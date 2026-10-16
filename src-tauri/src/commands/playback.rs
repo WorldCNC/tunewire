@@ -171,3 +171,9 @@ pub fn start_radio(app: AppHandle, st: State<'_, AppState>, track: Track) {
         }
     });
 }
+
+/// Warm up the stream for a song the user is likely to play (hover, top result).
+#[tauri::command]
+pub fn prefetch_track(app: AppHandle, track: Track, platform: Option<crate::models::Platform>) {
+    crate::controller::prefetch(&app, track, platform);
+}

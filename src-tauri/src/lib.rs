@@ -43,6 +43,7 @@ mod store;
 mod stream;
 mod themes;
 mod ytdlp;
+mod ytdlp_worker;
 
 #[cfg(test)]
 mod itests;
@@ -171,6 +172,11 @@ pub fn run() {
                 queue_saved_at: Mutex::new(std::time::Instant::now()),
             });
             system::apply_settings(&app.state::<AppState>(), &settings);
+            // Python + yt_dlp import take ~0.5 s; pay it now, not on the first song.
+            tauri::async_runtime::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                ytdlp_worker::warm(ytdlp::binary()).await;
+            });
 
             // Pick up new/removed files in the local library.
             if !settings.local_folders.is_empty() {
@@ -223,6 +229,7 @@ pub fn run() {
             playback::play_track,
             playback::play_tracks,
             playback::start_radio,
+            playback::prefetch_track,
             commands::explore::search_suggestions,
             commands::explore::search_history,
             commands::explore::clear_search_history,

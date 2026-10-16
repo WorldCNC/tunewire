@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -35,6 +35,9 @@ pub fn binary() -> String {
 
 /// Switch executables (e.g. to the bundled copy). `TUNEWIRE_YTDLP` wins.
 pub fn set_binary(path: &str) {
+    if *bin_lock().read().unwrap() != path {
+        tauri::async_runtime::spawn(crate::ytdlp_worker::reset());
+    }
     if std::env::var("TUNEWIRE_YTDLP").is_err() {
         *bin_lock().write().unwrap() = path.to_string();
     }
@@ -222,24 +225,98 @@ pub const AUDIO_FORMAT: &str = "bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/besta
 
 /// Equivalent of `yt-dlp -g -f bestaudio --no-playlist <url>`, but via `-j` so
 /// we also receive the HTTP headers, codec and duration of the chosen format.
+// ---------------------------------------------------------------------------
+// Stream URL cache + prefetch: resolving takes 1-2 s, so likely next songs are
+// resolved ahead of time (hover, top result, next in queue) and a click only
+// waits for the part that's left. Concurrent requests share one yt-dlp run.
+// ---------------------------------------------------------------------------
+
+type StreamCell = Arc<tokio::sync::OnceCell<AppResult<StreamInfo>>>;
+static STREAMS: std::sync::Mutex<Option<HashMap<String, (std::time::Instant, StreamCell)>>> = std::sync::Mutex::new(None);
+/// Stream URLs stay valid for hours; re-resolve well before that.
+const STREAM_TTL: Duration = Duration::from_secs(15 * 60);
+
+fn stream_cell(url: &str) -> StreamCell {
+    let mut guard = STREAMS.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, (t, c)| t.elapsed() < STREAM_TTL && !matches!(c.get(), Some(Err(_))));
+    if map.len() > 200 {
+        map.clear();
+    }
+    map.entry(url.to_string()).or_insert_with(|| (std::time::Instant::now(), Arc::new(tokio::sync::OnceCell::new()))).1.clone()
+}
+
+/// Resolve (or reuse) the playable stream for a page URL.
+pub async fn stream_info(url: &str) -> AppResult<StreamInfo> {
+    let cell = stream_cell(url);
+    cell.get_or_init(|| extract_stream(url)).await.clone()
+}
+
+/// Drop a cached stream (it failed to open, e.g. expired).
+pub fn forget_stream(url: &str) {
+    if let Some(map) = STREAMS.lock().unwrap().as_mut() {
+        map.remove(url);
+    }
+}
+
+/// Resolve in the background if a yt-dlp slot is free (never delays real work).
+pub fn prefetch_stream(url: String) {
+    if semaphore().available_permits() < 2 {
+        return;
+    }
+    let fresh = STREAMS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(&url).map(|(t, c)| t.elapsed() < STREAM_TTL && !matches!(c.get(), Some(Err(_)))))
+        .unwrap_or(false);
+    if fresh {
+        return; // already resolved or in flight
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Ok(info) = stream_info(&url).await {
+            let _ = tauri::async_runtime::spawn_blocking(move || crate::stream::warm_connection(&info)).await;
+        }
+    });
+}
+
 pub async fn extract_stream(url: &str) -> AppResult<StreamInfo> {
     extract_stream_with_format(url, AUDIO_FORMAT).await
 }
 
 pub async fn extract_stream_with_format(url: &str, format: &str) -> AppResult<StreamInfo> {
-    let v = run_json(
-        vec![
-            "-j".into(),
-            "--no-warnings".into(),
-            "--no-playlist".into(),
-            "-f".into(),
-            format.into(),
-            "--".into(),
-            url.into(),
-        ],
-        Duration::from_secs(60),
-    )
-    .await?;
+    let args = |fast: bool| {
+        let mut a: Vec<String> = vec!["-j".into(), "--no-warnings".into(), "--no-playlist".into(), "-f".into(), format.into()];
+        if fast {
+            // Audio comes from the player API's direct formats; the HLS/DASH
+            // manifests (~0.5 s more per song) only add video variants.
+            a.extend(["--extractor-args".into(), "youtube:skip=hls,dash".into()]);
+        }
+        a.extend(["--".into(), url.into()]);
+        a
+    };
+    let youtube = url.contains("youtube.com/") || url.contains("youtu.be/");
+    // Fast path: the long-lived worker (no Python startup, warm connections).
+    let opts = serde_json::json!({
+        "format": format,
+        "noplaylist": true,
+        "extractor_args": if youtube { serde_json::json!({ "youtube": { "skip": ["hls", "dash"] } }) } else { serde_json::json!({}) },
+    });
+    let worker = {
+        let _permit = semaphore().acquire().await.map_err(|_| AppError::Cancelled)?;
+        crate::ytdlp_worker::extract(&binary(), url, opts).await
+    };
+    let v = match worker {
+        Ok(Some(v)) => v,
+        Err(e) if !matches!(&e, AppError::Unavailable(m) | AppError::YtDlp(m) if m.to_lowercase().contains("format")) => return Err(e),
+        // Worker unavailable here, or the fast options failed: command line.
+        _ => match run_json(args(youtube), Duration::from_secs(60)).await {
+        Err(AppError::YtDlp(m) | AppError::Unavailable(m) | AppError::Extraction(m)) if youtube && m.to_lowercase().contains("format") => {
+            run_json(args(false), Duration::from_secs(60)).await?
+        }
+        r => r?,
+        },
+    };
 
     if v.get("_type").and_then(Value::as_str) == Some("playlist") {
         return Err(AppError::Invalid("this URL is a playlist, not a single track".into()));

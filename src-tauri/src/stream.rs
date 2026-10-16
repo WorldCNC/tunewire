@@ -249,13 +249,22 @@ pub struct StreamReader {
     jump: u64,
     random_access: bool,
     seekable: bool,
+    /// While set, report "not seekable" so the MP4 demuxer reads only the
+    /// header + segment index instead of walking every fragment of the file
+    /// (one network round trip each) before playback can start.
+    probing: Arc<AtomicBool>,
     byte_len: Option<u64>,
 }
 
 impl StreamReader {
+    /// Flag that hides seekability while set (see `probing`).
+    pub fn probe_flag(&self) -> Arc<AtomicBool> {
+        self.probing.clone()
+    }
+
     fn new(shared: Arc<Shared>, random_access: bool) -> StreamReader {
         let byte_len = shared.state.lock().unwrap().total;
-        StreamReader { shared, pos: 0, head: 0, jump: 0, random_access, seekable: byte_len.is_some(), byte_len }
+        StreamReader { shared, pos: 0, head: 0, jump: 0, random_access, seekable: byte_len.is_some(), byte_len, probing: Arc::new(AtomicBool::new(false)) }
     }
 
     fn phys(&self, v: u64) -> u64 {
@@ -284,9 +293,11 @@ impl Read for StreamReader {
                 }
             }
             if st.done {
+                // The bytes we need never arrived: an error, not end-of-file
+                // (which would make the decoder think the song is over).
                 return match &st.error {
-                    Some(e) if st.ranges.is_empty() => Err(io::Error::other(e.clone())),
-                    _ => Ok(0),
+                    Some(e) => Err(io::Error::other(e.clone())),
+                    None => Ok(0),
                 };
             }
             if self.shared.cancelled() {
@@ -343,7 +354,7 @@ impl Seek for StreamReader {
 
 impl symphonia::core::io::MediaSource for StreamReader {
     fn is_seekable(&self) -> bool {
-        self.seekable
+        self.seekable && !self.probing.load(Ordering::Relaxed)
     }
     fn byte_len(&self) -> Option<u64> {
         self.byte_len
@@ -559,6 +570,18 @@ fn total_from_headers(resp: &ureq::http::Response<ureq::Body>) -> Option<u64> {
             .and_then(|s| s.trim().parse().ok())
     } else {
         h.get("content-length").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok())
+    }
+}
+
+/// Fetch one byte of a prefetched stream so the TLS connection to its server
+/// is already open (pooled) when the song is actually played.
+pub fn warm_connection(info: &StreamInfo) {
+    if validate_url(&info.url).is_err() || info.protocol.as_deref().map(|p| p.contains("m3u8")).unwrap_or(false) {
+        return;
+    }
+    if let Ok(resp) = request(&info.url, &info.headers, Some((0, 0))) {
+        let mut sink = Vec::new();
+        let _ = resp.into_body().into_reader().take(16).read_to_end(&mut sink);
     }
 }
 

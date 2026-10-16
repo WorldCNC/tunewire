@@ -44,7 +44,7 @@ async fn load_version(st: &AppState, v: &TrackVersion, token: u64) -> AppResult<
         return Ok((loaded, v.clone()));
     }
 
-    let info = ytdlp::extract_stream(&v.url).await?;
+    let info = ytdlp::stream_info(&v.url).await?;
     let mut version = v.clone();
     if v.partial {
         if let Some(t) = &info.title {
@@ -58,12 +58,22 @@ async fn load_version(st: &AppState, v: &TrackVersion, token: u64) -> AppResult<
         version.partial = false;
     }
     let fallback = info.duration.or(v.duration);
-    let loaded = tauri::async_runtime::spawn_blocking(move || {
-        let opened = stream::open(&info)?;
-        audio::prepare(opened, fallback, token)
-    })
-    .await
-    .map_err(|e| AppError::Extraction(e.to_string()))??;
+    let open = |info: ytdlp::StreamInfo| {
+        tauri::async_runtime::spawn_blocking(move || {
+            let opened = stream::open(&info)?;
+            audio::prepare(opened, fallback, token)
+        })
+    };
+    let loaded = match open(info).await.map_err(|e| AppError::Extraction(e.to_string()))? {
+        Ok(l) => l,
+        // A prefetched URL may have expired or be rejected: resolve it again once.
+        Err(AppError::Unavailable(_) | AppError::Network(_) | AppError::Extraction(_)) => {
+            ytdlp::forget_stream(&v.url);
+            let fresh = ytdlp::stream_info(&v.url).await?;
+            open(fresh).await.map_err(|e| AppError::Extraction(e.to_string()))??
+        }
+        Err(e) => return Err(e),
+    };
     Ok((loaded, version))
 }
 
@@ -84,6 +94,31 @@ fn candidates(st: &AppState, item: &QueueItem) -> Vec<TrackVersion> {
         c.insert(0, d.version.clone());
     }
     c
+}
+
+/// Resolve the stream a click on `track` would play, ahead of time.
+pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<Platform>) {
+    let st = app.state::<AppState>();
+    let item = QueueItem { uid: 0, track, platform };
+    let logged_in = crate::spotify_play::has_login();
+    let first = candidates(&st, &item).into_iter().find(|v| v.platform != Platform::Spotify || logged_in);
+    match first {
+        Some(v) if matches!(v.platform, Platform::Local | Platform::Spotify) => {}
+        Some(v) if !std::path::Path::new(&v.url).exists() => ytdlp::prefetch_stream(v.url),
+        Some(_) => {}
+        // Spotify-only: find the exact recording now, then its stream.
+        None => {
+            let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() else { return };
+            let cache = st.cache.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(Some(isrc)) = crate::spotify::isrc(&sp.id).await {
+                    if let Ok(v) = search::resolve_isrc(&isrc, &sp, &cache).await {
+                        ytdlp::prefetch_stream(v.url);
+                    }
+                }
+            });
+        }
+    }
 }
 
 /// Replace a placeholder track's metadata (queue entry + the item we report).
@@ -309,6 +344,14 @@ fn started(app: &AppHandle, item: QueueItem, version: TrackVersion) {
     emit_queue(app);
     emit_playback(app);
     maybe_autoplay(app);
+    // "Next" is the most likely click; have its stream ready.
+    let next = {
+        let q = st.queue.lock().unwrap();
+        q.current.and_then(|i| q.items.get(i + 1)).map(|n| (n.track.clone(), n.platform))
+    };
+    if let Some((t, p)) = next {
+        prefetch(app, t, p);
+    }
 }
 
 /// Index that should play after the current one (None = stop).

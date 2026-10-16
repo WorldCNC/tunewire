@@ -88,6 +88,7 @@ async function doSearch(q) {
     $('#search-meta').textContent = `${res.tracks.length} songs from ${dupes} results on ${where} · ${res.cached ? 'cached' : ((performance.now() - t0) / 1000).toFixed(1) + ' s'}`;
     for (const w of res.warnings) warn.append(h('div', { class: 'notice' }, w));
     renderResults();
+    if (res.tracks[0]) prefetchTrack(res.tracks[0]);
     plugins.emit('search-completed', { query: q, source: state.source, tracks: res.tracks });
   } catch (e) {
     if (seq !== searchSeq) return;

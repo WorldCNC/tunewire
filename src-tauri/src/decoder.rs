@@ -44,6 +44,10 @@ pub struct AudioDecoder {
 
 impl AudioDecoder {
     pub fn new(reader: StreamReader, hint: Option<&str>) -> AppResult<AudioDecoder> {
+        // MP4: probe as a non-seekable stream (fast start), seekable afterwards.
+        let probing = reader.probe_flag();
+        let mp4 = matches!(hint, Some("m4a" | "mp4" | "m4b"));
+        probing.store(mp4, std::sync::atomic::Ordering::Relaxed);
         let mss = MediaSourceStream::new(Box::new(reader), MediaSourceStreamOptions::default());
         let mut h = Hint::new();
         if let Some(ext) = hint {
@@ -56,6 +60,7 @@ impl AudioDecoder {
         let probed = symphonia::default::get_probe()
             .format(&h, mss, &FormatOptions { enable_gapless: true, ..Default::default() }, &MetadataOptions::default())
             .map_err(|e| AppError::Decode(format!("unrecognized stream ({e}; format {})", hint.unwrap_or("?"))))?;
+        probing.store(false, std::sync::atomic::Ordering::Relaxed);
         let format = probed.format;
         let track = format
             .tracks()

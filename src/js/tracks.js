@@ -87,11 +87,24 @@ function addToPlaylistMenu(anchor, tracks) {
  * opts.extraMenu: extra menu items
  * opts.sub: secondary line under the title (e.g. "played 3 min ago")
  */
+const prefetched = new Map();
+function prefetchTrack(track) {
+  const now = Date.now();
+  if (now - (prefetched.get(track.key) || 0) < 10 * 60 * 1000) return;
+  prefetched.set(track.key, now);
+  call('prefetch_track', { track, platform: null }).catch(() => {});
+}
+
 function trackRow(track, index, opts = {}) {
   const versions = sortedVersions(track);
   const play = () => (opts.onPlay ? opts.onPlay() : playTrack(track));
   const row = h('div', { class: 'track', dataset: { key: track.key } });
   const liked = state.favKeys.has(track.key);
+  // Resting the pointer on a song for a moment resolves its stream, so the
+  // click that usually follows starts playback much sooner.
+  let hoverTimer = null;
+  row.addEventListener('mouseenter', () => { hoverTimer = setTimeout(() => prefetchTrack(track), 250); });
+  row.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
 
   const num = h('div', { class: 't-num' },
     h('span', { class: 'n' }, String(index + 1)),

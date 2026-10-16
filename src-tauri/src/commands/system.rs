@@ -122,6 +122,7 @@ pub async fn spotify_account() -> Option<String> {
 /// Download/update the bundled yt-dlp and switch to it.
 #[tauri::command]
 pub async fn ytdlp_install(app: AppHandle, st: State<'_, AppState>) -> AppResult<ytdlp::Health> {
+    crate::ytdlp_worker::reset().await;
     let dir = st.data_dir.join("bin");
     emit_status(&app, "info", "Downloading yt-dlp…");
     tauri::async_runtime::spawn_blocking(move || ytdlp::install_bundled(&dir))

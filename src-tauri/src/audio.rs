@@ -898,6 +898,25 @@ mod live_tests {
         assert!(n > sec / 2);
     }
 
+    /// Where the time goes between "play" and the first audio sample.
+    #[test]
+    #[ignore]
+    fn load_timing_breakdown() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for url in ["https://music.youtube.com/watch?v=MvB77oYXlvU", "https://music.youtube.com/watch?v=PvM79DJ2PmM", "https://music.youtube.com/watch?v=NMRhx71bGo4"] {
+            let t0 = std::time::Instant::now();
+            let info = rt.block_on(crate::ytdlp::extract_stream(url)).expect("extract");
+            let t1 = t0.elapsed();
+            let opened = crate::stream::open(&info).expect("open");
+            let t2 = t0.elapsed();
+            let mut t = prepare(opened, info.duration, 1).expect("decoder");
+            let t3 = t0.elapsed();
+            let first = t.decoder.next();
+            let t4 = t0.elapsed();
+            println!("{url}\n  extract {t1:?} | open {:?} | probe {:?} | first sample {:?} | total {t4:?} ({:?} {:?}) {first:?}", t2 - t1, t3 - t2, t4 - t3, info.ext, info.protocol);
+        }
+    }
+
     #[test]
     #[ignore]
     fn youtube_music_stream() {

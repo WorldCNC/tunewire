@@ -325,4 +325,7 @@ pub fn emit_queue(app: &AppHandle) {
 
 pub fn emit_library(app: &AppHandle, what: &str) {
     let _ = app.emit("library-changed", what);
+    if matches!(what, "playlists" | "favorites") {
+        crate::matcher::kick(app); // new Spotify songs: find them on YouTube Music
+    }
 }

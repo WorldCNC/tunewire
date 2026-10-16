@@ -367,6 +367,17 @@ fn same_track(a: &Norm, b: &Norm) -> bool {
     true
 }
 
+/// Same song title and version (the artist is trusted, e.g. an ISRC match).
+pub(crate) fn same_title(a: &TrackVersion, b: &TrackVersion) -> bool {
+    let (na, nb) = (Norm::of(a), Norm::of(b));
+    na.markers == nb.markers && na.variant == nb.variant && title_similarity(&na, &nb) >= 0.8
+}
+
+/// Same recording: title, version, artist and length all agree.
+pub(crate) fn same_recording(a: &TrackVersion, b: &TrackVersion) -> bool {
+    same_track(&Norm::of(a), &Norm::of(b))
+}
+
 fn relevance(query: &[String], n: &Norm) -> f64 {
     if query.is_empty() {
         return 0.0;
@@ -918,29 +929,6 @@ pub async fn resolve_equivalent(
         AppError::EmptyResults => AppError::Unavailable(format!("no playable match for “{artist} – {title}”")),
         e => e,
     })
-}
-
-/// Exact recording by ISRC: YouTube Music indexes ISRCs, so its song search
-/// returns the official audio of that recording first. The title is still
-/// checked so an unrelated hit never plays.
-pub async fn resolve_isrc(isrc: &str, spotify: &TrackVersion, cache: &SearchCache) -> AppResult<TrackVersion> {
-    let (found, _) = search_platform(Platform::Ytmusic, isrc.to_string(), 5, cache).await?;
-    let tn = Norm::of(spotify);
-    found
-        .into_iter()
-        .take(3)
-        .find(|v| {
-            let n = Norm::of(v);
-            n.markers == tn.markers && n.variant == tn.variant && title_similarity(&tn, &n) >= 0.8
-        })
-        .map(|mut v| {
-            // Flat results carry no artist/duration; the recording is the same.
-            v.artist = spotify.artist.clone();
-            v.duration = v.duration.or(spotify.duration);
-            v.album = v.album.or(spotify.album.clone());
-            v
-        })
-        .ok_or_else(|| AppError::Unavailable(format!("no YouTube Music upload for ISRC {isrc}")))
 }
 
 #[cfg(test)]

@@ -70,8 +70,12 @@ fn is_spotify(url: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn load_playlist(st: State<'_, AppState>, url: String) -> AppResult<RemotePlaylist> {
-    fetch_remote(&st, url).await
+pub async fn load_playlist(app: tauri::AppHandle, st: State<'_, AppState>, url: String) -> AppResult<RemotePlaylist> {
+    let mut pl = fetch_remote(&st, url).await?;
+    // Spotify songs: use known matches now, find the rest in the background.
+    pl.tracks = crate::matcher::with_matches(pl.tracks);
+    crate::matcher::prepare(&app, pl.tracks.clone());
+    Ok(pl)
 }
 
 /// Any supported playlist/album/track link → tracks.
@@ -162,7 +166,7 @@ pub async fn extract_stream_url(url: String) -> AppResult<ytdlp::StreamInfo> {
 /// Paste-and-play: a track URL plays now, a playlist URL replaces the queue.
 #[tauri::command]
 pub async fn play_url(app: AppHandle, st: State<'_, AppState>, url: String) -> AppResult<RemotePlaylist> {
-    let pl = load_playlist(st.clone(), url).await?;
+    let pl = load_playlist(app.clone(), st.clone(), url).await?;
     if pl.tracks.len() == 1 {
         play_track_inner(&app, &st, pl.tracks[0].clone(), None);
     } else {

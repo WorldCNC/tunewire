@@ -423,17 +423,6 @@ mod isrc_tests {
     fn live_isrc() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         assert_eq!(rt.block_on(super::isrc("4uLU6hMCjMI75M1A2tKUQC")).unwrap().as_deref(), Some("GBARL9300135"));
-        let cache = crate::search::SearchCache::default();
-        for q in ["separatist", "daft punk one more time", "tame impala let it happen", "hiatus kaiyote nakamarra"] {
-            let sp = rt.block_on(super::search(q, 3)).unwrap().remove(0);
-            let t0 = std::time::Instant::now();
-            let isrc = rt.block_on(super::isrc(&sp.id)).unwrap();
-            let m = isrc.as_deref().map(|i| rt.block_on(crate::search::resolve_isrc(i, &sp, &cache)));
-            println!("{} — {} [{:?}] → {:?} in {:?}", sp.title, sp.artist, isrc, m.as_ref().map(|r| r.as_ref().map(|v| (&v.title, &v.url)).map_err(|e| e.to_string())), t0.elapsed());
-            let Some(Ok(v)) = m else { continue };
-            let s = rt.block_on(crate::ytdlp::extract_stream(&v.url)).unwrap();
-            println!("   stream ok, duration {:?} vs spotify {:?}", s.duration, sp.duration);
-        }
     }
 }
 
@@ -503,7 +492,7 @@ fn playlist_item_track(it: &Value) -> Option<Track> {
 }
 
 /// Every track of a playlist, 100 per request.
-fn fetch_playlist_full(id: &str) -> AppResult<(String, Vec<Track>)> {
+pub(crate) fn fetch_playlist_full(id: &str) -> AppResult<(String, Vec<Track>)> {
     if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(AppError::Invalid("malformed Spotify id".into()));
     }

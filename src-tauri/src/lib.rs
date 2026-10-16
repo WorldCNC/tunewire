@@ -31,6 +31,7 @@ mod error;
 mod http;
 mod localfiles;
 mod lyrics;
+mod matcher;
 mod media;
 mod models;
 mod plugins;
@@ -179,7 +180,14 @@ pub fn run() {
                 let st = app.state::<AppState>();
                 let history = st.store.library.lock().unwrap().history.clone();
                 stats::init(&st.store.dir, &history);
+                matcher::init(&st.store.dir);
             }
+            // Finish matching Spotify songs left over from last time.
+            let h = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                matcher::kick(&h);
+            });
             // Build today's mixes in the background so Home opens instantly.
             let h = app.handle().clone();
             tauri::async_runtime::spawn(async move {

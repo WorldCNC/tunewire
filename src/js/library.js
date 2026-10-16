@@ -95,6 +95,7 @@ function renderPlaylistDetail() {
       h('div', { class: 'pl-kicker' }, remote ? `Remote playlist${pl.platform ? ' · ' + (PLATFORMS[pl.platform]?.label || '') : ''}` : 'Playlist'),
       h('h1', {}, remote ? pl.title : pl.name),
       h('div', { class: 'meta', style: 'margin-bottom:10px' }, `${tracks.length} tracks, ${fmtTime(total)}`),
+      matchStatus(tracks),
       actions));
 
   const head = h('div', { class: 'table-head' });
@@ -113,6 +114,44 @@ function renderPlaylistDetail() {
   box.replaceChildren(header, head, list, recommendSection(pl, remote));
   markPlaying();
 }
+
+// Spotify matching -------------------------------------------------------------
+// Spotify songs are matched to their YouTube Music recording in the background
+// right after import, so they start as fast as any other song.
+state.matchProgress = null;
+
+function spotifyOnly(t) {
+  return t.versions.length > 0 && t.versions.every((v) => v.platform === 'spotify');
+}
+
+function matchStatus(tracks) {
+  const el = h('div', { class: 'match-status', id: 'match-status' });
+  el._pending = tracks.filter(spotifyOnly).length;
+  paintMatchStatus(el);
+  return el;
+}
+
+function paintMatchStatus(el = $('#match-status')) {
+  if (!el) return;
+  const p = state.matchProgress;
+  if (p && !p.finished && el._pending > 0) {
+    el.hidden = false;
+    el.replaceChildren(h('span', { class: 'spinner' }), h('span', {}, `Getting Spotify songs ready to play instantly · ${p.done} of ${p.total}`),
+      h('div', { class: 'match-bar' }, h('i', { style: `width:${(p.done / Math.max(1, p.total)) * 100}%` })));
+  } else {
+    el.hidden = true;
+  }
+}
+
+listen('match-progress', (e) => {
+  const p = e.payload;
+  const wasRunning = state.matchProgress && !state.matchProgress.finished;
+  state.matchProgress = p;
+  paintMatchStatus();
+  if (p.finished && wasRunning && p.total >= 10) {
+    toast(`${p.matched} Spotify songs are ready to play instantly${p.matched < p.total ? ` (${p.total - p.matched} not found on YouTube Music)` : ''}`, 'ok', 5000);
+  }
+});
 
 // Recommendations ------------------------------------------------------------
 // Kept per playlist so re-rendering (likes, adds) doesn't refetch.

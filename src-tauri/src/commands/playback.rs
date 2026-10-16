@@ -8,7 +8,8 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Platform, Track};
 use crate::state::{emit_playback, emit_queue, AppState, Phase, PlaybackState, QueueItem};
 
-pub fn play_track_inner(app: &AppHandle, st: &AppState, track: Track, platform: Option<Platform>) {
+pub fn play_track_inner(app: &AppHandle, st: &AppState, mut track: Track, platform: Option<Platform>) {
+    crate::matcher::apply(&mut track);
     let idx = {
         let mut q = st.queue.lock().unwrap();
         let item = q.make(track, platform);
@@ -20,6 +21,9 @@ pub fn play_track_inner(app: &AppHandle, st: &AppState, track: Track, platform: 
 }
 
 pub fn set_queue_and_play(app: &AppHandle, st: &AppState, tracks: Vec<Track>, start: usize) {
+    let tracks = crate::matcher::with_matches(tracks);
+    // Spotify songs coming up: match them before they're reached.
+    crate::matcher::prepare(app, tracks.iter().skip(start).take(40).cloned().collect());
     {
         let mut q = st.queue.lock().unwrap();
         let items: Vec<QueueItem> = tracks.into_iter().map(|t| q.make(t, None)).collect();

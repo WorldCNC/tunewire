@@ -82,6 +82,11 @@ fn candidates(st: &AppState, item: &QueueItem) -> Vec<TrackVersion> {
     let pref = st.store.settings().platform_order;
     let mut c = item.track.versions.clone();
     search::sort_versions(&mut c, &pref);
+    // The matched recording starts much faster than Spotify's own stream;
+    // that's used only when Spotify was picked explicitly.
+    if item.platform != Some(Platform::Spotify) && c.iter().any(|v| v.matched_for == Some(Platform::Spotify)) {
+        c.sort_by_key(|v| v.platform == Platform::Spotify);
+    }
     if let Some(p) = item.platform {
         if let Some(pos) = c.iter().position(|v| v.platform == p) {
             let v = c.remove(pos);
@@ -99,6 +104,8 @@ fn candidates(st: &AppState, item: &QueueItem) -> Vec<TrackVersion> {
 /// Resolve the stream a click on `track` would play, ahead of time.
 pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<Platform>) {
     let st = app.state::<AppState>();
+    let mut track = track;
+    crate::matcher::apply(&mut track);
     let item = QueueItem { uid: 0, track, platform };
     let logged_in = crate::spotify_play::has_login();
     let first = candidates(&st, &item).into_iter().find(|v| v.platform != Platform::Spotify || logged_in);
@@ -109,12 +116,9 @@ pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<P
         // Spotify-only: find the exact recording now, then its stream.
         None => {
             let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() else { return };
-            let cache = st.cache.clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(Some(isrc)) = crate::spotify::isrc(&sp.id).await {
-                    if let Ok(v) = search::resolve_isrc(&isrc, &sp, &cache).await {
-                        ytdlp::prefetch_stream(v.url);
-                    }
+                if let Some(v) = crate::matcher::match_spotify(&sp).await {
+                    ytdlp::prefetch_stream(v.url);
                 }
             });
         }
@@ -154,6 +158,12 @@ async fn load_item(
             emit_playback(app);
         }
     };
+    if crate::matcher::apply(&mut item.track) {
+        let mut q = st.queue.lock().unwrap();
+        if let Some(qi) = q.items.iter_mut().find(|i| i.uid == item.uid) {
+            qi.track = item.track.clone();
+        }
+    }
     let mut tried: Vec<Platform> = Vec::new();
     let mut last_err: Option<AppError> = None;
     let chose_spotify = item.platform == Some(Platform::Spotify) && !crate::spotify_play::has_login();
@@ -191,13 +201,7 @@ async fn load_item(
     if let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() {
         if !tried.contains(&Platform::Ytmusic) {
             say("Finding the exact recording…".into());
-            if let Ok(Some(isrc)) = crate::spotify::isrc(&sp.id).await {
-                found = search::resolve_isrc(&isrc, &sp, &st.cache).await.ok().map(|mut v| {
-                    v.matched_for = Some(Platform::Spotify);
-                    v.isrc_match = true;
-                    v
-                });
-            }
+            found = crate::matcher::match_spotify(&sp).await;
             if cancelled() {
                 return Err(AppError::Cancelled);
             }

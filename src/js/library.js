@@ -110,8 +110,78 @@ function renderPlaylistDetail() {
     list.append(trackRow(t, i, { onPlay: () => playList(tracks, i), extraMenu: extra }));
   });
   if (!tracks.length) list.append(h('div', { class: 'empty' }, h('p', {}, 'This playlist is empty. Add songs from search results with the ⋯ menu.')));
-  box.replaceChildren(header, head, list);
+  box.replaceChildren(header, head, list, recommendSection(pl, remote));
   markPlaying();
+}
+
+// Recommendations ------------------------------------------------------------
+// Kept per playlist so re-rendering (likes, adds) doesn't refetch.
+const recState = new Map();
+
+function recommendSection(pl, remote) {
+  const id = remote ? 'remote' : pl.id;
+  const tracks = pl.tracks;
+  const box = h('div', { class: 'rec-section' });
+  if (!tracks.length) return box;
+  let rs = recState.get(id);
+  if (!rs || rs.src !== tracks.length) {
+    rs = { nonce: rs?.nonce || 1, list: null, loading: false, error: null, src: tracks.length, added: new Set(rs?.added || []) };
+    recState.set(id, rs);
+  }
+  const refresh = () => { rs.nonce++; rs.list = null; load(); };
+  const render = () => {
+    const head = h('div', { class: 'rec-head' },
+      h('div', {}, h('h2', {}, 'Recommended'), h('span', { class: 'meta' }, remote ? 'Songs that fit this playlist' : 'Based on what’s in this playlist')),
+      h('div', { class: 'actions' },
+        rs.list?.length ? h('button', { class: 'btn small', html: `${icon('play')}Play all`, onclick: () => playList(rs.list.map((r) => r.track), 0) }) : null,
+        h('button', { class: 'btn small', html: `${icon('refresh')}Refresh`, disabled: rs.loading, onclick: refresh })));
+    if (rs.loading && !rs.list) {
+      box.replaceChildren(head, h('div', { class: 'track-list' }, ...skeletonRows(5)));
+      return;
+    }
+    if (rs.error) {
+      box.replaceChildren(head, h('div', { class: 'empty' }, h('p', {}, rs.error)));
+      return;
+    }
+    const visible = (rs.list || []).filter((r) => !rs.added.has(r.track.key));
+    const list = h('div', { class: 'track-list stagger' }, ...visible.map((r, i) => {
+      const add = remote ? null : h('button', { class: 'icon-btn small rec-add', title: `Add to ${pl.name}`, html: icon('plus'), onclick: async (e) => {
+        e.stopPropagation();
+        // The playlist grows by one: keep this list instead of refetching
+        // (set before the call; the re-render can arrive before it returns).
+        rs.added.add(r.track.key);
+        rs.src++;
+        try {
+          await call('add_to_playlist', { id: pl.id, tracks: [r.track] });
+          toast(`Added to ${pl.name}`, 'ok', 1400);
+        } catch (err) {
+          rs.added.delete(r.track.key);
+          rs.src--;
+          toast(errMsg(err), 'error');
+          render();
+        }
+      } });
+      return trackRow(r.track, i, { onPlay: () => playTrack(r.track), sub: `Because of ${r.because}`, action: add });
+    }));
+    box.replaceChildren(head, list);
+    setTimeout(() => list.classList.remove('stagger'), 700);
+    markPlaying();
+  };
+  const load = async () => {
+    rs.loading = true;
+    rs.error = null;
+    render();
+    try {
+      rs.list = await call('recommend_for_playlist', { tracks, nonce: rs.nonce, count: 20 });
+    } catch (e) {
+      rs.error = errMsg(e);
+    }
+    rs.loading = false;
+    if (box.isConnected) render();
+  };
+  if (rs.list) render();
+  else load();
+  return box;
 }
 
 $('#side-new-playlist').addEventListener('click', () => $('#new-playlist').click());

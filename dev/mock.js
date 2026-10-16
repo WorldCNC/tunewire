@@ -93,6 +93,7 @@
     spotify_user_playlists: () => [{ name: 'Mock mix', url: 'https://open.spotify.com/playlist/mock1', tracks: 3, thumbnail: null, owner: 'dev' }],
     sync_playlist: ({ id }) => playlists.find((p) => p.id === id)?.tracks.length || 0,
     prefetch_track: () => {},
+    recommend_for_playlist: ({ tracks: seeds, nonce }) => tracks.filter((t) => !seeds.some((s) => s.key === t.key)).map((t, i) => ({ track: t, because: seeds[(i + (nonce || 0)) % seeds.length].title, seeds: 1 + (i % 2) })),
     background_image_data: () => 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=',
     start_radio: ({ track }) => { queue.items = [{ uid: ++uid, track, platform: null }, ...tracks.filter((t) => t.key !== track.key).map((t) => ({ uid: ++uid, track: t, platform: null }))]; startItem(0); },
     discord_status: () => (settings.discord_rpc ? 'connected' : 'off'),

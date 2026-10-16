@@ -145,6 +145,7 @@ function trackRow(track, index, opts = {}) {
     },
   });
   const actions = h('div', { class: 't-actions' },
+    opts.action || null,
     h('button', { class: `icon-btn small like-btn${liked ? ' liked' : ''}`, title: liked ? 'Unlike' : 'Like', html: icon(liked ? 'heartFill' : 'heart'), onclick: (e) => { e.stopPropagation(); toggleFavorite(track); } }),
     menuBtn);
 

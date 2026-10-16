@@ -616,3 +616,10 @@ button.link:hover { text-decoration: underline; }
 .progress:hover .track-bg, .progress.dragging .track-bg, .progress:hover .played, .progress.dragging .played, .progress:hover .buffered { top: 5px; height: 6px; border-radius: 3px; transition: top .12s ease, height .12s ease; }
 .toast { animation: tw-pop .22s var(--ease-out); }
 @media (prefers-reduced-motion: reduce) { .amb-layer { transition: none; } }
+
+/* ---- Playlist recommendations ---- */
+.rec-section { margin-top: 34px; }
+.rec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.rec-head h2 { font-size: 17px; margin-bottom: 2px; }
+.rec-add { color: var(--text-dim); }
+.track:hover .rec-add { color: var(--accent); }

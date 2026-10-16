@@ -269,6 +269,7 @@ pub fn run() {
             library::add_to_playlist,
             library::remove_from_playlist,
             library::move_in_playlist,
+            library::recommend_for_playlist,
             library::list_favorites,
             library::toggle_favorite,
             library::list_history,

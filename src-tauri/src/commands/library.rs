@@ -149,3 +149,10 @@ pub fn clear_history(app: AppHandle, st: State<'_, AppState>) -> AppResult<()> {
     emit_library(&app, "history");
     Ok(())
 }
+
+/// Songs that fit a playlist (see radio::recommend). `nonce` changes the seeds.
+#[tauri::command]
+pub async fn recommend_for_playlist(st: State<'_, AppState>, tracks: Vec<Track>, nonce: Option<u64>, count: Option<usize>) -> AppResult<Vec<crate::radio::Recommendation>> {
+    let tracks: Vec<Track> = tracks.into_iter().take(2000).collect();
+    crate::radio::recommend(tracks, nonce.unwrap_or(1), count.unwrap_or(20).clamp(5, 40), &st.cache).await
+}

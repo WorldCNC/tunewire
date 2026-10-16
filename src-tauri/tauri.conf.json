@@ -20,9 +20,11 @@
         "title": "Tunewire",
         "width": 1240,
         "height": 800,
-        "minWidth": 760,
+        "minWidth": 820,
         "minHeight": 520,
         "resizable": true,
+        "decorations": false,
+        "shadow": true,
         "dragDropEnabled": false
       }
     ],

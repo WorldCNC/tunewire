@@ -163,6 +163,12 @@ pub async fn extract_stream_url(url: String) -> AppResult<ytdlp::StreamInfo> {
     ytdlp::extract_stream(url.trim()).await
 }
 
+/// Tracks with any saved Spotify matches filled in (an opened link's view).
+#[tauri::command]
+pub fn apply_matches(tracks: Vec<Track>) -> Vec<Track> {
+    crate::matcher::with_matches(tracks)
+}
+
 /// Paste-and-play: a track URL plays now, a playlist URL replaces the queue.
 #[tauri::command]
 pub async fn play_url(app: AppHandle, st: State<'_, AppState>, url: String) -> AppResult<RemotePlaylist> {

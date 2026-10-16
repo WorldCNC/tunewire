@@ -434,6 +434,16 @@ fn maybe_autoplay(app: &AppHandle) {
 /// Move to the next track according to the repeat mode.
 pub fn advance(app: &AppHandle, auto: bool) {
     let st = app.state::<AppState>();
+    if auto && crate::commands::playback::sleep_due_at_track_end() {
+        st.audio.stop();
+        st.set_now(|n| {
+            n.phase = Phase::Idle;
+            n.message = None;
+        });
+        emit_playback(app);
+        emit_status(app, "info", "Sleep timer: stopped at the end of the song");
+        return;
+    }
     match next_index(&st, auto) {
         Some(i) => spawn_play(app, i, auto),
         None if auto && st.store.settings().autoplay && !RADIO_INFLIGHT.load(Ordering::SeqCst) => {
@@ -479,6 +489,9 @@ fn maybe_preload(app: &AppHandle) {
     let eng = st.audio.status();
     if st.now.lock().unwrap().phase != Phase::Active || eng.state != EngineState::Playing {
         return;
+    }
+    if crate::commands::playback::sleep_at() == Some(0) {
+        return; // stopping after this song: don't roll into the next one
     }
     if eng.preloaded.is_some() || st.preload_inflight.load(Ordering::SeqCst) || st.preload.lock().unwrap().is_some() {
         return;

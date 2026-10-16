@@ -12,6 +12,9 @@ const SHORTCUTS = [
   ['N / P', 'Next / previous track'],
   ['L', 'Like the current track'],
   ['R', 'Cycle repeat mode'],
+  ['S', 'Shuffle on / off'],
+  ['Alt+← / Alt+→', 'Back / forward'],
+  ['Ctrl+A', 'Select all songs in a list'],
   ['Q', 'Toggle queue panel'],
   ['/ or Ctrl+K', 'Focus search'],
   ['1 – 7', 'Switch view'],
@@ -25,12 +28,13 @@ function showShortcuts() {
     body: h('div', { class: 'shortcuts' }, ...SHORTCUTS.flatMap(([k, d]) => [h('div', {}, ...k.split(' ').map((p) => (p === '/' || p === 'or' || p === '–' ? ` ${p} ` : h('kbd', {}, p)))), h('div', { class: 'muted' }, d)])),
   });
 }
-$('#btn-help').addEventListener('click', showShortcuts);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (openMenuEl) return closeMenu();
     if (modalStack.length) return modalStack[modalStack.length - 1].close();
+    if (fsp.el) return closeFullscreen();
+    if (selectedRows().length) return clearSelection();
     if (document.activeElement?.blur) document.activeElement.blur();
     return;
   }
@@ -38,8 +42,10 @@ document.addEventListener('keydown', (e) => {
   const typing = t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && !(t.type === 'range' || t.type === 'checkbox');
   if (typing || modalStack.length) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#search-input').focus(); $('#search-input').select(); return; }
+  if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); return; }
+  if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goForward(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  const views = ['search', 'favorites', 'history', 'playlists', 'downloads', 'local', 'settings'];
+  const views = ['home', 'search', 'favorites', 'history', 'stats', 'charts', 'settings'];
   switch (e.key) {
     case ' ': e.preventDefault(); call('toggle_pause'); break;
     case 'ArrowLeft': e.preventDefault(); seekBy(e.shiftKey ? -15 : -5); break;
@@ -51,6 +57,7 @@ document.addEventListener('keydown', (e) => {
     case 'p': case 'P': call('previous_track'); break;
     case 'l': case 'L': $('#np-like').click(); break;
     case 'r': case 'R': $('#btn-repeat').click(); break;
+    case 's': case 'S': $('#btn-shuffle').click(); break;
     case 'q': case 'Q': toggleQueue(); break;
     case '/': e.preventDefault(); $('#search-input').focus(); $('#search-input').select(); break;
     case '?': showShortcuts(); break;

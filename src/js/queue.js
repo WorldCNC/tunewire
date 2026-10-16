@@ -67,7 +67,20 @@ function renderQueue() {
   if (past.length) frag.append(h('div', { class: 'q-section' }, 'Played'), ...past.map(([it, i]) => row(it, i)));
   list.replaceChildren(frag);
   updateQueueIndicators();
+  renderNowPlaying();
 }
+
+// Songs dragged from a list onto the queue get added to it.
+$('#queue').addEventListener('dragover', (e) => { if (trackDrag) { e.preventDefault(); $('#queue').classList.add('drop-target'); } });
+$('#queue').addEventListener('dragleave', (e) => { if (!$('#queue').contains(e.relatedTarget)) $('#queue').classList.remove('drop-target'); });
+$('#queue').addEventListener('drop', (e) => {
+  $('#queue').classList.remove('drop-target');
+  if (!trackDrag) return;
+  e.preventDefault();
+  const tracks = trackDrag.tracks;
+  endTrackDrag();
+  enqueue(tracks);
+});
 
 function updateQueueIndicators() {
   const eq = $('#queue-list .eq');
@@ -115,7 +128,6 @@ queueList.addEventListener('dragend', () => {
   $$('.q-item', queueList).forEach((x) => x.classList.remove('drag-over-top', 'drag-over-bottom', 'dragging'));
 });
 
-$('#queue-shuffle').addEventListener('click', () => call('shuffle_queue').then(() => toast('Shuffled upcoming tracks', 'info', 1500)));
 $('#queue-clear').addEventListener('click', () => call('clear_queue', { keepCurrent: true }));
 $('#queue-save').addEventListener('click', async () => {
   const tracks = state.queue.items.map((i) => i.track);

@@ -52,7 +52,7 @@ async function wireEvents() {
         t.duration = t.duration ?? ytm.duration;
       }
     }
-    if (changed && state.view === 'search' && !$('#search-body').hidden) renderResults(state.lastOnPlay || null);
+    if (changed && state.view === 'search' && !$('#search-body').hidden) { renderResults(state.lastOnPlay || null); if (srch.tab === 'all') renderSearchAll(); }
   });
   await listen('status', (e) => {
     const { level, message } = e.payload;
@@ -100,27 +100,16 @@ async function boot() {
   renderQueue();
   renderPlayback();
   await Promise.all([refreshHistory().catch(() => {}), refreshPlaylists(), refreshFavorites(), refreshDownloads(), refreshLocalCount(), refreshFollowed()]);
-  renderHero();
   renderHome();
-  $('#search-input').focus();
+  try { showPanel(localStorage.getItem('tw-panel') || 'queue'); } catch { showPanel('queue'); }
+  document.body.classList.toggle('show-sources', !!state.settings.show_sources);
 
   // Slower checks (they start processes or use the network) after first paint.
   refreshTools();
   checkHealth().then((health) => {
-    if (!health.ok) {
-      openModal({
-        title: 'yt-dlp is required',
-        subtitle: health.message,
-        body: h('div', {},
-          h('p', {}, 'Tunewire uses yt-dlp for all search, playlist and stream extraction. Install a recent version and make sure it is on your PATH:'),
-          h('pre', { class: 'card', style: 'font-size:12px;white-space:pre-wrap' },
-            'Linux:   pipx install yt-dlp   (or your package manager)\nmacOS:   brew install yt-dlp\nWindows: winget install yt-dlp\n\nAlternatively set TUNEWIRE_YTDLP=/full/path/to/yt-dlp'),
-          h('p', { class: 'muted' }, 'Then press Re-check.')),
-        footer: [h('button', { class: 'btn primary', onclick: async () => { const r = await checkHealth(); if (r.ok) { modalStack.at(-1)?.close(); toast('yt-dlp found', 'ok'); } else toast(r.message, 'error'); } }, 'Re-check')],
-      });
-    } else if (/outdated/.test(health.message)) {
-      toast(health.message, 'warn', 10000);
-    }
+    paintHealth();
+    if (!health.ok) offerYtdlpInstall(health.message);
+    else if (/outdated/.test(health.message)) toast(health.message, 'warn', 10000);
   });
 
   for (const id of state.settings.enabled_plugins || []) plugins.start(id);

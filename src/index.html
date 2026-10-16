@@ -12,102 +12,109 @@
 <body>
   <div id="ambient" aria-hidden="true"><div class="amb-layer"></div><div class="amb-layer"></div><div class="amb-veil"></div></div>
   <div id="app" class="app">
-    <aside class="sidebar">
-      <div class="brand">Tunewire</div>
-      <nav class="nav" id="nav">
-        <button class="nav-item active" data-view="home"><i data-icon="home"></i><span>Home</span></button>
-        <button class="nav-item" data-view="search"><i data-icon="search"></i><span>Search</span></button>
-        <button class="nav-item" data-view="charts"><i data-icon="chart"></i><span>Charts</span></button>
-        <button class="nav-item" data-view="releases"><i data-icon="sparkle"></i><span>New releases</span><em class="nav-count new" id="rel-count"></em></button>
-        <button class="nav-item" data-view="favorites"><i data-icon="heart"></i><span>Liked</span><em class="nav-count" id="fav-count"></em></button>
-        <button class="nav-item" data-view="history"><i data-icon="clock"></i><span>History</span></button>
-        <button class="nav-item" data-view="stats"><i data-icon="pulse"></i><span>Your stats</span></button>
-        <button class="nav-item" data-view="playlists"><i data-icon="list"></i><span>Playlists</span></button>
-        <button class="nav-item" data-view="downloads"><i data-icon="download"></i><span>Downloads</span><em class="nav-count" id="dl-count"></em></button>
-        <button class="nav-item" data-view="local"><i data-icon="folder"></i><span>Local files</span><em class="nav-count" id="local-count"></em></button>
-        <div class="nav-group">
-          <div class="nav-group-head"><span>Your playlists</span><button class="icon-btn tiny" id="side-new-playlist" title="New playlist"><i data-icon="plus"></i></button></div>
-          <div class="side-playlists" id="side-playlists"></div>
-        </div>
-        <div id="plugin-nav" class="plugin-nav"></div>
-      </nav>
-      <div class="nav-foot">
+    <!-- Title bar: window drag area, navigation and search (the window has no system frame). -->
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="tb-left" data-tauri-drag-region>
+        <span class="tb-brand" data-tauri-drag-region><span class="tb-logo" aria-hidden="true"></span>Tunewire</span>
+        <button class="tb-nav" id="nav-back" title="Go back"><i data-icon="chevLeft"></i></button>
+        <button class="tb-nav" id="nav-fwd" title="Go forward"><i data-icon="chevRight"></i></button>
+      </div>
+      <div class="tb-center" data-tauri-drag-region>
+        <button class="tb-home" id="nav-home" title="Home"><i data-icon="home"></i></button>
+        <form class="search" id="search-form" autocomplete="off">
+          <i data-icon="search"></i>
+          <input id="search-input" type="text" placeholder="What do you want to play?" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="suggest" aria-expanded="false" />
+          <div class="suggest" id="suggest" role="listbox" hidden></div>
+          <button type="button" class="search-clear" id="search-clear" title="Clear"><i data-icon="x"></i></button>
+          <span class="search-sep" aria-hidden="true"></span>
+          <button type="button" class="search-browse" id="search-browse" title="Browse"><i data-icon="browse"></i></button>
+        </form>
+      </div>
+      <div class="tb-right" data-tauri-drag-region>
         <button class="update-pill" id="update-pill" hidden><i data-icon="download"></i><span>Update ready</span><em>Restart</em></button>
-        <button class="nav-item" data-view="themes"><i data-icon="palette"></i><span>Themes</span></button>
-        <button class="nav-item" data-view="plugins"><i data-icon="puzzle"></i><span>Plugins</span></button>
-        <button class="nav-item" data-view="settings"><i data-icon="gear"></i><span>Settings</span></button>
-        <div class="tool-status">
-          <div class="health" id="health" title="yt-dlp"><span class="dot"></span><span class="health-text">yt-dlp…</span></div>
-          <div class="health" id="health-spotdl" title="spotDL"><span class="dot"></span><span class="health-text">spotDL…</span></div>
+        <div class="health-bad" id="health-bad" hidden></div>
+        <button class="tb-btn" id="nav-releases" title="New releases"><i data-icon="bell"></i><em class="nav-count new" id="rel-count"></em></button>
+        <button class="tb-btn" id="nav-menu" title="Settings and more"><i data-icon="gear"></i></button>
+        <div class="win-controls" id="win-controls">
+          <button class="win-btn" id="win-min" title="Minimize"><i data-icon="winMin"></i></button>
+          <button class="win-btn" id="win-max" title="Maximize"><i data-icon="winMax"></i></button>
+          <button class="win-btn close" id="win-close" title="Close"><i data-icon="x"></i></button>
         </div>
+      </div>
+    </header>
+
+    <!-- Your Library -->
+    <aside class="sidebar" id="sidebar">
+      <div class="lib-head">
+        <button class="lib-title" id="lib-collapse" title="Collapse Your Library"><i data-icon="library"></i><span>Your Library</span></button>
+        <button class="icon-btn lib-plus" id="lib-create" title="Create or import"><i data-icon="plus"></i></button>
+      </div>
+      <nav class="lib-nav" id="nav">
+        <button class="nav-item" data-view="charts" title="Charts"><i data-icon="chart"></i><span>Charts</span></button>
+        <button class="nav-item" data-view="releases" title="New releases"><i data-icon="sparkle"></i><span>New releases</span></button>
+        <button class="nav-item" data-view="stats" title="Your stats"><i data-icon="pulse"></i><span>Your stats</span></button>
+        <button class="nav-item" data-view="history" title="Recently played"><i data-icon="clock"></i><span>Recently played</span></button>
+      </nav>
+      <div class="lib-chips" id="lib-chips">
+        <button data-filter="playlist">Playlists</button>
+        <button data-filter="artist">Artists</button>
+        <button data-filter="downloaded">Downloaded</button>
+      </div>
+      <div class="lib-tools">
+        <div class="lib-search" id="lib-search"><button class="icon-btn small" id="lib-search-btn" title="Search in Your Library"><i data-icon="search"></i></button><input id="lib-search-input" placeholder="Search in Your Library" spellcheck="false" /></div>
+        <button class="lib-sort" id="lib-sort"><span id="lib-sort-label">Recents</span><i data-icon="list"></i></button>
+      </div>
+      <div class="lib-list" id="lib-list"></div>
+      <div id="plugin-nav" class="plugin-nav"></div>
+      <div class="tool-status" hidden>
+        <div class="health" id="health" title="yt-dlp"><span class="dot"></span><span class="health-text">yt-dlp…</span></div>
+        <div class="health" id="health-spotdl" title="spotDL"><span class="dot"></span><span class="health-text">spotDL…</span></div>
       </div>
     </aside>
 
     <main class="main">
-      <header class="toolbar">
-        <form class="search" id="search-form" autocomplete="off">
-          <i data-icon="search"></i>
-          <input id="search-input" type="text" placeholder="Search, or paste a link" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="suggest" aria-expanded="false" />
-          <div class="suggest" id="suggest" role="listbox" hidden></div>
-          <button type="button" class="search-clear" id="search-clear" title="Clear"><i data-icon="x"></i></button>
-        </form>
-        <div class="segmented" id="source-select" role="radiogroup" aria-label="Source">
-          <button data-source="all" class="active" title="All sources">All</button>
-          <button data-source="ytmusic" title="YouTube Music"><span class="src-ico" data-brand="ytmusic"></span><span class="src-label">YT Music</span></button>
-          <button data-source="soundcloud" title="SoundCloud"><span class="src-ico" data-brand="soundcloud"></span><span class="src-label">SoundCloud</span></button>
-          <button data-source="youtube" title="YouTube"><span class="src-ico" data-brand="youtube"></span><span class="src-label">YouTube</span></button>
-          <button data-source="spotify" title="Spotify (via spotDL)"><span class="src-ico" data-brand="spotify"></span><span class="src-label">Spotify</span></button>
-          <button data-source="local" title="Local files" id="source-local" hidden><span class="src-ico"><i data-icon="folder"></i></span><span class="src-label">Local</span></button>
-        </div>
-      </header>
-
       <div class="views">
         <section class="view active" id="view-home"><div id="home-body"></div></section>
         <section class="view" id="view-mix"><div id="mix-body"></div></section>
         <section class="view" id="view-stats"><div id="stats-body"></div></section>
+        <section class="view" id="view-playlist"><div id="playlist-detail"></div></section>
+        <section class="view" id="view-favorites"><div id="fav-body"></div></section>
+        <section class="view" id="view-mood"><div id="mood-body"></div></section>
         <section class="view" id="view-search">
           <div id="search-home"></div>
           <div id="search-body" hidden>
-            <div class="page-head">
-              <h1 id="search-title">Search</h1>
-              <span class="meta" id="search-meta"></span>
+            <div class="search-chips" id="search-chips">
+              <button data-tab="all" class="active">All</button>
+              <button data-tab="songs">Songs</button>
+              <button data-tab="artists">Artists</button>
+              <button data-tab="albums">Albums</button>
+              <button data-tab="playlists">Playlists</button>
             </div>
-            <div id="search-warnings"></div>
-            <div class="table-head" id="results-head" hidden></div>
-            <div class="track-list" id="search-results"></div>
-          </div>
-        </section>
-
-        <section class="view" id="view-playlists">
-          <div class="split">
-            <div class="split-side">
-              <div class="page-head"><h1>Playlists</h1><div class="actions"><button class="btn" id="import-spotify" title="Import public playlists from a Spotify profile"><span class="src-ico" data-brand="spotify"></span>Import</button><button class="btn" id="new-playlist"><i data-icon="plus"></i>New</button></div></div>
-              <form class="url-loader" id="remote-form">
-                <input id="remote-url" class="input" type="text" placeholder="Playlist link (SoundCloud, YouTube, Spotify)" spellcheck="false" />
-                <button class="btn" type="submit">Load</button>
-              </form>
-              <div class="pl-list" id="playlist-list"></div>
+            <div id="search-all"></div>
+            <div id="search-songs" hidden>
+              <div class="page-head songs-head">
+                <div class="segmented" id="source-select" role="radiogroup" aria-label="Source">
+                  <button data-source="all" class="active" title="All sources">All sources</button>
+                  <button data-source="ytmusic" title="YouTube Music"><span class="src-ico" data-brand="ytmusic"></span><span class="src-label">YT Music</span></button>
+                  <button data-source="soundcloud" title="SoundCloud"><span class="src-ico" data-brand="soundcloud"></span><span class="src-label">SoundCloud</span></button>
+                  <button data-source="youtube" title="YouTube"><span class="src-ico" data-brand="youtube"></span><span class="src-label">YouTube</span></button>
+                  <button data-source="spotify" title="Spotify"><span class="src-ico" data-brand="spotify"></span><span class="src-label">Spotify</span></button>
+                  <button data-source="local" title="Local files" id="source-local" hidden><span class="src-ico"><i data-icon="folder"></i></span><span class="src-label">Local</span></button>
+                </div>
+                <span class="meta" id="search-meta"></span>
+              </div>
+              <div id="search-warnings"></div>
+              <div class="table-head" id="results-head" hidden></div>
+              <div class="track-list" id="search-results"></div>
             </div>
-            <div class="split-main" id="playlist-detail"></div>
+            <div id="search-grid" hidden></div>
+            <h1 id="search-title" hidden></h1>
           </div>
-        </section>
-
-        <section class="view" id="view-favorites">
-          <div class="page-head">
-            <div><h1>Liked</h1><span class="meta" id="fav-meta"></span></div>
-            <div class="actions">
-              <button class="btn primary" id="fav-play"><i data-icon="play"></i>Play</button>
-              <button class="btn" id="fav-shuffle"><i data-icon="shuffle"></i>Shuffle</button>
-              <button class="btn" id="fav-queue"><i data-icon="plus"></i>Add to queue</button>
-            </div>
-          </div>
-          <div class="table-head" id="fav-head"></div>
-          <div class="track-list" id="favorites-list"></div>
         </section>
 
         <section class="view" id="view-history">
           <div class="page-head">
-            <h1>History</h1>
+            <h1>Recently played</h1>
             <div class="actions"><button class="btn" id="history-clear"><i data-icon="trash"></i>Clear</button></div>
           </div>
           <div class="table-head" id="history-head"></div>
@@ -179,11 +186,14 @@
           <div id="plugin-panel-body" class="plugin-panel"></div>
         </section>
       </div>
+      <div class="selection-bar" id="selection-bar" hidden></div>
     </main>
 
+    <!-- Right panel: Now playing, queue, lyrics -->
     <aside class="queue" id="queue">
       <div class="queue-head">
         <div class="panel-tabs" role="tablist">
+          <button data-panel="now" role="tab">Now playing</button>
           <button class="active" data-panel="queue" role="tab">Queue <span class="meta" id="queue-count"></span></button>
           <button data-panel="lyrics" role="tab">Lyrics</button>
         </div>
@@ -191,18 +201,19 @@
           <button class="icon-btn" id="lyrics-full" title="Full screen lyrics"><i data-icon="expand"></i></button>
         </div>
         <div class="actions" id="queue-actions">
-          <button class="icon-btn" id="queue-shuffle" title="Shuffle upcoming"><i data-icon="shuffle"></i></button>
           <button class="icon-btn" id="queue-save" title="Save as playlist"><i data-icon="save"></i></button>
           <button class="icon-btn" id="queue-clear" title="Clear (keeps current track)"><i data-icon="trash"></i></button>
         </div>
+        <button class="icon-btn" id="panel-close" title="Close"><i data-icon="x"></i></button>
       </div>
+      <div class="np-panel" id="np-panel" hidden></div>
       <div class="queue-list" id="queue-list"></div>
       <div class="lyrics" id="lyrics-panel" hidden></div>
     </aside>
 
     <footer class="player-bar" id="player-bar">
       <div class="now">
-        <div class="cover" id="np-cover"></div>
+        <button class="cover" id="np-cover" title="Now playing"></button>
         <div class="now-text">
           <div class="np-title" id="np-title">Not playing</div>
           <button class="np-artist" id="np-artist" title="Go to artist"></button>
@@ -212,11 +223,11 @@
       </div>
       <div class="transport">
         <div class="buttons">
-          <button class="icon-btn" id="btn-repeat" title="Repeat: off"><i data-icon="repeat"></i></button>
+          <button class="icon-btn" id="btn-shuffle" title="Shuffle (S)"><i data-icon="shuffle"></i></button>
           <button class="icon-btn" id="btn-prev" title="Previous (P)"><i data-icon="prev"></i></button>
           <button class="play-btn" id="btn-play" title="Play / pause (Space)"><i data-icon="play"></i></button>
           <button class="icon-btn" id="btn-next" title="Next (N)"><i data-icon="next"></i></button>
-          <button class="icon-btn" id="btn-stop" title="Stop"><i data-icon="stop"></i></button>
+          <button class="icon-btn" id="btn-repeat" title="Repeat: off"><i data-icon="repeat"></i></button>
         </div>
         <div class="progress-row">
           <span class="time" id="t-pos">0:00</span>
@@ -232,10 +243,14 @@
       </div>
       <div class="side-controls">
         <div id="plugin-player-slot" class="plugin-player-slot"></div>
+        <button class="icon-btn" id="btn-np" title="Now playing view"><i data-icon="npView"></i></button>
+        <button class="icon-btn" id="btn-lyrics" title="Lyrics"><i data-icon="mic"></i></button>
         <button class="icon-btn" id="toggle-queue" title="Queue (Q)"><i data-icon="queue"></i></button>
+        <button class="icon-btn" id="btn-device" title="Output device"><i data-icon="speaker"></i></button>
+        <button class="icon-btn" id="btn-sleep" title="Sleep timer"><i data-icon="moon"></i></button>
         <button class="icon-btn" id="btn-mute" title="Mute (M)"><i data-icon="volume"></i></button>
         <input type="range" id="volume" min="0" max="100" value="70" aria-label="Volume" />
-        <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)"><i data-icon="keyboard"></i></button>
+        <button class="icon-btn" id="btn-full" title="Full screen"><i data-icon="expand"></i></button>
       </div>
     </footer>
   </div>
@@ -257,6 +272,8 @@
   <script src="js/themes.js"></script>
   <script src="js/plugins.js"></script>
   <script src="js/foryou.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/imports.js"></script>
   <script src="js/update.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/shortcuts.js"></script>

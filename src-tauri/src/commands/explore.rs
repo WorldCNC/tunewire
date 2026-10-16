@@ -222,8 +222,15 @@ pub async fn sync_playlist(app: AppHandle, st: State<'_, AppState>, id: String) 
     let n = remote.tracks.len();
     st.store.update_library(|lib| {
         let p = lib.playlists.iter_mut().find(|p| p.id == id).ok_or_else(|| AppError::NotFound("playlist".into()))?;
-        p.tracks = remote.tracks;
-        p.updated = now_ms();
+        let now = now_ms();
+        // Keep known Spotify matches and the dates songs were added.
+        p.tracks = crate::matcher::with_matches(remote.tracks);
+        for t in &p.tracks {
+            p.added.entry(t.key.clone()).or_insert(now);
+        }
+        let keys: std::collections::HashSet<&String> = p.tracks.iter().map(|t| &t.key).collect();
+        p.added.retain(|k, _| keys.contains(k));
+        p.updated = now;
         Ok(())
     })?;
     emit_library(&app, "playlists");

@@ -129,6 +129,40 @@ pub fn shuffle_queue(app: AppHandle, st: State<'_, AppState>) -> QueueSnapshot {
     changed(&app, &st)
 }
 
+/// Shuffle mode: on shuffles what's coming up (remembering the order);
+/// off puts the remaining songs back in their original order.
+#[tauri::command]
+pub fn set_shuffle(app: AppHandle, st: State<'_, AppState>, on: bool) -> QueueSnapshot {
+    let _ = st.store.update_settings(|s| s.shuffle = on);
+    {
+        let mut q = st.queue.lock().unwrap();
+        if on {
+            q.unshuffled = Some(q.items.iter().map(|i| i.uid).collect());
+            shuffle_tail(&mut q);
+        } else if let Some(order) = q.unshuffled.take() {
+            let start = q.current.map(|c| c + 1).unwrap_or(0);
+            let pos: std::collections::HashMap<u64, usize> = order.iter().enumerate().map(|(i, u)| (*u, i)).collect();
+            q.items[start..].sort_by_key(|i| pos.get(&i.uid).copied().unwrap_or(usize::MAX));
+        }
+    }
+    crate::controller::invalidate_preload(&st);
+    crate::state::emit_playback(&app);
+    changed(&app, &st)
+}
+
+/// Shuffle everything after the current item.
+pub fn shuffle_tail(q: &mut crate::state::QueueState) {
+    let start = q.current.map(|c| c + 1).unwrap_or(0);
+    let mut x = store::now_ms() | 1;
+    let tail = &mut q.items[start..];
+    for i in (1..tail.len()).rev() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        tail.swap(i, (x % (i as u64 + 1)) as usize);
+    }
+}
+
 /// Override which platform a queue entry should play from.
 #[tauri::command]
 pub fn set_item_platform(app: AppHandle, st: State<'_, AppState>, uid: u64, platform: Option<Platform>) -> AppResult<()> {

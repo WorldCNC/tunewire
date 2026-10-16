@@ -95,10 +95,39 @@ function prefetchTrack(track) {
   call('prefetch_track', { track, platform: null }).catch(() => {});
 }
 
+function trackAlbum(track) {
+  return track.versions.find((v) => v.album)?.album || '';
+}
+
+function fmtAdded(ms) {
+  if (!ms) return '';
+  const d = (Date.now() - ms) / 1000;
+  if (d < 3600) return `${Math.max(1, Math.round(d / 60))} min ago`;
+  if (d < 86400) return `${Math.round(d / 3600)} hour${Math.round(d / 3600) === 1 ? '' : 's'} ago`;
+  if (d < 86400 * 7) return `${Math.round(d / 86400)} day${Math.round(d / 86400) === 1 ? '' : 's'} ago`;
+  if (d < 86400 * 28) return `${Math.round(d / (86400 * 7))} week${Math.round(d / (86400 * 7)) === 1 ? '' : 's'} ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/**
+ * One row of a track table.
+ * opts.onPlay: custom play action (e.g. play a whole list from this index)
+ * opts.extraMenu: extra menu items
+ * opts.sub: extra note after the artist (e.g. "Because of …", "3 min ago")
+ * opts.added: when it was added (shows the Date added column)
+ * opts.action: an extra button next to the heart
+ * opts.noCover / opts.noAlbum: album pages
+ */
 function trackRow(track, index, opts = {}) {
   const versions = sortedVersions(track);
   const play = () => (opts.onPlay ? opts.onPlay() : playTrack(track));
-  const row = h('div', { class: 'track', dataset: { key: track.key }, style: `--i:${index}` });
+  const cls = ['track'];
+  if (opts.added !== undefined) cls.push('has-added');
+  if (opts.noCover) cls.push('no-cover');
+  const row = h('div', { class: cls.join(' '), dataset: { key: track.key }, style: `--i:${index}`, draggable: 'true' });
+  row._track = track;
+  row._index = opts.index ?? index;
+  row._play = play;
   const liked = state.favKeys.has(track.key);
   // Resting the pointer on a song for a moment resolves its stream, so the
   // click that usually follows starts playback much sooner.
@@ -108,113 +137,269 @@ function trackRow(track, index, opts = {}) {
 
   const num = h('div', { class: 't-num' },
     h('span', { class: 'n' }, String(index + 1)),
-    h('button', { class: 'icon-btn', title: 'Play', html: icon('play'), onclick: (e) => { e.stopPropagation(); play(); } }));
+    h('button', { class: 'icon-btn', title: `Play ${track.title}`, html: icon('play'), onclick: (e) => { e.stopPropagation(); play(); } }));
   num.insertAdjacentHTML('beforeend', EQ);
 
-  const badges = h('div', { class: 'badges t-badges' });
+  // Source icons: shown on hover (or always, with the setting on).
+  const srcs = h('span', { class: 't-srcs' });
   for (const v of versions) {
-    badges.append(pdot(v.platform, {
+    srcs.append(pdot(v.platform, {
       preview: v.preview,
       title: `Play from ${PLATFORMS[v.platform]?.label}${v.preview ? ' (30 s preview)' : ''}`,
       onClick: () => playTrack(track, v.platform),
     }));
   }
 
-  const menuBtn = h('button', {
-    class: 'icon-btn small', title: 'More', html: icon('dots'),
-    onclick: (e) => {
-      e.stopPropagation();
-      row.classList.add('menu-open');
-      const items = [
-        { label: 'Play', icon: 'play', onClick: play },
-        { label: 'Play next', icon: 'playNext', onClick: () => enqueue([track], true) },
-        { label: 'Add to queue', icon: 'plus', onClick: () => enqueue([track]) },
-        { label: 'Add to playlist…', icon: 'list', onClick: () => addToPlaylistMenu(menuBtn, [track]) },
-        'sep',
-        { label: `Choose source (${versions.length})…`, icon: 'layers', onClick: () => openVersions(track) },
-        { label: liked ? 'Unlike' : 'Like', icon: 'heart', onClick: () => toggleFavorite(track) },
-        { label: 'Start radio', icon: 'radio', onClick: () => startRadio(track) },
-        track.artist ? { label: 'Go to artist', icon: 'user', onClick: () => openArtist(track.artist, track) } : null,
-        state.downloadKeys.has(track.key)
-          ? { label: 'Remove download', icon: 'trash', onClick: () => deleteDownload(track.key) }
-          : (versions.every((v) => v.platform === 'local') ? null : { label: 'Download', icon: 'download', onClick: () => downloadTracks([track]) }),
-        versions[0]?.platform !== 'local' ? { label: 'Copy link', icon: 'link', onClick: () => copyText(versions[0]?.url) } : null,
-        ...(opts.extraMenu || []),
-      ].filter(Boolean);
-      openMenu(menuBtn, items, { onClose: () => row.classList.remove('menu-open') });
-    },
-  });
-  const actions = h('div', { class: 't-actions' },
-    opts.action || null,
-    h('button', { class: `icon-btn small like-btn${liked ? ' liked' : ''}`, title: liked ? 'Unlike' : 'Like', html: icon(liked ? 'heartFill' : 'heart'), onclick: (e) => { e.stopPropagation(); toggleFavorite(track); } }),
-    menuBtn);
+  const menuBtn = h('button', { class: 'icon-btn small', title: `More options for ${track.title}`, html: icon('dots'), onclick: (e) => { e.stopPropagation(); openRowMenu(row, menuBtn); } });
+  row._menu = () => openRowMenu(row, menuBtn);
+  row._menuItems = () => {
+    const items = [
+      { label: 'Add to queue', icon: 'plus', onClick: () => enqueue([track]) },
+      { label: 'Play next', icon: 'playNext', onClick: () => enqueue([track], true) },
+      { label: 'Add to playlist…', icon: 'list', onClick: () => addToPlaylistMenu(menuBtn, [track]) },
+      { label: state.favKeys.has(track.key) ? 'Remove from Liked Songs' : 'Save to Liked Songs', icon: 'heart', onClick: () => toggleFavorite(track) },
+      'sep',
+      { label: 'Start radio', icon: 'radio', onClick: () => startRadio(track) },
+      track.artist ? { label: 'Go to artist', icon: 'user', onClick: () => openArtist(track.artist, track) } : null,
+      trackAlbum(track) && track.versions.some((v) => v.platform === 'ytmusic') ? { label: 'Go to album', icon: 'disc', onClick: () => openAlbumOf(track) } : null,
+      { label: `Choose source (${versions.length})…`, icon: 'layers', onClick: () => openVersions(track) },
+      state.downloadKeys.has(track.key)
+        ? { label: 'Remove download', icon: 'trash', onClick: () => deleteDownload(track.key) }
+        : (versions.every((v) => v.platform === 'local') ? null : { label: 'Download', icon: 'download', onClick: () => downloadTracks([track]) }),
+      versions[0]?.platform !== 'local' ? { label: 'Copy link', icon: 'link', onClick: () => copyText(versions[0]?.url) } : null,
+      ...(opts.extraMenu || []),
+    ].filter(Boolean);
+    return items;
+  };
 
-  const artist = h('div', { class: 't-artist' });
+  const artistsEl = h('span', { class: 't-artists' });
   if (track.artist) {
-    artist.append(h('button', { title: `Go to ${track.artist}`, onclick: (e) => { e.stopPropagation(); openArtist(track.artist, track); } }, track.artist));
+    const names = track.artist.split(/, | & /);
+    names.forEach((n, i) => {
+      if (i) artistsEl.append(', ');
+      artistsEl.append(h('button', { onclick: (e) => { e.stopPropagation(); openArtist(n, i === 0 ? track : null); } }, n));
+    });
   } else {
-    artist.append(h('span', { class: 'faint' }, 'Unknown'));
+    artistsEl.append(h('span', { class: 'faint' }, 'Unknown artist'));
   }
+  const album = trackAlbum(track);
+  const albumEl = h('div', { class: 't-album' }, album && !opts.noAlbum
+    ? (track.versions.some((v) => v.platform === 'ytmusic' && v.album) ? h('button', { onclick: (e) => { e.stopPropagation(); openAlbumOf(track); } }, album) : album)
+    : '');
 
-  row.append(
+  row.append(...[
     num,
     h('div', { class: 't-titlecell' }, thumbEl(track.thumbnail),
       h('div', { class: 't-main' },
         h('div', { class: 't-title', title: track.title },
           state.downloadKeys.has(track.key) ? h('span', { class: 'dl-mark', title: 'Downloaded', html: icon('saved') }) : null,
           track.title),
-        opts.sub ? h('div', { class: 't-sub' }, opts.sub) : null)),
-    artist,
-    badges,
+        h('div', { class: 't-sub' }, artistsEl, opts.sub ? h('span', { class: 'faint' }, `· ${opts.sub}`) : null, srcs))),
+    albumEl,
+    opts.added !== undefined ? h('div', { class: 't-added' }, fmtAdded(opts.added)) : null,
+    h('div', { class: 't-like' }, opts.action || null,
+      h('button', { class: `icon-btn small like-btn${liked ? ' liked' : ''}`, title: liked ? 'Remove from Liked Songs' : 'Save to Liked Songs', html: icon(liked ? 'heartFill' : 'heart'), onclick: (e) => { e.stopPropagation(); toggleFavorite(track); } })),
     h('div', { class: 't-dur' }, fmtTime(track.duration)),
-    actions);
+    h('div', { class: 't-more' }, menuBtn)].filter(Boolean));
 
-  // Single click selects; double click / Enter plays (desktop list conventions).
   row.tabIndex = -1;
-  row.addEventListener('click', () => {
-    for (const r of $$('.track.selected')) r.classList.remove('selected');
-    row.classList.add('selected');
-    row.focus({ preventScroll: true });
-  });
+  row.addEventListener('click', (e) => selectRow(row, e));
   row.addEventListener('dblclick', (e) => { e.preventDefault(); play(); });
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); play(); }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault(); e.stopPropagation();
       const sib = e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
-      if (sib?.classList.contains('track')) sib.click();
+      if (sib?.classList.contains('track')) selectRow(sib, { shiftKey: e.shiftKey });
       sib?.scrollIntoView({ block: 'nearest' });
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); e.stopPropagation(); selectAll(row.parentElement); }
   });
-  row.addEventListener('contextmenu', (e) => { e.preventDefault(); row.click(); menuBtn.click(); });
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (!row.classList.contains('selected')) selectRow(row, {});
+    openRowMenu(row, row, e);
+  });
+  row.addEventListener('dragstart', (e) => startTrackDrag(row, e));
+  row.addEventListener('dragend', endTrackDrag);
   return row;
 }
 
+function openRowMenu(row, anchor, ev) {
+  const rows = selectedRows();
+  row.classList.add('menu-open');
+  const onClose = () => row.classList.remove('menu-open');
+  if (rows.length > 1 && rows.includes(row)) {
+    openMenu(anchor, bulkMenuItems(rows), { onClose, at: ev });
+    return;
+  }
+  openMenu(anchor, row._menuItems(), { onClose, at: ev });
+}
+
+// Multi-select ------------------------------------------------------------------
+// Click selects, Ctrl/Cmd-click adds, Shift-click selects a range (in one list).
+const sel = { list: null, anchor: null };
+
+function listRows(list) {
+  return list ? [...list.children].filter((r) => r.classList?.contains('track') && r._track) : [];
+}
+function selectedRows() {
+  return listRows(sel.list).filter((r) => r.classList.contains('selected'));
+}
+function selectRow(row, e = {}) {
+  const list = row.parentElement;
+  if (sel.list !== list) clearSelection();
+  sel.list = list;
+  const rows = listRows(list);
+  if (e.shiftKey && sel.anchor && rows.includes(sel.anchor)) {
+    const [a, b] = [rows.indexOf(sel.anchor), rows.indexOf(row)].sort((x, y) => x - y);
+    if (!(e.ctrlKey || e.metaKey)) rows.forEach((r) => r.classList.remove('selected'));
+    rows.slice(a, b + 1).forEach((r) => r.classList.add('selected'));
+  } else if (e.ctrlKey || e.metaKey) {
+    row.classList.toggle('selected');
+    sel.anchor = row;
+  } else {
+    rows.forEach((r) => r.classList.toggle('selected', r === row));
+    sel.anchor = row;
+  }
+  row.focus({ preventScroll: true });
+  updateSelectionBar();
+}
+function selectAll(list) {
+  sel.list = list;
+  listRows(list).forEach((r) => r.classList.add('selected'));
+  updateSelectionBar();
+}
+function clearSelection() {
+  for (const r of $$('.track.selected')) r.classList.remove('selected');
+  sel.list = null;
+  sel.anchor = null;
+  updateSelectionBar();
+}
+
+function bulkMenuItems(rows) {
+  const tracks = rows.map((r) => r._track);
+  const ctx = sel.list?._ctx;
+  const allLiked = tracks.every((t) => state.favKeys.has(t.key));
+  return [
+    { label: `${tracks.length} songs selected`, heading: true },
+    { label: 'Play', icon: 'play', onClick: () => playList(tracks, 0) },
+    { label: 'Add to queue', icon: 'plus', onClick: () => enqueue(tracks) },
+    { label: 'Play next', icon: 'playNext', onClick: () => enqueue(tracks, true) },
+    { label: 'Add to playlist…', icon: 'list', onClick: () => addToPlaylistMenu(rows[0].querySelector('.t-more button') || rows[0], tracks) },
+    { label: allLiked ? 'Remove from Liked Songs' : 'Save to Liked Songs', icon: 'heart', onClick: () => likeMany(tracks, !allLiked) },
+    { label: 'Download', icon: 'download', onClick: () => downloadTracks(tracks) },
+    ctx?.removeMany ? 'sep' : null,
+    ctx?.removeMany ? { label: ctx.removeLabel || 'Remove from this playlist', icon: 'trash', onClick: () => ctx.removeMany(rows.map((r) => r._index)) } : null,
+  ].filter(Boolean);
+}
+
+async function likeMany(tracks, like) {
+  let n = 0;
+  for (const t of tracks) {
+    if (state.favKeys.has(t.key) !== like) {
+      try { await call('toggle_favorite', { track: t }); n++; } catch { /* keep going */ }
+    }
+  }
+  toast(like ? `Saved ${n} songs to Liked Songs` : `Removed ${n} songs from Liked Songs`, 'ok', 2200);
+}
+
+function updateSelectionBar() {
+  const bar = $('#selection-bar');
+  if (!bar) return;
+  const rows = selectedRows();
+  if (rows.length < 2) { bar.hidden = true; return; }
+  const tracks = rows.map((r) => r._track);
+  const ctx = sel.list?._ctx;
+  const b = (label, ic, fn) => h('button', { html: `${icon(ic)}${esc(label)}`, onclick: (e) => { e.stopPropagation(); fn(e); } });
+  bar.replaceChildren(...[
+    h('span', { class: 'sel-count' }, `${rows.length} selected`),
+    b('Play', 'play', () => playList(tracks, 0)),
+    b('Queue', 'plus', () => enqueue(tracks)),
+    b('Add to playlist', 'list', (e) => addToPlaylistMenu(e.currentTarget, tracks)),
+    b('Like', 'heart', () => likeMany(tracks, !tracks.every((t) => state.favKeys.has(t.key)))),
+    ctx?.removeMany ? b('Remove', 'trash', () => ctx.removeMany(rows.map((r) => r._index))) : null,
+    h('button', { title: 'Clear selection (Esc)', html: icon('x'), onclick: clearSelection })].filter(Boolean));
+  bar.hidden = false;
+}
+
+// Drag and drop -----------------------------------------------------------------
+// Songs can be dragged onto a playlist in Your Library, onto the queue, or
+// within a playlist to reorder it.
+let trackDrag = null;
+
+function startTrackDrag(row, e) {
+  const rows = row.classList.contains('selected') && selectedRows().length > 1 ? selectedRows() : [row];
+  trackDrag = { rows, tracks: rows.map((r) => r._track), list: row.parentElement };
+  rows.forEach((r) => r.classList.add('dragging'));
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.dataTransfer.setData('text/plain', rows.map((r) => `${r._track.artist} - ${r._track.title}`).join('\n'));
+  const ghost = h('div', { class: 'drag-ghost' }, rows.length > 1 ? `${rows.length} songs` : row._track.title);
+  document.body.append(ghost);
+  try { e.dataTransfer.setDragImage(ghost, 12, 12); } catch { /* optional */ }
+  setTimeout(() => ghost.remove(), 0);
+}
+function endTrackDrag() {
+  if (trackDrag) trackDrag.rows.forEach((r) => r.classList.remove('dragging'));
+  trackDrag = null;
+  $$('.drop-before, .drop-after, .drop-target').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-target'));
+}
+
+// Reordering inside a list that allows it (list._ctx.reorder).
+document.addEventListener('dragover', (e) => {
+  if (!trackDrag) return;
+  const row = e.target.closest?.('.track');
+  const list = row?.parentElement;
+  $$('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+  if (!row || list !== trackDrag.list || !list._ctx?.reorder) return;
+  e.preventDefault();
+  const r = row.getBoundingClientRect();
+  row.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
+});
+document.addEventListener('drop', (e) => {
+  if (!trackDrag) return;
+  const row = e.target.closest?.('.track');
+  const list = row?.parentElement;
+  if (!row || list !== trackDrag.list || !list._ctx?.reorder) return;
+  e.preventDefault();
+  const r = row.getBoundingClientRect();
+  const before = e.clientY < r.top + r.height / 2;
+  const moving = trackDrag.rows.map((x) => x._index);
+  let to = row._index + (before ? 0 : 1);
+  to -= moving.filter((i) => i < to).length;
+  list._ctx.reorder(moving, to);
+  endTrackDrag();
+});
+
 /** Column header row. sortKey/onSort make Title/Artist/Time clickable. */
-function tableHead(el, { sort, onSort } = {}) {
+function tableHead(el, { sort, onSort, added = false, albumLabel = 'Album' } = {}) {
   const col = (label, key, cls = '') => {
-    if (!onSort) return h('span', { class: cls }, label);
+    if (!onSort || !key) return h('span', { class: cls }, label);
     const active = sort?.key === key;
-    const b = h('button', { class: `sortable ${cls}${active ? ' sorted' : ''}`, title: `Sort by ${label.toLowerCase()}` }, label);
+    const b = h('button', { class: `sortable ${cls}${active ? ' sorted' : ''}`, title: `Sort by ${String(label).toLowerCase()}` }, label);
     if (active) b.insertAdjacentHTML('beforeend', icon(sort.dir === 1 ? 'up' : 'down'));
     b.addEventListener('click', () => onSort(key));
     return b;
   };
-  el.replaceChildren(
-    h('span', { class: 'r' }, '#'),
+  el.className = `table-head${added ? ' has-added' : ''}`;
+  const clock = h('span', { class: 'r', title: 'Duration', html: icon('clock') });
+  el.replaceChildren(...[
+    h('span', { style: 'text-align:center' }, '#'),
     col('Title', 'title'),
-    col('Artist', 'artist', 'c-artist'),
-    h('span', { class: 'c-src' }, 'Sources'),
-    col('Time', 'duration', 'r'),
-    h('span'));
+    col(albumLabel, albumLabel ? 'album' : null, 'c-album'),
+    added ? col('Date added', 'added', 'c-added') : null,
+    h('span'),
+    onSort ? (() => { const b = col('', 'duration', 'r'); b.prepend(...h('span', { html: icon('clock') }).childNodes); return b; })() : clock,
+    h('span')].filter(Boolean));
   el.hidden = false;
 }
 
 function skeletonRows(n = 8) {
   return Array.from({ length: n }, () => h('div', { class: 'track skeleton' },
-    h('div'), h('div', { class: 'thumb' }),
-    h('div', {}, h('div', { class: 'sk', style: `width:${40 + Math.random() * 40}%` }), h('div', { class: 'sk', style: `width:${20 + Math.random() * 25}%` })),
-    h('div'), h('div'), h('div')));
+    h('div'),
+    h('div', { class: 't-titlecell' }, h('div', { class: 'thumb' }),
+      h('div', { style: 'flex:1' }, h('div', { class: 'sk', style: `width:${40 + Math.random() * 40}%` }), h('div', { class: 'sk', style: `width:${20 + Math.random() * 25}%` }))),
+    h('div', {}, h('div', { class: 'sk', style: `width:${30 + Math.random() * 40}%` })), h('div'), h('div'), h('div')));
 }
 
 function markPlaying() {

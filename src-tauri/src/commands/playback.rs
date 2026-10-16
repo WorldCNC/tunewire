@@ -24,13 +24,28 @@ pub fn set_queue_and_play(app: &AppHandle, st: &AppState, tracks: Vec<Track>, st
     let tracks = crate::matcher::with_matches(tracks);
     // Spotify songs coming up: match them before they're reached.
     crate::matcher::prepare(app, tracks.iter().skip(start).take(40).cloned().collect());
-    {
+    let shuffle = st.store.settings().shuffle;
+    let start = {
         let mut q = st.queue.lock().unwrap();
         let items: Vec<QueueItem> = tracks.into_iter().map(|t| q.make(t, None)).collect();
         q.items = items;
         q.current = None;
         q.resume_at = None;
-    }
+        q.unshuffled = None;
+        if shuffle && !q.items.is_empty() {
+            // The clicked song plays first, the rest in random order.
+            q.unshuffled = Some(q.items.iter().map(|i| i.uid).collect());
+            let at = start.min(q.items.len() - 1);
+            let first = q.items.remove(at);
+            q.items.insert(0, first);
+            q.current = Some(0);
+            crate::commands::queue::shuffle_tail(&mut q);
+            q.current = None;
+            0
+        } else {
+            start
+        }
+    };
     let len = st.queue.lock().unwrap().items.len();
     emit_queue(app);
     if len > 0 {
@@ -123,6 +138,57 @@ pub fn emit_soon(app: &AppHandle) {
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
         emit_playback(&app);
     });
+}
+
+// Sleep timer ----------------------------------------------------------------
+
+static SLEEP_AT: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+static SLEEP_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// When playback will stop: a ms timestamp, or 0 = at the end of this song.
+pub fn sleep_at() -> Option<u64> {
+    *SLEEP_AT.lock().unwrap()
+}
+
+/// Called when a song ends: true if the sleep timer wants playback to stop now.
+pub fn sleep_due_at_track_end() -> bool {
+    let mut g = SLEEP_AT.lock().unwrap();
+    if *g == Some(0) {
+        *g = None;
+        return true;
+    }
+    false
+}
+
+/// `minutes`: stop after that long; `end_of_track`: stop when this song ends; neither: cancel.
+#[tauri::command]
+pub fn set_sleep_timer(app: AppHandle, st: State<'_, AppState>, minutes: Option<f64>, end_of_track: Option<bool>) -> Option<u64> {
+    let gen = SLEEP_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let at = if end_of_track.unwrap_or(false) {
+        // Gapless preloading would roll straight into the next song.
+        invalidate_preload(&st);
+        Some(0)
+    } else {
+        minutes.filter(|m| *m > 0.0).map(|m| crate::store::now_ms() + (m * 60_000.0) as u64)
+    };
+    *SLEEP_AT.lock().unwrap() = at;
+    if let Some(deadline) = at.filter(|a| *a > 0) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let wait = deadline.saturating_sub(crate::store::now_ms());
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            if SLEEP_GEN.load(Ordering::SeqCst) != gen {
+                return;
+            }
+            *SLEEP_AT.lock().unwrap() = None;
+            let st = tauri::Manager::state::<AppState>(&app);
+            st.audio.pause();
+            emit_playback(&app);
+            crate::state::emit_status(&app, "info", "Sleep timer: playback paused");
+        });
+    }
+    emit_playback(&app);
+    at
 }
 
 #[tauri::command]

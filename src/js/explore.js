@@ -34,11 +34,7 @@ async function renderCharts(country) {
   }
   const sections = [...groups].map(([group, lists]) => h('div', { class: 'artist-section' },
     h('div', { class: 'section-title' }, group || 'Playlists'),
-    h('div', { class: 'album-grid' }, ...lists.map((p) => {
-      const art = h('div', { class: 'album-art', html: icon('chart') });
-      if (p.thumbnail) setArt(art, p.thumbnail);
-      return h('button', { class: 'album-card', title: p.title, onclick: () => openAlbum(p.url, p.title) }, art, h('div', { class: 'album-title' }, p.title));
-    }))));
+    albumGrid(lists.map((p) => ({ title: p.title, url: p.url, thumbnail: p.thumbnail })))));
   const artists = charts.artists.length ? h('div', { class: 'artist-section' },
     h('div', { class: 'section-title' }, 'Top artists'),
     h('div', { class: 'chart-artists' }, ...charts.artists.slice(0, 40).map((a) => h('button', { class: 'chart-artist', onclick: () => openArtist(a.name) },
@@ -113,13 +109,7 @@ async function renderReleases(force = false) {
   state.releases = feed;
   // Newest-first per artist; "new" ones first overall.
   const sorted = [...feed].sort((a, b) => (b.new - a.new));
-  const grid = h('div', { class: 'album-grid' }, ...sorted.map((r) => {
-    const art = h('div', { class: 'album-art', html: icon('disc') });
-    if (r.thumbnail) setArt(art, r.thumbnail);
-    return h('button', { class: `album-card${r.new ? ' is-new' : ''}`, title: `${r.title} — ${r.artist}`, onclick: () => openAlbum(r.url, r.title) },
-      art, r.new ? h('span', { class: 'new-badge' }, 'New') : null,
-      h('div', { class: 'album-title' }, r.title), h('div', { class: 'album-sub' }, r.artist));
-  }));
+  const grid = albumGrid(sorted.map((r) => ({ title: r.title, url: r.url, thumbnail: r.thumbnail, subtitle: r.artist, isNew: r.new })));
   body.replaceChildren(head, chips, feed.length ? grid : h('div', { class: 'empty' }, h('p', {}, 'No releases found for these artists.')));
   updateReleaseBadge(feed);
   // Seen once shown; the badges stay until the next visit.
@@ -389,13 +379,13 @@ async function importSpotifyProfile() {
       }
       m.close();
       toast(`Imported ${done} playlist${done === 1 ? '' : 's'}`, 'ok');
-      showView('playlists');
     } }, 'Import selected')],
   });
 }
 
 async function syncPlaylist(id, btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Syncing…'; }
+  else toast('Syncing…', 'info', 1500);
   try {
     const n = await call('sync_playlist', { id });
     toast(`Synced: ${n} songs`, 'ok');
@@ -403,7 +393,6 @@ async function syncPlaylist(id, btn) {
   if (btn) { btn.disabled = false; btn.innerHTML = `${icon('refresh')}Sync`; }
 }
 
-$('#import-spotify').addEventListener('click', importSpotifyProfile);
 
 // Ambient background ------------------------------------------------------------
 

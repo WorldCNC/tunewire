@@ -172,6 +172,45 @@
       };
     },
     save_share_image: ({ name }) => `/home/you/Pictures/${name}.png`,
+    ytm_search_extras: async () => {
+      await new Promise((r) => setTimeout(r, 120));
+      const card = (kind, title, subtitle, id, extra = {}) => ({ kind, title, subtitle, browse_id: id, video_id: null, thumbnail: yt('fa5IWHDbftI'), track: null, ...extra });
+      return {
+        top: card('artist', 'Daft Punk', 'Artist • 30M monthly audience', 'UCdaft'),
+        artists: [card('artist', 'Daft Punk', 'Artist', 'UCdaft'), card('artist', 'Justice', 'Artist', 'UCjustice')],
+        albums: ['Discovery', 'Homework', 'Random Access Memories'].map((t, i) => card('album', t, `Album • Daft Punk • ${2001 - i}`, `MPREb_${i}`)),
+        playlists: [card('playlist', 'This Is Daft Punk', 'Playlist • YouTube Music', 'VLPLdaft')],
+      };
+    },
+    ytm_artist: async ({ name }) => ({
+      name: name || 'Daft Punk', browse_id: 'UCdaft', banner: yt('fa5IWHDbftI'), thumbnail: yt('fa5IWHDbftI'), audience: '30M monthly audience', subscribers: '9M', description: 'French electronic duo.',
+      top_songs: tracks.slice(0, 6), all_songs: 'VLPLall',
+      albums: ['Discovery', 'Homework'].map((t, i) => ({ kind: 'album', title: t, subtitle: `Album • ${2001 - i}`, browse_id: `MPREb_${i}`, thumbnail: yt('Qm9EpPeVrn8'), track: null })),
+      singles: [{ kind: 'single', title: 'Get Lucky', subtitle: 'Single • 2013', browse_id: 'MPREb_s', thumbnail: yt('5NV6Rdv1a3I'), track: null }],
+      related: [{ kind: 'artist', title: 'Justice', subtitle: '5M monthly audience', browse_id: 'UCjustice', thumbnail: null, track: null }],
+      shelves: [],
+    }),
+    ytm_collection: async ({ id }) => ({ title: id === 'VLPLall' ? 'All songs' : 'Discovery', kind: id?.startsWith('VL') ? 'Playlist' : 'Album', artist: 'Daft Punk', artist_browse: 'UCdaft', year: '2001', cover: yt('Qm9EpPeVrn8'), description: '', browse_id: id || 'MPREb_0', tracks: tracks.slice(0, 5) }),
+    ytm_find_album: () => 'MPREb_0',
+    ytm_moods: () => [{ title: 'Moods & moments', items: [{ title: 'Chill', params: 'p1', color: '#7fb3ff' }, { title: 'Workout', params: 'p2', color: '#ff7f50' }] }, { title: 'Genres', items: [{ title: 'Pop', params: 'p3', color: '#ff5fa2' }] }],
+    ytm_mood_page: () => [{ title: 'Chill pop', cards: [{ kind: 'playlist', title: 'Chill Hits', subtitle: 'Playlist', browse_id: 'VLchill', thumbnail: null, track: null }] }],
+    artist_soundcloud: () => [],
+    spotify_library_login: async () => { await new Promise((r) => setTimeout(r, 200)); return { user: 'devuser', liked: 3, playlists: [{ id: 'sp1', name: 'Road trip', owner: 'devuser', total: 2, thumbnail: null }, { id: 'sp2', name: 'Focus', owner: 'Spotify', total: 3, thumbnail: null }] }; },
+    spotify_library_import: async ({ liked, playlists: pls }) => {
+      let first = null;
+      for (const [id, name] of pls) { const p = { id: `p${id}`, name, tracks: tracks.slice(0, 2), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); first = first || p.id; emit('import-progress', { done: 1, total: pls.length, label: name }); }
+      if (liked) { favorites = [...tracks.slice(4, 7), ...favorites]; emit('library-changed', 'favorites'); }
+      emit('library-changed', 'playlists');
+      return { playlists: pls.length, songs: pls.length * 2, liked: liked ? 3 : 0, missing: 0, first_id: first };
+    },
+    import_apple_music: () => { const p = { id: `pam${Date.now()}`, name: 'Apple Mix', tracks: tracks.slice(1, 4), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return { playlist: p, missing: 1 }; },
+    import_rows: ({ name, rows }) => { const p = { id: `pcsv${Date.now()}`, name, tracks: tracks.slice(0, Math.min(rows.length, 5)), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return { playlist: p, missing: 0 }; },
+    apply_matches: ({ tracks: ts }) => ts,
+    remove_many_from_playlist: ({ id, indices }) => { const p = playlists.find((x) => x.id === id); p.tracks = p.tracks.filter((_, i) => !indices.includes(i)); emit('library-changed', 'playlists'); return indices.length; },
+    move_many_in_playlist: ({ id, indices, to }) => { const p = playlists.find((x) => x.id === id); const mv = indices.map((i) => p.tracks[i]); p.tracks = p.tracks.filter((_, i) => !indices.includes(i)); p.tracks.splice(to, 0, ...mv); emit('library-changed', 'playlists'); },
+    update_playlist_meta: ({ id, patch }) => { const p = playlists.find((x) => x.id === id); if (patch.name) p.name = patch.name; if (patch.description != null) p.description = patch.description; if (patch.pinned != null) p.pinned = patch.pinned; if (patch.folder != null) p.folder = patch.folder || null; if (patch.cover != null) p.cover = patch.cover || null; emit('library-changed', 'playlists'); },
+    set_sleep_timer: ({ minutes, endOfTrack }) => { playback.sleep_at = endOfTrack ? 0 : minutes ? Date.now() + minutes * 60000 : null; emit('playback', playback); return playback.sleep_at; },
+    set_shuffle: ({ on }) => { settings.shuffle = on; playback.shuffle = on; emit('playback', playback); return queue; },
   };
 
   window.__TAURI__ = {

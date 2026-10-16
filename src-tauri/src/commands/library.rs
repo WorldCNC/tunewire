@@ -27,7 +27,21 @@ pub fn create_playlist(app: AppHandle, st: State<'_, AppState>, name: String, tr
         return Err(AppError::Invalid("playlist name cannot be empty".into()));
     }
     let now = store::now_ms();
-    let pl = Playlist { id: store::new_id("pl"), name, tracks: clean_tracks(tracks.unwrap_or_default()), source_url, created: now, updated: now };
+    let tracks = clean_tracks(tracks.unwrap_or_default());
+    let added = tracks.iter().map(|t| (t.key.clone(), now)).collect();
+    let pl = Playlist {
+        id: store::new_id("pl"),
+        name,
+        tracks,
+        source_url,
+        created: now,
+        updated: now,
+        description: String::new(),
+        cover: None,
+        pinned: false,
+        folder: None,
+        added,
+    };
     let out = pl.clone();
     st.store.update_library(|lib| {
         lib.playlists.push(pl);
@@ -78,8 +92,10 @@ pub fn delete_playlist(app: AppHandle, st: State<'_, AppState>, id: String) -> A
 pub fn add_to_playlist(app: AppHandle, st: State<'_, AppState>, id: String, tracks: Vec<Track>) -> AppResult<usize> {
     with_playlist(&app, &st, &id, |p| {
         let mut added = 0;
+        let now = store::now_ms();
         for t in clean_tracks(tracks) {
             if !p.tracks.iter().any(|x| x.key == t.key) {
+                p.added.insert(t.key.clone(), now);
                 p.tracks.push(t);
                 added += 1;
             }
@@ -95,6 +111,84 @@ pub fn remove_from_playlist(app: AppHandle, st: State<'_, AppState>, id: String,
             return Err(AppError::Invalid("index out of range".into()));
         }
         p.tracks.remove(index);
+        Ok(())
+    })
+}
+
+/// Remove several songs at once (multi-select).
+#[tauri::command]
+pub fn remove_many_from_playlist(app: AppHandle, st: State<'_, AppState>, id: String, indices: Vec<usize>) -> AppResult<usize> {
+    with_playlist(&app, &st, &id, |p| {
+        let drop: std::collections::HashSet<usize> = indices.into_iter().collect();
+        let before = p.tracks.len();
+        let mut i = 0;
+        p.tracks.retain(|_| {
+            let keep = !drop.contains(&i);
+            i += 1;
+            keep
+        });
+        let keys: std::collections::HashSet<&String> = p.tracks.iter().map(|t| &t.key).collect();
+        p.added.retain(|k, _| keys.contains(k));
+        Ok(before - p.tracks.len())
+    })
+}
+
+/// Move a block of songs (drag and drop of a selection) to `to` (index in the final list).
+#[tauri::command]
+pub fn move_many_in_playlist(app: AppHandle, st: State<'_, AppState>, id: String, indices: Vec<usize>, to: usize) -> AppResult<()> {
+    with_playlist(&app, &st, &id, |p| {
+        let mut idx: Vec<usize> = indices.into_iter().filter(|&i| i < p.tracks.len()).collect();
+        idx.sort_unstable();
+        idx.dedup();
+        let moving: Vec<Track> = idx.iter().map(|&i| p.tracks[i].clone()).collect();
+        for &i in idx.iter().rev() {
+            p.tracks.remove(i);
+        }
+        let at = to.min(p.tracks.len());
+        for (k, t) in moving.into_iter().enumerate() {
+            p.tracks.insert(at + k, t);
+        }
+        Ok(())
+    })
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PlaylistPatch {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    /// "" removes the custom cover.
+    pub cover: Option<String>,
+    pub pinned: Option<bool>,
+    /// "" takes it out of its folder.
+    pub folder: Option<String>,
+}
+
+/// Name, description, cover, pin and folder.
+#[tauri::command]
+pub fn update_playlist_meta(app: AppHandle, st: State<'_, AppState>, id: String, patch: PlaylistPatch) -> AppResult<()> {
+    with_playlist(&app, &st, &id, |p| {
+        if let Some(n) = patch.name {
+            let n = n.trim().chars().take(120).collect::<String>();
+            if !n.is_empty() {
+                p.name = n;
+            }
+        }
+        if let Some(d) = patch.description {
+            p.description = d.trim().chars().take(600).collect();
+        }
+        if let Some(c) = patch.cover {
+            if c.len() > 1_500_000 {
+                return Err(AppError::Invalid("cover image is too large".into()));
+            }
+            p.cover = (!c.is_empty() && c.starts_with("data:image/")).then_some(c);
+        }
+        if let Some(pin) = patch.pinned {
+            p.pinned = pin;
+        }
+        if let Some(f) = patch.folder {
+            let f = f.trim().chars().take(60).collect::<String>();
+            p.folder = (!f.is_empty()).then_some(f);
+        }
         Ok(())
     })
 }

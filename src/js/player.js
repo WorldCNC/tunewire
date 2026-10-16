@@ -72,6 +72,12 @@ function renderPlayback() {
   rep.title = `Repeat: ${p.repeat}`;
 
   if (!volumeDragging) setVolumeUI(p.volume);
+  if (state.settings && typeof p.shuffle === 'boolean') state.settings.shuffle = p.shuffle;
+  $('#np-title').classList.toggle('link', !!state.playingFrom);
+  paintShuffle();
+  paintSleep();
+  paintFullscreen();
+  renderNowPlaying();
   document.title = track && p.status === 'playing' ? `${track.title} — ${track.artist || 'Tunewire'}` : 'Tunewire';
   if (p.status === 'playing' || p.status === 'error') state.loadingKey = null;
   // Walking every row is only needed when the playing track or status changes.
@@ -98,6 +104,7 @@ function renderProgress() {
     if (p.status !== 'playing' || p.stalled) setProgress(dur ? p.position / dur : 0);
   }
   runSmoothProgress();
+  if (fsp.el) paintFullscreen();
   $('#t-dur').textContent = fmtTime(dur);
   $('#p-buffered').style.width = `${Math.min(1, p.buffered ?? 0) * 100}%`;
   progressEl.classList.toggle('disabled', !(p.status === 'playing' || p.status === 'paused') || !dur);
@@ -186,7 +193,6 @@ function seekBy(delta) {
 $('#btn-play').addEventListener('click', () => call('toggle_pause').catch((e) => toast(errMsg(e), 'error')));
 $('#btn-next').addEventListener('click', () => call('next_track'));
 $('#btn-prev').addEventListener('click', () => call('previous_track'));
-$('#btn-stop').addEventListener('click', () => call('stop'));
 $('#btn-repeat').addEventListener('click', () => {
   const order = ['off', 'all', 'one'];
   const next = order[(order.indexOf(state.playback?.repeat || 'off') + 1) % 3];

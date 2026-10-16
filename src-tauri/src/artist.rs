@@ -107,6 +107,27 @@ pub async fn artist(name: &str, soundcloud_url: Option<String>) -> AppResult<Art
     Ok(page)
 }
 
+/// An artist's SoundCloud uploads (metadata gets completed later in the UI).
+pub async fn soundcloud_tracks(url: &str, name: &str) -> AppResult<Vec<Track>> {
+    if !url.contains("soundcloud.com") {
+        return Err(AppError::Invalid("not a SoundCloud page".into()));
+    }
+    let v = ytdlp::flat(&format!("{}/tracks", url.trim_end_matches('/')), Some(20)).await?;
+    let mut tracks = tracks_from(&v, Platform::Soundcloud);
+    for t in tracks.iter_mut() {
+        for v in t.versions.iter_mut() {
+            if v.artist.is_empty() {
+                v.artist = name.to_string();
+            }
+            if v.duration.is_none() || v.thumbnail.is_none() {
+                v.partial = true;
+            }
+        }
+        *t = crate::search::build_track(t.versions.clone(), 0.0);
+    }
+    Ok(tracks)
+}
+
 /// Find the artist's official YouTube channel (where the Releases tab lives).
 async fn official_channel(name: &str) -> Option<String> {
     let v = ytdlp::flat(&format!("ytsearch8:{name}"), None).await.ok()?;

@@ -7,7 +7,7 @@
 async function refreshDownloads() {
   try { state.downloads = await call('list_downloads'); } catch { state.downloads = []; }
   state.downloadKeys = new Set(state.downloads.map((d) => d.key));
-  $('#dl-count').textContent = state.downloads.length || '';
+  renderLibrary();
   if (state.view === 'downloads') renderDownloads();
 }
 
@@ -89,7 +89,8 @@ let localLimit = 300;
 
 async function refreshLocalCount() {
   try { localTracks = await call('list_local'); } catch { localTracks = []; }
-  $('#local-count').textContent = localTracks.length || '';
+  state.localCount = localTracks.length;
+  renderLibrary();
   $('#source-local').hidden = !localTracks.length;
   if (state.view === 'local') renderLocal();
 }

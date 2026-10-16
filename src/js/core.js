@@ -70,6 +70,23 @@ const ICONS = {
   translate: '<path d="M4 5h9M8.5 3v2M6 5c1 4 3.5 7 7 8.5M11 5c-1 4-3.5 7-7 8.5M13 21l4-9 4 9M14.5 18h5"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   discord: '',
+  chevLeft: '<path d="m14.5 6-6 6 6 6"/>',
+  chevRight: '<path d="m9.5 6 6 6-6 6"/>',
+  browse: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M17 13.5v7M13.5 17h7"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  winMin: '<path d="M5 12h14"/>',
+  winMax: '<rect x="5" y="5" width="14" height="14" rx="1"/>',
+  winRestore: '<rect x="5" y="8" width="11" height="11" rx="1"/><path d="M8 8V5h11v11h-3"/>',
+  library: '<path d="M4 4v16M9 4v16"/><path d="m14 4.5 5.5 15"/>',
+  npView: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/><circle cx="8.5" cy="12" r="2.2"/>',
+  speaker: '<rect x="6" y="2.5" width="12" height="19" rx="2"/><circle cx="12" cy="15" r="3.2"/><path d="M12 7h.01"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  pin: '<path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z"/><path d="M12 15v6"/>',
+  smartShuffle: '<path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6"/><path d="M6 2.5l1 2.5 2.5 1L7 7 6 9.5 5 7 2.5 6 5 5z" fill="currentColor" stroke="none"/>',
+  sort: '<path d="M4 7h16M7 12h10M10 17h4"/>',
+  folderPlus: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><path d="M12 11v6M9 14h6"/>',
+  importIcon: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  verified: '<path d="M12 2.5 14.6 5l3.5-.3.8 3.4 3 1.9-1.4 3.2 1.4 3.2-3 1.9-.8 3.4-3.5-.3L12 21.5 9.4 19l-3.5.3-.8-3.4-3-1.9L3.5 12 2.1 8.8l3-1.9.8-3.4 3.5.3z" fill="currentColor" stroke="none"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
 };
 
 function icon(name) {
@@ -220,6 +237,10 @@ const state = {
   history: [],
   results: [],
   view: 'home',
+  panel: 'queue',
+  libFilter: null,
+  libSort: 'recents',
+  libQuery: '',
   source: 'all',
   selectedPlaylist: null, // id of local playlist, or 'remote'
   remote: null,           // RemotePlaylist currently shown
@@ -312,7 +333,7 @@ function closeMenu() {
 }
 
 /** items: [{label, icon, onClick} | {label: 'x', heading: true} | 'sep'] */
-function openMenu(anchor, items, { onClose } = {}) {
+function openMenu(anchor, items, { onClose, at } = {}) {
   closeMenu();
   const menu = h('div', { class: 'menu', role: 'menu' });
   for (const it of items) {
@@ -325,9 +346,10 @@ function openMenu(anchor, items, { onClose } = {}) {
     }));
   }
   document.body.append(menu);
-  const r = anchor.getBoundingClientRect();
+  // Context menus open at the pointer; button menus under the button.
+  const r = at ? { left: at.clientX, right: at.clientX + menu.offsetWidth, top: at.clientY, bottom: at.clientY } : anchor.getBoundingClientRect();
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
-  let left = Math.min(r.right - mw, window.innerWidth - mw - 8);
+  let left = Math.min(at ? r.left : r.right - mw, window.innerWidth - mw - 8);
   left = Math.max(8, left);
   let top = r.bottom + 4;
   if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
@@ -344,15 +366,27 @@ window.addEventListener('resize', closeMenu);
 // Navigation
 // ===========================================================================
 
+// Pages are routes: drill-down pages (artist, album, playlist…) pass a
+// `reopen` function so Back / Forward can show them again.
 const navStack = [];
-function showView(name, { push = true } = {}) {
-  if (push && state.view && state.view !== name) navStack.push(state.view);
-  if (navStack.length > 30) navStack.shift();
+const fwdStack = [];
+let curRoute = { view: 'home', reopen: null };
+
+function showView(name, { push = true, reopen = null } = {}) {
+  if (push && (curRoute.view !== name || reopen)) {
+    navStack.push(curRoute);
+    fwdStack.length = 0;
+    if (navStack.length > 50) navStack.shift();
+  }
+  curRoute = { view: name, reopen };
   state.view = name;
   for (const v of $$('.view')) v.classList.toggle('active', v.id === `view-${name}`);
   for (const n of $$('.nav-item[data-view]')) n.classList.toggle('active', n.dataset.view === name);
   if (name !== 'plugin-panel') for (const n of $$('#plugin-nav .nav-item')) n.classList.remove('active');
-  renderPlaylistList();
+  $('#nav-home')?.classList.toggle('active', name === 'home');
+  clearSelection();
+  renderLibrary();
+  updateNavButtons();
   if (name === 'history') refreshHistory();
   if (name === 'themes') renderThemes();
   if (name === 'plugins') renderPlugins();
@@ -363,14 +397,35 @@ function showView(name, { push = true } = {}) {
   if (name === 'releases') renderReleases();
   if (name === 'home') renderHome();
   if (name === 'stats') renderStats();
+  if (name === 'favorites') renderFavorites();
+  if (name === 'search' && !$('#search-input').value.trim()) { showSearchBody(false); renderHero(); }
 }
 
+function restoreRoute(r) {
+  if (r.reopen) r.reopen();
+  else showView(r.view, { push: false });
+  curRoute = r;
+  updateNavButtons();
+}
 function goBack() {
   const prev = navStack.pop();
-  if (prev) showView(prev, { push: false });
+  if (!prev) return;
+  fwdStack.push(curRoute);
+  restoreRoute(prev);
+}
+function goForward() {
+  const next = fwdStack.pop();
+  if (!next) return;
+  navStack.push(curRoute);
+  restoreRoute(next);
+}
+function updateNavButtons() {
+  const b = $('#nav-back'), f = $('#nav-fwd');
+  if (b) b.disabled = !navStack.length;
+  if (f) f.disabled = !fwdStack.length;
 }
 
-/** "← Back" button for drill-down pages (artist, album). */
+/** Kept for pages that still show an inline Back button. */
 function backButton() {
   return h('button', { class: 'btn small back-btn', html: `${icon('back')}Back`, onclick: goBack });
 }
@@ -379,14 +434,37 @@ $('.sidebar').addEventListener('click', (e) => {
   const b = e.target.closest('.nav-item[data-view]');
   if (b) showView(b.dataset.view);
 });
+document.addEventListener('mouseup', (e) => {
+  // Mouse back/forward buttons.
+  if (e.button === 3) { e.preventDefault(); goBack(); }
+  if (e.button === 4) { e.preventDefault(); goForward(); }
+});
 
 // Surface unexpected frontend errors instead of failing silently.
 window.addEventListener('error', (e) => toast(`Something went wrong: ${e.message}`, 'error'));
 window.addEventListener('unhandledrejection', (e) => toast(`Something went wrong: ${errMsg(e.reason)}`, 'error'));
 
-function toggleQueue() {
+function panelOpen() {
   const app = $('#app');
-  if (window.innerWidth <= 1180) app.classList.toggle('queue-open');
-  else app.classList.toggle('queue-hidden');
+  return window.innerWidth <= 1200 ? app.classList.contains('queue-open') : !app.classList.contains('queue-hidden');
+}
+function setPanelOpen(open) {
+  const app = $('#app');
+  if (window.innerWidth <= 1200) app.classList.toggle('queue-open', open);
+  else app.classList.toggle('queue-hidden', !open);
+  try { localStorage.setItem('tw-panel-open', open ? '1' : '0'); } catch { /* optional */ }
+  syncPanelButtons();
+}
+/** Toggle the right panel on a tab: opens it, switches tab, or closes it. */
+function togglePanel(name) {
+  if (panelOpen() && state.panel === name) setPanelOpen(false);
+  else { setPanelOpen(true); showPanel(name); }
+}
+function toggleQueue() { togglePanel('queue'); }
+function syncPanelButtons() {
+  const open = panelOpen();
+  $('#btn-np')?.classList.toggle('on', open && state.panel === 'now');
+  $('#btn-lyrics')?.classList.toggle('on', open && state.panel === 'lyrics');
+  $('#toggle-queue')?.classList.toggle('on', open && state.panel === 'queue');
 }
 $('#toggle-queue').addEventListener('click', toggleQueue);

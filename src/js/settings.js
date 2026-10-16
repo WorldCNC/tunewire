@@ -15,6 +15,7 @@ function settingToggle(label, help, key) {
   input.addEventListener('change', async () => {
     await updateSettings({ [key]: input.checked });
     if (key === 'discord_rpc') toast(input.checked ? 'Discord Rich Presence on' : 'Discord Rich Presence off', 'ok', 1800);
+    if (key === 'show_sources') document.body.classList.toggle('show-sources', input.checked);
     if (key === 'cover_accent') {
       if (input.checked) updateCoverAccent(state.playback?.version?.thumbnail || state.playback?.current?.track?.thumbnail);
       else clearCoverAccent();
@@ -128,7 +129,8 @@ function renderSettings() {
     group('Appearance', null,
       settingRow('Background', 'What shows faintly behind the panels.', backgroundControl()),
       settingRow('Background strength', null, strengthControl()),
-      settingToggle('Accent from album art', 'Tints buttons and highlights with a color from the playing song’s cover.', 'cover_accent')),
+      settingToggle('Accent from album art', 'Tints buttons and highlights with a color from the playing song’s cover.', 'cover_accent'),
+      settingToggle('Show source icons on songs', 'Always show the YouTube Music / SoundCloud / YouTube / Spotify icons on song rows (otherwise only when you hover a song).', 'show_sources')),
     group('Lyrics', null,
       settingToggle('Show lyrics', 'Fetches synced lyrics from LRCLIB (lrclib.net) for the Lyrics tab next to the queue.', 'lyrics')),
     group('Downloads & local files', null,
@@ -235,7 +237,7 @@ function eqSetting() {
   const fillPresets = () => {
     const cur = presetName();
     preset.replaceChildren(...Object.keys(EQ_PRESETS).map((k) => h('option', { value: k, selected: k === cur }, k)),
-      cur === 'Custom' ? h('option', { value: 'Custom', selected: true }, 'Custom') : null);
+      ...(cur === 'Custom' ? [h('option', { value: 'Custom', selected: true }, 'Custom')] : []));
   };
   const save = throttle(() => updateSettings({ eq_gains: gains }), 150);
   const sliders = gains.map((g, i) => {

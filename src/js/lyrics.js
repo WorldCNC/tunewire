@@ -18,12 +18,17 @@ function parseLrc(text) {
 }
 
 function showPanel(name) {
+  state.panel = name;
   for (const b of $$('.panel-tabs button')) b.classList.toggle('active', b.dataset.panel === name);
   $('#queue-list').hidden = name !== 'queue';
   $('#queue-actions').hidden = name !== 'queue';
   $('#lyrics-panel').hidden = name !== 'lyrics';
   $('#lyrics-actions').hidden = name !== 'lyrics';
+  $('#np-panel').hidden = name !== 'now';
   if (name === 'lyrics') loadLyrics();
+  if (name === 'now') renderNowPlaying(true);
+  syncPanelButtons();
+  try { localStorage.setItem('tw-panel', name); } catch { /* optional */ }
 }
 $('.panel-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-panel]');

@@ -16,7 +16,7 @@ use serde_json::Value;
 use crate::error::{AppError, AppResult};
 use crate::models::{Platform, Track};
 
-pub const HISTORY_MAX: usize = 500;
+pub const HISTORY_MAX: usize = 5000;
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -82,6 +82,10 @@ pub struct Settings {
     pub background_strength: u32,
     /// Picture for background = "image".
     pub background_image: String,
+    /// Shuffle mode (the queue's original order is kept to turn it off again).
+    pub shuffle: bool,
+    /// Show every source's icon on song rows (otherwise only on hover).
+    pub show_sources: bool,
 }
 
 impl Default for Settings {
@@ -122,6 +126,8 @@ impl Default for Settings {
             background: "art".into(),
             background_strength: 45,
             background_image: String::new(),
+            shuffle: false,
+            show_sources: false,
         }
     }
 }
@@ -175,6 +181,19 @@ pub struct Playlist {
     pub source_url: Option<String>,
     pub created: u64,
     pub updated: u64,
+    #[serde(default)]
+    pub description: String,
+    /// Custom cover (data: URL, resized in the UI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
+    /// Sidebar folder name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// Track key -> when it was added (ms).
+    #[serde(default)]
+    pub added: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

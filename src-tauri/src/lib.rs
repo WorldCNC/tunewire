@@ -26,6 +26,7 @@ mod discord;
 mod downloads;
 mod eq;
 mod explore;
+mod imports;
 mod foryou;
 mod error;
 mod http;
@@ -48,6 +49,7 @@ mod stream;
 mod themes;
 mod ytdlp;
 mod ytdlp_worker;
+mod ytm;
 
 #[cfg(test)]
 mod itests;
@@ -150,6 +152,7 @@ pub fn run() {
                 current: current_item.as_ref().and(saved.current),
                 items: saved.items,
                 resume_at: None,
+                unshuffled: None,
             };
             app.manage(AppState {
                 store,
@@ -257,6 +260,23 @@ pub fn run() {
             playback::play_tracks,
             playback::start_radio,
             playback::prefetch_track,
+            commands::browse::ytm_search_extras,
+            commands::browse::ytm_artist,
+            commands::browse::ytm_collection,
+            commands::browse::ytm_moods,
+            commands::browse::ytm_find_album,
+            commands::browse::ytm_mood_page,
+            commands::browse::artist_soundcloud,
+            commands::browse::spotify_library_login,
+            commands::browse::spotify_library_import,
+            commands::browse::import_apple_music,
+            commands::browse::import_rows,
+            discover::apply_matches,
+            library::remove_many_from_playlist,
+            library::move_many_in_playlist,
+            library::update_playlist_meta,
+            playback::set_sleep_timer,
+            commands::queue::set_shuffle,
             commands::foryou::for_you,
             commands::foryou::refresh_for_you,
             commands::foryou::listening_stats,

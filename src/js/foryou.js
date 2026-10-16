@@ -24,7 +24,7 @@ function fmtHours(m) {
 /** 2×2 cover collage (or a single cover). */
 function mixArt(covers, cls = 'mix-art') {
   const list = (covers || []).filter(Boolean);
-  const box = h('div', { class: `${cls}${list.length < 4 ? ' single' : ''}` });
+  const box = h('div', { class: `${cls}${list.length < 4 ? ' single' : ' grid4'}` });
   if (!list.length) { box.innerHTML = icon('music'); return box; }
   for (const url of list.length < 4 ? list.slice(0, 1) : list.slice(0, 4)) {
     box.append(h('img', { src: url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
@@ -54,7 +54,7 @@ function shortcutTiles(data) {
   if (data?.discover) items.push({ title: 'Discover Weekly', covers: data.discover.covers, go: () => openMix(data.discover) });
   for (const m of data?.local || []) items.push({ title: m.title, covers: m.covers, go: () => openMix(m) });
   for (const p of (state.playlists || []).slice().sort((a, b) => b.updated - a.updated)) {
-    items.push({ title: p.name, covers: p.tracks.slice(0, 4).map((t) => t.thumbnail), go: () => { state.selectedPlaylist = p.id; showView('playlists'); renderPlaylistDetail(); } });
+    items.push({ title: p.name, covers: p.tracks.slice(0, 4).map((t) => t.thumbnail), go: () => openPlaylist(p.id) });
   }
   if (data?.daily?.[0]) items.push({ title: data.daily[0].title, covers: data.daily[0].covers, go: () => openMix(data.daily[0]) });
   if (!items.length) return null;
@@ -167,31 +167,29 @@ function statCard(value, label, img) {
 
 // Mix page ------------------------------------------------------------------
 
-function openMix(mix) {
-  showView('mix');
-  const total = mix.tracks.reduce((s, t) => s + (t.duration || 0), 0);
+function openMix(mix, { push = true } = {}) {
+  showView('mix', { push, reopen: () => openMix(mix, { push: false }) });
   const kicker = { daily: 'Daily Mix · made for you', discover: 'Made for you · new every Monday', repeat: 'From your listening', rediscover: 'From your listening' }[mix.kind] || 'Mix';
-  const header = h('div', { class: 'pl-header' }, mixArt(mix.covers, 'pl-art mix-big'),
-    h('div', { class: 'pl-meta' },
-      h('div', { class: 'pl-kicker' }, kicker),
-      h('h1', {}, mix.title),
-      h('div', { class: 'meta' }, mix.subtitle),
-      h('div', { class: 'meta', style: 'margin:4px 0 10px' }, `${mix.tracks.length} songs, ${fmtTime(total)}`),
-      h('div', { class: 'actions' },
-        h('button', { class: 'btn primary', html: `${icon('play')}Play`, onclick: () => playList(mix.tracks, 0) }),
-        h('button', { class: 'btn', html: `${icon('shuffle')}Shuffle`, onclick: () => playList([...mix.tracks].sort(() => Math.random() - 0.5), 0) }),
-        h('button', { class: 'btn', html: `${icon('plus')}Queue all`, onclick: () => enqueue(mix.tracks) }),
-        h('button', { class: 'btn', html: `${icon('save')}Save as playlist`, onclick: async () => {
-          const date = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-          const name = await promptModal({ title: 'Save as playlist', value: mix.kind === 'daily' || mix.kind === 'discover' ? `${mix.title} · ${date}` : mix.title, okLabel: 'Save' });
-          if (!name) return;
-          try { await call('create_playlist', { name, tracks: mix.tracks, sourceUrl: null }); toast(`Saved ${name}`, 'ok'); } catch (e) { toast(errMsg(e), 'error'); }
-        } }))));
-  const head = h('div', { class: 'table-head' });
-  tableHead(head);
-  const list = h('div', { class: 'track-list' }, ...mix.tracks.map((t, i) => trackRow(t, i, { onPlay: () => playList(mix.tracks, i) })));
-  $('#mix-body').replaceChildren(h('div', { class: 'page-head' }, backButton()), header, head, list);
-  markPlaying();
+  renderCollection($('#mix-body'), {
+    id: `mix:${mix.id}`,
+    kind: kicker,
+    title: mix.title,
+    tracks: mix.tracks,
+    art: mixArt(mix.covers, 'hero-art'),
+    cover: mix.covers[0],
+    description: mix.subtitle,
+    line: [h('b', {}, 'Tunewire')],
+    actions: [
+      h('button', { class: 'ab-icon', title: 'Save as playlist', html: icon('plus'), onclick: async () => {
+        const date = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const name = await promptModal({ title: 'Save as playlist', value: mix.kind === 'daily' || mix.kind === 'discover' ? `${mix.title} · ${date}` : mix.title, okLabel: 'Save' });
+        if (!name) return;
+        try { await call('create_playlist', { name, tracks: mix.tracks, sourceUrl: null }); toast(`Saved “${name}” to Your Library`, 'ok'); } catch (e) { toast(errMsg(e), 'error'); }
+      } }),
+      h('button', { class: 'ab-icon', title: 'Download', html: icon('download'), onclick: () => downloadTracks(mix.tracks) }),
+    ],
+    menu: () => [{ label: 'Add to queue', icon: 'plus', onClick: () => enqueue(mix.tracks) }],
+  });
 }
 
 // Stats page ----------------------------------------------------------------

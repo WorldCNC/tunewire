@@ -10,10 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::models::{Platform, Track, TrackVersion};
 use crate::state::AppState;
 use crate::store::now_ms;
@@ -97,102 +96,8 @@ pub fn apply(track: &mut Track) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
-// YouTube Music song search (its own API: ~0.6 s, full metadata)
-// ---------------------------------------------------------------------------
-
-fn runs(v: &Value) -> Vec<&Value> {
-    v.pointer("/musicResponsiveListItemFlexColumnRenderer/text/runs").and_then(Value::as_array).map(|a| a.iter().collect()).unwrap_or_default()
-}
-
-fn page_type(run: &Value) -> &str {
-    run.pointer("/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType").and_then(Value::as_str).unwrap_or("")
-}
-
-fn parse_duration(s: &str) -> Option<f64> {
-    let mut total = 0.0;
-    for part in s.split(':') {
-        total = total * 60.0 + part.trim().parse::<f64>().ok()?;
-    }
-    Some(total)
-}
-
-fn ytm_songs_blocking(query: &str) -> AppResult<Vec<TrackVersion>> {
-    let body = serde_json::json!({
-        "query": query,
-        // "Songs" filter.
-        "params": "EgWKAQIIAWoMEA4QChADEAQQCRAF",
-        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US" } }
-    });
-    let mut r = crate::http::agent()
-        .post("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
-        .header("Content-Type", "application/json")
-        .header("Origin", "https://music.youtube.com")
-        .header("User-Agent", crate::http::USER_AGENT)
-        .send(body.to_string())
-        .map_err(|e| AppError::Network(e.to_string()))?;
-    if !r.status().is_success() {
-        return Err(AppError::Network(format!("YouTube Music search returned HTTP {}", r.status().as_u16())));
-    }
-    let text = r.body_mut().with_config().limit(8 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
-    let v: Value = serde_json::from_str(&text)?;
-    let sections = v
-        .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    for item in sections.iter().filter_map(|s| s.pointer("/musicShelfRenderer/contents").and_then(Value::as_array)).flatten() {
-        let Some(m) = item.get("musicResponsiveListItemRenderer") else { continue };
-        let Some(cols) = m.get("flexColumns").and_then(Value::as_array) else { continue };
-        let (Some(c0), Some(c1)) = (cols.first(), cols.get(1)) else { continue };
-        let title = runs(c0).iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect::<String>();
-        let vid = m
-            .pointer("/playlistItemData/videoId")
-            .or_else(|| runs(c0).first().and_then(|r| r.pointer("/navigationEndpoint/watchEndpoint/videoId")))
-            .and_then(Value::as_str);
-        let Some(vid) = vid else { continue };
-        let byline = runs(c1);
-        let artists: Vec<&str> = byline.iter().filter(|r| page_type(r) == "MUSIC_PAGE_TYPE_ARTIST").filter_map(|r| r.get("text").and_then(Value::as_str)).collect();
-        // Artists without a page come as plain text before the first " • ".
-        let artist = if artists.is_empty() {
-            byline.iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect::<String>().split(" • ").next().unwrap_or("").trim().to_string()
-        } else {
-            artists.join(", ")
-        };
-        let album = byline.iter().find(|r| page_type(r) == "MUSIC_PAGE_TYPE_ALBUM").and_then(|r| r.get("text").and_then(Value::as_str)).map(str::to_string);
-        let duration = byline.iter().rev().filter_map(|r| r.get("text").and_then(Value::as_str)).find_map(parse_duration);
-        let thumbnail = m
-            .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
-            .and_then(Value::as_array)
-            .and_then(|a| a.last())
-            .and_then(|t| t.get("url").and_then(Value::as_str))
-            .map(str::to_string);
-        if title.is_empty() {
-            continue;
-        }
-        out.push(TrackVersion {
-            platform: Platform::Ytmusic,
-            url: format!("https://music.youtube.com/watch?v={vid}"),
-            id: vid.to_string(),
-            title,
-            artist,
-            duration,
-            thumbnail,
-            preview: false,
-            partial: false,
-            artist_url: None,
-            album,
-            rank: out.len(),
-            matched_for: None,
-            isrc_match: false,
-        });
-    }
-    Ok(out)
-}
-
 async fn ytm_songs(query: String) -> AppResult<Vec<TrackVersion>> {
-    tauri::async_runtime::spawn_blocking(move || ytm_songs_blocking(&query)).await.map_err(|e| AppError::Network(e.to_string()))?
+    crate::ytm::search_songs(&query).await
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +148,8 @@ struct Progress {
     total: usize,
     matched: usize,
     finished: bool,
+    /// "library" (saved playlists, liked) or "other" (an opened link, the queue).
+    scope: &'static str,
 }
 
 /// Match many Spotify versions in parallel; `tick` runs after each one.
@@ -288,11 +195,13 @@ fn apply_library(app: &AppHandle) {
         }
         Ok(())
     });
+    // A quiet event: the UI swaps in the new data without re-rendering
+    // (matches don't change what a row shows, only how fast it plays).
     if changed_pl {
-        let _ = app.emit("library-changed", "playlists");
+        let _ = app.emit("library-matched", "playlists");
     }
     if changed_fav {
-        let _ = app.emit("library-changed", "favorites");
+        let _ = app.emit("library-matched", "favorites");
     }
     apply_queue(app);
 }
@@ -306,6 +215,25 @@ pub fn apply_queue(app: &AppHandle) {
     }
     if changed {
         let _ = app.emit("queue-changed", st.queue_snapshot());
+    }
+}
+
+/// Forget old matches for songs that are no longer in the library.
+fn prune(app: &AppHandle) {
+    let keep: HashSet<String> = {
+        let st = app.state::<AppState>();
+        let lib = st.store.library.lock().unwrap();
+        lib.playlists.iter().flat_map(|p| p.tracks.iter()).chain(lib.favorites.iter()).filter_map(spotify_version).map(|v| v.id.clone()).collect()
+    };
+    let cutoff = now_ms().saturating_sub(60 * 86_400_000);
+    let mut removed = false;
+    if let Some(m) = MATCHES.lock().unwrap().as_mut() {
+        let before = m.len();
+        m.retain(|id, e| keep.contains(id) || e.at > cutoff);
+        removed = m.len() != before;
+    }
+    if removed {
+        save();
     }
 }
 
@@ -331,7 +259,7 @@ pub fn kick(app: &AppHandle) {
                 let h = app.clone();
                 let last_apply = Arc::new(Mutex::new(std::time::Instant::now()));
                 let matched = match_all(todo, move |done, matched| {
-                    let _ = h.emit("match-progress", Progress { done, total, matched, finished: false });
+                    let _ = h.emit("match-progress", Progress { done, total, matched, finished: false, scope: "library" });
                     // Save progress into the library every couple of seconds.
                     let mut last = last_apply.lock().unwrap();
                     if last.elapsed().as_secs_f64() > 2.5 {
@@ -342,12 +270,13 @@ pub fn kick(app: &AppHandle) {
                 })
                 .await;
                 apply_library(&app);
-                let _ = app.emit("match-progress", Progress { done: total, total, matched, finished: true });
+                let _ = app.emit("match-progress", Progress { done: total, total, matched, finished: true, scope: "library" });
             }
             if !AGAIN.load(Ordering::SeqCst) {
                 break;
             }
         }
+        prune(&app);
         RUNNING.store(false, Ordering::SeqCst);
         // A kick that raced with the end of the loop.
         if AGAIN.swap(false, Ordering::SeqCst) {
@@ -364,10 +293,12 @@ pub fn prepare(app: &AppHandle, tracks: Vec<Track>) {
         return;
     }
     let app = app.clone();
+    let total = todo.len();
     tauri::async_runtime::spawn(async move {
         let h = app.clone();
         let last_apply = Mutex::new(std::time::Instant::now());
-        match_all(todo, move |_, _| {
+        let matched = match_all(todo, move |done, matched| {
+            let _ = h.emit("match-progress", Progress { done, total, matched, finished: false, scope: "other" });
             let mut last = last_apply.lock().unwrap();
             if last.elapsed().as_secs_f64() > 1.5 {
                 *last = std::time::Instant::now();
@@ -376,6 +307,7 @@ pub fn prepare(app: &AppHandle, tracks: Vec<Track>) {
         })
         .await;
         apply_queue(&app);
+        let _ = app.emit("match-progress", Progress { done: total, total, matched, finished: true, scope: "other" });
     });
 }
 
@@ -387,15 +319,6 @@ pub fn with_matches(mut tracks: Vec<Track>) -> Vec<Track> {
     tracks
 }
 
-#[allow(dead_code)]
-pub fn stats() -> (usize, usize) {
-    let g = MATCHES.lock().unwrap();
-    let m: &HashMap<String, Entry> = match g.as_ref() {
-        Some(m) => m,
-        None => return (0, 0),
-    };
-    (m.values().filter(|e| e.v.is_some()).count(), m.len())
-}
 
 #[cfg(test)]
 mod tests {

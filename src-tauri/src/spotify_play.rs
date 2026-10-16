@@ -24,8 +24,8 @@ use crate::stream::{self, OpenedStream};
 
 /// Spotify's Ogg files start with a 167-byte custom header page.
 const OGG_HEADER_END: u64 = 0xa7;
-const REDIRECT: &str = "http://127.0.0.1:5588/login";
-const LOGIN_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>Logged in to Spotify. You can close this tab and return to Tunewire.</p>";
+pub(crate) const REDIRECT: &str = "http://127.0.0.1:5588/login";
+pub(crate) const LOGIN_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>Logged in to Spotify. You can close this tab and return to Tunewire.</p>";
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 static SESSION: Mutex<Option<Session>> = Mutex::const_new(None);

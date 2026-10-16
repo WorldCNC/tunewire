@@ -31,6 +31,8 @@ pub struct QueueState {
     /// When the playing item is removed, the index that should play next.
     pub resume_at: Option<usize>,
     pub next_uid: u64,
+    /// Queue order (uids) from before shuffle was turned on.
+    pub unshuffled: Option<Vec<u64>>,
 }
 
 impl QueueState {
@@ -157,6 +159,9 @@ pub struct PlaybackState {
     pub stalled: bool,
     pub volume: f32,
     pub repeat: String,
+    pub shuffle: bool,
+    /// Sleep timer: ms timestamp, or 0 = at the end of this song.
+    pub sleep_at: Option<u64>,
     pub index: Option<usize>,
     pub current: Option<QueueItem>,
     pub version: Option<TrackVersion>,
@@ -204,6 +209,8 @@ impl AppState {
             stalled: active && eng.stalled,
             volume: settings.volume,
             repeat: settings.repeat.clone(),
+            shuffle: settings.shuffle,
+            sleep_at: crate::commands::playback::sleep_at(),
             index,
             current: now.item,
             version: now.version,
@@ -248,7 +255,9 @@ pub fn emit_playback(app: &AppHandle) {
 /// Everything except progress: if this is unchanged, a tick is enough.
 fn signature(ps: &PlaybackState) -> String {
     format!(
-        "{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{:?}",
+        "{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{:?}",
+        ps.shuffle,
+        ps.sleep_at.unwrap_or(1),
         ps.status,
         ps.current.as_ref().map(|c| c.uid),
         ps.version.as_ref().map(|v| &v.url),

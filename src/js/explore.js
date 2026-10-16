@@ -404,3 +404,60 @@ async function syncPlaylist(id, btn) {
 }
 
 $('#import-spotify').addEventListener('click', importSpotifyProfile);
+
+// Ambient background ------------------------------------------------------------
+
+const ambient = { cur: 0, css: undefined, imgPath: null, imgData: null, seq: 0 };
+
+/** Crossfade to a new background (any CSS background-image value, or none). */
+function setAmbientLayer(css) {
+  if (css === ambient.css) return;
+  ambient.css = css;
+  const layers = $$('#ambient .amb-layer');
+  const prev = layers[ambient.cur];
+  if (!css) { layers.forEach((l) => l.classList.remove('on')); return; }
+  const next = layers[ambient.cur ^ 1];
+  next.style.backgroundImage = css;
+  ambient.cur ^= 1;
+  requestAnimationFrame(() => requestAnimationFrame(() => { next.classList.add('on'); prev.classList.remove('on'); }));
+}
+
+async function updateAmbient() {
+  const s = state.settings || {};
+  const mode = s.background || 'art';
+  const seq = ++ambient.seq;
+  document.documentElement.style.setProperty('--amb-strength', ((s.background_strength ?? 45) / 100).toFixed(2));
+  $('#ambient').className = mode;
+  if (mode === 'plain') return setAmbientLayer(null);
+  if (mode === 'image') {
+    if (!s.background_image) return setAmbientLayer(null);
+    if (ambient.imgPath !== s.background_image) {
+      ambient.imgPath = s.background_image;
+      try { ambient.imgData = await call('background_image_data', { path: s.background_image }); } catch (e) { ambient.imgData = null; toast(errMsg(e), 'error'); }
+      if (seq !== ambient.seq) return;
+    }
+    return setAmbientLayer(ambient.imgData ? `url("${ambient.imgData}")` : null);
+  }
+  const p = state.playback;
+  const thumb = p?.version?.thumbnail || p?.current?.track?.thumbnail;
+  if (!thumb) return setAmbientLayer(null);
+  if (mode === 'art') {
+    const big = thumb.replace('/mqdefault.jpg', '/hqdefault.jpg').replace('-t300x300.', '-t500x500.');
+    return setAmbientLayer(`url("${big.replace(/"/g, '%22')}")`);
+  }
+  // tint: two soft pools of the cover's main color.
+  const color = await call('cover_color', { url: thumb }).catch(() => null);
+  if (seq !== ambient.seq) return;
+  setAmbientLayer(color ? `radial-gradient(55% 55% at 20% 15%, ${color}, transparent 72%), radial-gradient(50% 60% at 85% 85%, ${color}99, transparent 72%)` : null);
+}
+
+async function pickBackgroundImage() {
+  try {
+    const r = await window.__TAURI__.dialog.open({ multiple: false, title: 'Choose a background image', filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }] });
+    const path = Array.isArray(r) ? r[0] : r;
+    if (!path) return;
+    await updateSettings({ background_image: path, background: 'image' });
+    updateAmbient();
+    renderSettings();
+  } catch (e) { toast(errMsg(e), 'error'); }
+}

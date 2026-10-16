@@ -98,7 +98,7 @@ function prefetchTrack(track) {
 function trackRow(track, index, opts = {}) {
   const versions = sortedVersions(track);
   const play = () => (opts.onPlay ? opts.onPlay() : playTrack(track));
-  const row = h('div', { class: 'track', dataset: { key: track.key } });
+  const row = h('div', { class: 'track', dataset: { key: track.key }, style: `--i:${index}` });
   const liked = state.favKeys.has(track.key);
   // Resting the pointer on a song for a moment resolves its stream, so the
   // click that usually follows starts playback much sooner.

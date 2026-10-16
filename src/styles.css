@@ -546,3 +546,73 @@ button.link:hover { text-decoration: underline; }
 .lf-lines .lyric .tr { font-size: 17px; font-weight: 500; color: var(--text-dim); }
 .lf-lines .lyric.current .tr { color: var(--accent); }
 .lyrics-full .empty { position: relative; margin: auto; }
+
+/* =====================================================================
+   Ambient look: floating panels over a soft background (playing cover,
+   cover tint, custom image or plain), plus motion.
+   ===================================================================== */
+:root {
+  /* Panels take the theme's own surface color, partly see-through. */
+  --panel: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+  --panel-solid: var(--bg-elev);
+  --panel-border: color-mix(in srgb, var(--text) 8%, transparent);
+  --panel-radius: 10px;
+  --gap: 8px;
+  --amb-strength: .45;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+}
+:root[data-mode="light"] { --panel: color-mix(in srgb, var(--bg-elev) 76%, transparent); }
+
+#ambient { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: var(--bg); }
+.amb-layer {
+  position: absolute; inset: -12%; background-position: center; background-size: cover;
+  opacity: 0; transform: scale(1.04);
+  transition: opacity 1.4s ease, transform 8s ease;
+  /* Muted on purpose: a hint of the cover, not a poster. */
+  filter: blur(64px) saturate(.55) brightness(.62);
+}
+:root[data-mode="light"] .amb-layer { filter: blur(64px) saturate(.45) brightness(1.15); }
+.amb-layer.on { opacity: var(--amb-strength); transform: scale(1); }
+#ambient.image .amb-layer { filter: blur(10px) saturate(.8) brightness(.7); inset: -3%; }
+:root[data-mode="light"] #ambient.image .amb-layer { filter: blur(10px) saturate(.7) brightness(1.1); }
+.amb-veil { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 40%, transparent 0%, var(--bg) 130%); opacity: .6; }
+
+.app {
+  position: relative; z-index: 1; background: transparent;
+  gap: var(--gap); padding: var(--gap); box-sizing: border-box;
+  transition: grid-template-columns .28s var(--ease-out);
+}
+.app.queue-hidden { gap: var(--gap) 0; }
+.sidebar, .main, .queue, .player-bar {
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--panel-radius); overflow: hidden;
+}
+.sidebar { border-right: 1px solid var(--panel-border); }
+.queue { border-left: 1px solid var(--panel-border); }
+.player-bar { border-top: 1px solid var(--panel-border); }
+.toolbar, .queue-head { border-bottom-color: var(--panel-border); }
+.nav-foot { border-top-color: var(--panel-border); }
+.suggest, .menu, .modal { background: var(--panel-solid); }
+.nav-item, .side-playlists button, .track, .q-item, .btn, .search { border-radius: 6px; }
+.cover, .thumb { border-radius: 5px; }
+
+/* Motion ---------------------------------------------------------------- */
+@keyframes tw-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes tw-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tw-pop { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+.view.active { animation: tw-rise .22s var(--ease-out); }
+.track-list.stagger > .track { animation: tw-rise .26s var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 14) * 16ms); }
+.album-grid > * { animation: tw-rise .3s var(--ease-out) both; }
+.modal { animation: tw-pop .2s var(--ease-out); }
+.modal-backdrop { animation: tw-fade .16s ease; }
+.lyrics-full { animation: tw-fade .25s ease; }
+.cover img, .thumb img, .album-art img, .artist-photo img { animation: tw-fade .35s ease both; }
+.track, .q-item, .nav-item, .side-playlists button, .album-card, .chart-artist, .suggest-item { transition: background .14s ease, color .14s ease, transform .18s var(--ease-out); }
+.btn, .icon-btn, .play-btn, .chip, .pdot { transition: background .14s ease, color .14s ease, border-color .14s ease, transform .12s var(--ease-out), filter .14s ease; }
+.btn:active, .icon-btn:active, .pdot:active { transform: scale(.95); }
+.play-btn:hover { transform: scale(1.06); filter: none; }
+.play-btn:active { transform: scale(.94); }
+.album-card:hover { transform: translateY(-2px); }
+.progress .played, .progress .knob { will-change: width, left; }
+.progress:hover .track-bg, .progress.dragging .track-bg, .progress:hover .played, .progress.dragging .played, .progress:hover .buffered { top: 5px; height: 6px; border-radius: 3px; transition: top .12s ease, height .12s ease; }
+.toast { animation: tw-pop .22s var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .amb-layer { transition: none; } }

@@ -24,6 +24,7 @@ function renderPlayback() {
     cover.innerHTML = thumb ? '' : icon('music');
     if (thumb) cover.append(h('img', { src: thumb, alt: '', onerror: (e) => { e.target.remove(); cover.innerHTML = icon('music'); } }));
     updateCoverAccent(thumb);
+    updateAmbient();
     if (fullLyrics.open) renderFullLyrics();
   }
 
@@ -89,10 +90,14 @@ function renderProgress() {
   const p = state.playback;
   if (!p) return;
   const dur = p.duration;
+  smooth.pos = p.position;
+  smooth.at = performance.now();
   if (!state.draggingProgress) {
     $('#t-pos').textContent = fmtTime(p.position);
-    setProgress(dur ? p.position / dur : 0);
+    // While playing, the animation loop moves the bar continuously.
+    if (p.status !== 'playing' || p.stalled) setProgress(dur ? p.position / dur : 0);
   }
+  runSmoothProgress();
   $('#t-dur').textContent = fmtTime(dur);
   $('#p-buffered').style.width = `${Math.min(1, p.buffered ?? 0) * 100}%`;
   progressEl.classList.toggle('disabled', !(p.status === 'playing' || p.status === 'paused') || !dur);
@@ -105,6 +110,19 @@ function renderProgress() {
     delete msg.dataset.stalled;
     renderPlayback();
   }
+}
+
+// Position ticks arrive ~4×/s; between them the bar is extrapolated per frame.
+const smooth = { pos: 0, at: 0, raf: 0 };
+function runSmoothProgress() {
+  if (smooth.raf) return;
+  const step = () => {
+    const p = state.playback;
+    if (!p || p.status !== 'playing' || p.stalled || !p.duration) { smooth.raf = 0; return; }
+    if (!state.draggingProgress) setProgress(Math.min(p.duration, smooth.pos + (performance.now() - smooth.at) / 1000) / p.duration);
+    smooth.raf = requestAnimationFrame(step);
+  };
+  smooth.raf = requestAnimationFrame(step);
 }
 
 function setProgress(frac) {

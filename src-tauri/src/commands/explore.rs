@@ -229,3 +229,24 @@ pub async fn sync_playlist(app: AppHandle, st: State<'_, AppState>, id: String) 
     emit_library(&app, "playlists");
     Ok(n)
 }
+
+/// The custom background picture as a data: URL (the page can't read files).
+#[tauri::command]
+pub async fn background_image_data(path: String) -> AppResult<String> {
+    let mime = match std::path::Path::new(&path).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => return Err(AppError::Invalid("pick a JPG, PNG, WebP or GIF image".into())),
+    };
+    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(&path))
+        .await
+        .map_err(|e| AppError::Storage(e.to_string()))?
+        .map_err(|e| AppError::NotFound(format!("background image: {e}")))?;
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err(AppError::Invalid("that image is over 20 MB".into()));
+    }
+    use base64::Engine;
+    Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}

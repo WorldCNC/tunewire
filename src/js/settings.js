@@ -126,6 +126,8 @@ function renderSettings() {
       settingRow('Output device', 'Where the sound goes. Switching continues the current song on the new device.', outputDeviceControl()),
       eqSetting()),
     group('Appearance', null,
+      settingRow('Background', 'What shows faintly behind the panels.', backgroundControl()),
+      settingRow('Background strength', null, strengthControl()),
       settingToggle('Accent from album art', 'Tints buttons and highlights with a color from the playing song’s cover.', 'cover_accent')),
     group('Lyrics', null,
       settingToggle('Show lyrics', 'Fetches synced lyrics from LRCLIB (lrclib.net) for the Lyrics tab next to the queue.', 'lyrics')),
@@ -168,6 +170,36 @@ async function checkHealth(target) {
   state.ytdlpPath = res.path;
   if (target) target.textContent = res.message;
   return res;
+}
+
+function backgroundControl() {
+  const s = state.settings;
+  const sel = h('select', {},
+    ...[['art', 'Playing song’s cover'], ['tint', 'Color from the cover'], ['image', 'My picture'], ['plain', 'Plain']]
+      .map(([v, l]) => h('option', { value: v, selected: (s.background || 'art') === v }, l)));
+  sel.addEventListener('change', async () => {
+    if (sel.value === 'image' && !s.background_image) { await pickBackgroundImage(); return; }
+    await updateSettings({ background: sel.value });
+    updateAmbient();
+    renderSettings();
+  });
+  const name = s.background_image ? s.background_image.split(/[\\/]/).pop() : '';
+  return h('div', { class: 'actions' }, sel,
+    (s.background || 'art') === 'image' ? h('button', { class: 'btn small', title: s.background_image || '', onclick: pickBackgroundImage }, name ? `Change (${name})` : 'Choose…') : null);
+}
+
+function strengthControl() {
+  const v = state.settings.background_strength ?? 45;
+  const label = h('span', { class: 'meta', style: 'width:38px;text-align:right' }, `${v}%`);
+  const range = h('input', { type: 'range', min: 0, max: 100, step: 5, value: v, style: 'width:160px' });
+  range.style.setProperty('--fill', `${v}%`);
+  range.addEventListener('input', () => {
+    label.textContent = `${range.value}%`;
+    range.style.setProperty('--fill', `${range.value}%`);
+    document.documentElement.style.setProperty('--amb-strength', (range.value / 100).toFixed(2));
+  });
+  range.addEventListener('change', () => updateSettings({ background_strength: Number(range.value) }));
+  return h('div', { class: 'actions' }, range, label);
 }
 
 function outputDeviceControl() {

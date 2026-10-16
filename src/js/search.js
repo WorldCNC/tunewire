@@ -87,7 +87,10 @@ async function doSearch(q) {
     const where = state.source === 'all' ? 'all sources' : PLATFORMS[state.source]?.label;
     $('#search-meta').textContent = `${res.tracks.length} songs from ${dupes} results on ${where} · ${res.cached ? 'cached' : ((performance.now() - t0) / 1000).toFixed(1) + ' s'}`;
     for (const w of res.warnings) warn.append(h('div', { class: 'notice' }, w));
+    const list = $('#search-results');
+    list.classList.add('stagger');
     renderResults();
+    setTimeout(() => list.classList.remove('stagger'), 700);
     if (res.tracks[0]) prefetchTrack(res.tracks[0]);
     plugins.emit('search-completed', { query: q, source: state.source, tracks: res.tracks });
   } catch (e) {

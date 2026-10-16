@@ -92,6 +92,7 @@ async function boot() {
   const theme = call('load_theme', { id: state.settings.theme }).catch(() => call('load_theme', { id: 'midnight' }).catch(() => ({ vars: {} })));
   const [t, queue, playback] = await Promise.all([theme, call('get_queue'), call('get_playback_state')]);
   applyTheme(t);
+  updateAmbient();
   state.queue = queue;
   state.playback = playback;
   renderQueue();

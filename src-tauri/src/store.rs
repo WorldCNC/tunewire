@@ -75,6 +75,13 @@ pub struct Settings {
     pub charts_country: String,
     /// Recent searches, newest first.
     pub search_history: Vec<String>,
+    /// Window background: "art" (playing cover, blurred), "tint" (cover
+    /// color), "image" (background_image) or "plain".
+    pub background: String,
+    /// 0-100: how visible the background is behind the panels.
+    pub background_strength: u32,
+    /// Picture for background = "image".
+    pub background_image: String,
 }
 
 impl Default for Settings {
@@ -112,6 +119,9 @@ impl Default for Settings {
             cover_accent: true,
             charts_country: "ZZ".into(),
             search_history: Vec::new(),
+            background: "art".into(),
+            background_strength: 45,
+            background_image: String::new(),
         }
     }
 }
@@ -138,6 +148,10 @@ impl Settings {
             *g = if g.is_finite() { g.clamp(-12.0, 12.0) } else { 0.0 };
         }
         self.search_history.truncate(30);
+        self.background_strength = self.background_strength.min(100);
+        if !matches!(self.background.as_str(), "art" | "tint" | "image" | "plain") {
+            self.background = "art".into();
+        }
         if !matches!(self.spotify_backend.as_str(), "auto" | "spotdl" | "embed" | "off") {
             self.spotify_backend = "auto".into();
         }

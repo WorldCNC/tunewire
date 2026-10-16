@@ -70,6 +70,21 @@ async fn connect(creds: Credentials) -> AppResult<Session> {
         }
     })?;
     restrict_permissions();
+    // Spotify only serves audio to Premium accounts. The account type arrives
+    // in a packet right after login.
+    for _ in 0..50 {
+        if let Some(kind) = session.get_user_attribute("type") {
+            if kind != "premium" {
+                session.shutdown();
+                if let Some(p) = creds_path() {
+                    let _ = std::fs::remove_file(p);
+                }
+                return Err(AppError::Unavailable(format!("playing Spotify audio needs Spotify Premium (this is a {kind} account)")));
+            }
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     Ok(session)
 }
 

@@ -43,11 +43,21 @@ pub async fn available() -> bool {
     *CACHE.get_or_init(|| async { version().await.is_some() }).await
 }
 
-static CREDS: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+static CLIENT_ID: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
-/// Use personal Spotify app credentials (much faster than spotDL's shared, rate-limited ones).
-pub fn set_credentials(id: &str, secret: &str) {
-    *CREDS.lock().unwrap() = (!id.trim().is_empty() && !secret.trim().is_empty()).then(|| (id.trim().to_string(), secret.trim().to_string()));
+/// Use personal Spotify app credentials (much faster than spotDL's shared,
+/// rate-limited ones). The secret is read from the keychain only when spotDL runs.
+pub fn set_client_id(id: &str) {
+    *CLIENT_ID.lock().unwrap() = id.trim().to_string();
+}
+
+fn credentials() -> Option<(String, String)> {
+    let id = CLIENT_ID.lock().unwrap().clone();
+    if id.is_empty() {
+        return None;
+    }
+    let secret = crate::secrets::get(crate::secrets::SPOTIFY_SECRET)?;
+    (!secret.trim().is_empty()).then(|| (id, secret.trim().to_string()))
 }
 
 /// Run `spotdl save <query> --save-file tmp` and return the parsed songs.
@@ -56,7 +66,7 @@ pub async fn save(query: &str) -> AppResult<Vec<TrackVersion>> {
     let file = std::env::temp_dir().join(format!("tunewire-{}.spotdl", crate::store::new_id("")));
     let mut cmd = command();
     cmd.args(["save", query, "--save-file"]).arg(&file).args(["--log-level", "ERROR"]);
-    if let Some((id, secret)) = CREDS.lock().unwrap().clone() {
+    if let Some((id, secret)) = tokio::task::spawn_blocking(credentials).await.ok().flatten() {
         cmd.args(["--client-id", &id, "--client-secret", &secret]);
     }
     let child = cmd

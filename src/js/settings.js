@@ -15,6 +15,10 @@ function settingToggle(label, help, key) {
   input.addEventListener('change', async () => {
     await updateSettings({ [key]: input.checked });
     if (key === 'discord_rpc') toast(input.checked ? 'Discord Rich Presence on' : 'Discord Rich Presence off', 'ok', 1800);
+    if (key === 'cover_accent') {
+      if (input.checked) updateCoverAccent(state.playback?.version?.thumbnail || state.playback?.current?.track?.thumbnail);
+      else clearCoverAccent();
+    }
   });
   return h('div', { class: 'setting' }, h('div', { class: 'label' }, label, h('small', { html: help })), h('label', { class: 'switch' }, input, h('span')));
 }
@@ -107,6 +111,7 @@ function renderSettings() {
       settingRow('Source priority', 'When a song exists on several platforms, the first available one plays. If it fails, the next one is tried.', order),
       settingRow('Results per source', null, limit),
       settingToggle('Search YouTube in “All”', 'Adds regular YouTube uploads (live versions, covers) to combined searches.', 'include_youtube_in_all'),
+      settingToggle('Autoplay', 'When the queue runs out, keep playing similar songs (YouTube Music radio).', 'autoplay'),
       settingToggle('Close to tray', 'Closing the window keeps music playing. Quit from the tray icon.', 'close_to_tray')),
     group('Spotify', 'spotify',
       settingRow('Spotify account', 'Log in to play Spotify’s own audio (Ogg Vorbis up to 320 kbps) when you pick Spotify as the source. Needs <b>Spotify Premium</b>; your login opens in the browser and only a reusable token is stored on this computer. Without it, Spotify songs play from the same recording on YouTube Music.', account),
@@ -117,7 +122,11 @@ function renderSettings() {
       settingRow('Spotify app credentials (spotDL)', 'Only used by the spotDL fallback. Its built-in credentials are shared and often rate-limited, which can make it take a minute. A free app from <code>developer.spotify.com/dashboard</code> avoids that (redirect URI: <code>http://127.0.0.1:9900/</code>). The secret is stored in your system keychain, not in a file.', h('div', { class: 'actions' }, credId, credSecret))),
     group('Sound', null,
       settingToggle('Volume normalization', 'Evens out loudness between songs and platforms. Measured from the first seconds of each song, with a soft limiter against clipping.', 'normalize'),
-      settingRow('Crossfade', 'Overlap the end of a song with the start of the next. At 0, songs still play back to back without a gap.', crossfadeControl())),
+      settingRow('Crossfade', 'Overlap the end of a song with the start of the next. At 0, songs still play back to back without a gap.', crossfadeControl()),
+      settingRow('Output device', 'Where the sound goes. Switching continues the current song on the new device.', outputDeviceControl()),
+      eqSetting()),
+    group('Appearance', null,
+      settingToggle('Accent from album art', 'Tints buttons and highlights with a color from the playing song’s cover.', 'cover_accent')),
     group('Lyrics', null,
       settingToggle('Show lyrics', 'Fetches synced lyrics from LRCLIB (lrclib.net) for the Lyrics tab next to the queue.', 'lyrics')),
     group('Downloads & local files', null,
@@ -159,6 +168,70 @@ async function checkHealth(target) {
   state.ytdlpPath = res.path;
   if (target) target.textContent = res.message;
   return res;
+}
+
+function outputDeviceControl() {
+  const sel = h('select', { style: 'max-width:240px' }, h('option', { value: '' }, 'System default'));
+  call('list_output_devices').then((devs) => {
+    for (const d of devs) sel.append(h('option', { value: d.id, selected: d.id === state.settings.output_device }, d.default ? `${d.name} (default)` : d.name));
+    if (state.settings.output_device && !devs.some((d) => d.id === state.settings.output_device)) {
+      sel.append(h('option', { value: state.settings.output_device, selected: true }, 'Saved device (not connected)'));
+    }
+  }).catch(() => {});
+  sel.addEventListener('change', () => updateSettings({ output_device: sel.value }).then(() => toast('Output device changed', 'ok', 1500)));
+  return sel;
+}
+
+const EQ_BANDS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+const EQ_PRESETS = {
+  Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  'Bass boost': [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
+  'Treble boost': [0, 0, 0, 0, 0, 1, 2, 4, 5, 6],
+  Vocal: [-2, -2, -1, 1, 3, 4, 3, 1, 0, -1],
+  Loudness: [5, 4, 2, 0, -1, 0, 1, 2, 4, 5],
+  Electronic: [4, 3, 1, 0, -1, 1, 0, 1, 3, 4],
+  Rock: [4, 3, 1, -1, -2, -1, 1, 2, 3, 4],
+  Acoustic: [3, 2, 1, 1, 2, 2, 2, 2, 1, 1],
+  'Bass cut': [-6, -5, -3, -1, 0, 0, 0, 0, 0, 0],
+};
+
+function eqSetting() {
+  const s = state.settings;
+  const gains = [...(s.eq_gains || EQ_PRESETS.Flat)];
+  const presetName = () => Object.keys(EQ_PRESETS).find((k) => EQ_PRESETS[k].every((g, i) => g === gains[i])) || 'Custom';
+  const preset = h('select', {});
+  const fillPresets = () => {
+    const cur = presetName();
+    preset.replaceChildren(...Object.keys(EQ_PRESETS).map((k) => h('option', { value: k, selected: k === cur }, k)),
+      cur === 'Custom' ? h('option', { value: 'Custom', selected: true }, 'Custom') : null);
+  };
+  const save = throttle(() => updateSettings({ eq_gains: gains }), 150);
+  const sliders = gains.map((g, i) => {
+    const val = h('span', { class: 'eq-val' }, `${g > 0 ? '+' : ''}${g}`);
+    const r = h('input', { type: 'range', min: -12, max: 12, step: 1, value: g, class: 'eq-slider', 'aria-label': `${EQ_BANDS[i]} Hz` });
+    r.addEventListener('input', () => {
+      gains[i] = Number(r.value);
+      val.textContent = `${gains[i] > 0 ? '+' : ''}${gains[i]}`;
+      fillPresets();
+      save();
+    });
+    r.addEventListener('dblclick', () => { r.value = 0; r.dispatchEvent(new Event('input')); });
+    return h('div', { class: 'eq-band' }, val, r, h('span', { class: 'eq-hz' }, EQ_BANDS[i]));
+  });
+  preset.addEventListener('change', () => {
+    const p = EQ_PRESETS[preset.value];
+    if (!p) return;
+    p.forEach((g, i) => { gains[i] = g; const r = sliders[i].querySelector('input'); r.value = g; sliders[i].querySelector('.eq-val').textContent = `${g > 0 ? '+' : ''}${g}`; });
+    updateSettings({ eq_gains: gains });
+  });
+  fillPresets();
+  const enabled = h('input', { type: 'checkbox', checked: !!s.eq_enabled });
+  const panel = h('div', { class: `eq-panel${s.eq_enabled ? '' : ' off'}` }, ...sliders);
+  enabled.addEventListener('change', () => { panel.classList.toggle('off', !enabled.checked); updateSettings({ eq_enabled: enabled.checked }); });
+  return h('div', { class: 'setting eq-setting' },
+    h('div', { class: 'label' }, 'Equalizer', h('small', {}, 'Ten bands from 31 Hz to 16 kHz. Double-click a slider to reset it.')),
+    h('div', { class: 'actions' }, preset, h('label', { class: 'switch' }, enabled, h('span'))),
+    panel);
 }
 
 function crossfadeControl() {

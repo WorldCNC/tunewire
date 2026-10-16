@@ -571,7 +571,7 @@ pub fn parse_entry(e: &Value, platform: Platform, rank: usize) -> Option<TrackVe
     Some(TrackVersion { platform, url, id, title, artist, duration, thumbnail, preview, partial, artist_url, album, rank, matched_for: None, isrc_match: false })
 }
 
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

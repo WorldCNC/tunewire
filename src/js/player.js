@@ -23,6 +23,8 @@ function renderPlayback() {
     $('#player-bar').style.setProperty('--np-art', thumb ? `url("${thumb.replace(/"/g, '%22')}")` : 'none');
     cover.innerHTML = thumb ? '' : icon('music');
     if (thumb) cover.append(h('img', { src: thumb, alt: '', onerror: (e) => { e.target.remove(); cover.innerHTML = icon('music'); } }));
+    updateCoverAccent(thumb);
+    if (fullLyrics.open) renderFullLyrics();
   }
 
   const msg = $('#np-via');

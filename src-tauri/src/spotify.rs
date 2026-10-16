@@ -84,6 +84,16 @@ fn cover(entity: &Value) -> Option<String> {
 /// Spotify URL → tracks (metadata only; versions have platform = Spotify).
 pub async fn load(url: &str) -> AppResult<RemotePlaylist> {
     let (kind, id) = parse_url(url).ok_or_else(|| AppError::Invalid("not a Spotify link".into()))?;
+    // Playlists: the web player's paginated query has every track (the embed
+    // page stops at 50). The embed page stays as the fallback.
+    if kind == "playlist" {
+        let i2 = id.clone();
+        if let Ok(Ok((title, tracks))) = tauri::async_runtime::spawn_blocking(move || fetch_playlist_full(&i2)).await {
+            if !tracks.is_empty() {
+                return Ok(RemotePlaylist { title, url: url.to_string(), platform: Some(Platform::Spotify), tracks });
+            }
+        }
+    }
     let (k2, i2) = (kind.clone(), id.clone());
     let entity = tauri::async_runtime::spawn_blocking(move || fetch_embed(&k2, &i2))
         .await
@@ -424,5 +434,215 @@ mod isrc_tests {
             let s = rt.block_on(crate::ytdlp::extract_stream(&v.url)).unwrap();
             println!("   stream ok, duration {:?} vs spotify {:?}", s.duration, sp.duration);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Full playlists (web player's `fetchPlaylist` query, anonymous token)
+// ---------------------------------------------------------------------------
+
+const FETCH_PLAYLIST_FALLBACK: &str = "21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf";
+static PLAYLIST_HASH: Mutex<Option<String>> = Mutex::new(None);
+
+/// Query id of a GraphQL operation defined in the web player's main script.
+fn discover_op_hash(op: &str) -> AppResult<String> {
+    let page = get_text("https://open.spotify.com/search")?;
+    let main = page
+        .split('"')
+        .find(|s| s.starts_with("https://open.spotifycdn.com/cdn/build/web-player/web-player.") && s.ends_with(".js"))
+        .ok_or_else(|| AppError::Extraction("web player script not found".into()))?;
+    let js = get_text(main)?;
+    let key = format!("\"{op}\",\"query\",\"");
+    let at = js.find(&key).ok_or_else(|| AppError::Extraction(format!("{op} query not found")))? + key.len();
+    let h = &js[at..(at + 64).min(js.len())];
+    if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(h.to_string())
+    } else {
+        Err(AppError::Extraction(format!("{op} query id malformed")))
+    }
+}
+
+fn pathfinder(op: &str, hash: &str, variables: Value, tok: &str) -> AppResult<(u16, Value)> {
+    let body = serde_json::json!({ "variables": variables, "operationName": op, "extensions": { "persistedQuery": { "version": 1, "sha256Hash": hash } } });
+    let mut r = crate::http::agent()
+        .post("https://api-partner.spotify.com/pathfinder/v2/query")
+        .header("Authorization", format!("Bearer {tok}"))
+        .header("Content-Type", "application/json;charset=UTF-8")
+        .header("app-platform", "WebPlayer")
+        .header("Origin", "https://open.spotify.com")
+        .header("User-Agent", crate::http::USER_AGENT)
+        .send(body.to_string())
+        .map_err(|e| AppError::Network(e.to_string()))?;
+    let status = r.status().as_u16();
+    let text = r.body_mut().with_config().limit(32 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
+    Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
+}
+
+fn playlist_item_track(it: &Value) -> Option<Track> {
+    let t = it.pointer("/itemV2/data")?;
+    if t.get("__typename").and_then(Value::as_str) != Some("Track") {
+        return None;
+    }
+    let uri = t.get("uri").and_then(Value::as_str)?;
+    let title = t.get("name").and_then(Value::as_str)?;
+    let artist = t
+        .pointer("/artists/items")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|x| x.pointer("/profile/name").and_then(Value::as_str)).collect::<Vec<_>>().join(", "))
+        .unwrap_or_default();
+    let dur = t.pointer("/trackDuration/totalMilliseconds").and_then(Value::as_f64);
+    let thumb = t.pointer("/albumOfTrack/coverArt/sources").and_then(Value::as_array).and_then(|s| {
+        s.iter()
+            .min_by_key(|x| (x.get("width").and_then(Value::as_i64).unwrap_or(0) - 300).abs())
+            .and_then(|x| x.get("url").and_then(Value::as_str))
+            .map(str::to_string)
+    });
+    let mut v = version(title, &artist, dur, uri, thumb);
+    v.album = t.pointer("/albumOfTrack/name").and_then(Value::as_str).map(str::to_string);
+    Some(build_track(vec![v], 0.0))
+}
+
+/// Every track of a playlist, 100 per request.
+fn fetch_playlist_full(id: &str) -> AppResult<(String, Vec<Track>)> {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(AppError::Invalid("malformed Spotify id".into()));
+    }
+    let mut tok = token(false)?;
+    let mut hash = PLAYLIST_HASH.lock().unwrap().clone().unwrap_or_else(|| FETCH_PLAYLIST_FALLBACK.into());
+    let mut title = String::from("Spotify playlist");
+    let mut tracks = Vec::new();
+    let mut offset = 0usize;
+    let mut retried = false;
+    loop {
+        let vars = serde_json::json!({ "uri": format!("spotify:playlist:{id}"), "offset": offset, "limit": 100, "enableWatchFeedEntrypoint": false });
+        let (status, v) = pathfinder("fetchPlaylist", &hash, vars, &tok)?;
+        let unknown = v.to_string().contains("PersistedQueryNotFound");
+        match status {
+            401 if !retried => {
+                tok = token(true)?;
+                retried = true;
+                continue;
+            }
+            _ if (unknown || status == 400 || status == 404) && !retried => {
+                hash = discover_op_hash("fetchPlaylist")?;
+                *PLAYLIST_HASH.lock().unwrap() = Some(hash.clone());
+                retried = true;
+                continue;
+            }
+            200 => {}
+            s => return Err(AppError::Network(format!("Spotify playlist request failed (HTTP {s})"))),
+        }
+        let pl = v.pointer("/data/playlistV2").ok_or_else(|| AppError::Unavailable("Spotify returned no playlist (private?)".into()))?;
+        if let Some(n) = pl.get("name").and_then(Value::as_str) {
+            title = n.to_string();
+        }
+        let items = pl.pointer("/content/items").and_then(Value::as_array).cloned().unwrap_or_default();
+        let total = pl.pointer("/content/totalCount").and_then(Value::as_u64).unwrap_or(0) as usize;
+        tracks.extend(items.iter().filter_map(playlist_item_track));
+        offset += items.len();
+        if items.is_empty() || offset >= total || offset >= 10_000 {
+            break;
+        }
+    }
+    Ok((title, tracks))
+}
+
+// ---------------------------------------------------------------------------
+// A user's public playlists (official Web API; needs the user's own app
+// credentials from Settings → Spotify, client-credentials flow)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UserPlaylist {
+    pub name: String,
+    pub url: String,
+    pub tracks: u64,
+    pub thumbnail: Option<String>,
+    pub owner: String,
+}
+
+fn app_token(client_id: &str, secret: &str) -> AppResult<String> {
+    use base64::Engine;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{client_id}:{secret}"));
+    let mut r = crate::http::agent()
+        .post("https://accounts.spotify.com/api/token")
+        .header("Authorization", format!("Basic {basic}"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .send("grant_type=client_credentials")
+        .map_err(|e| AppError::Network(e.to_string()))?;
+    let status = r.status().as_u16();
+    let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?).unwrap_or(Value::Null);
+    match (status, v.get("access_token").and_then(Value::as_str)) {
+        (200, Some(t)) => Ok(t.to_string()),
+        _ => Err(AppError::Invalid("Spotify rejected the app credentials (Settings → Spotify)".into())),
+    }
+}
+
+pub fn user_id_from_url(url: &str) -> Option<String> {
+    let u = url.trim();
+    let id = if let Some(rest) = u.strip_prefix("spotify:user:") {
+        rest
+    } else {
+        u.split("spotify.com/").nth(1)?.split(['?', '#']).next()?.split('/').filter(|s| !s.starts_with("intl-")).skip_while(|s| *s != "user").nth(1)?
+    };
+    (!id.is_empty() && id.len() < 100 && id.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))).then(|| id.to_string())
+}
+
+pub async fn user_playlists(user: String, client_id: String, secret: String) -> AppResult<Vec<UserPlaylist>> {
+    if client_id.trim().is_empty() || secret.trim().is_empty() {
+        return Err(AppError::Invalid(
+            "listing a profile's playlists needs your own free Spotify app: add its Client ID and secret in Settings → Spotify".into(),
+        ));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let tok = app_token(client_id.trim(), secret.trim())?;
+        let mut out = Vec::new();
+        let mut next = Some(format!("https://api.spotify.com/v1/users/{user}/playlists?limit=50"));
+        while let Some(url) = next.take() {
+            let mut r = crate::http::agent().get(&url).header("Authorization", format!("Bearer {tok}")).call().map_err(|e| AppError::Network(e.to_string()))?;
+            let status = r.status().as_u16();
+            if status == 404 {
+                return Err(AppError::NotFound("Spotify user".into()));
+            }
+            if status != 200 {
+                return Err(AppError::Network(format!("Spotify returned HTTP {status}")));
+            }
+            let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?;
+            for p in v.get("items").and_then(Value::as_array).into_iter().flatten() {
+                let (Some(name), Some(id)) = (p.get("name").and_then(Value::as_str), p.get("id").and_then(Value::as_str)) else { continue };
+                out.push(UserPlaylist {
+                    name: name.to_string(),
+                    url: format!("https://open.spotify.com/playlist/{id}"),
+                    tracks: p.pointer("/tracks/total").and_then(Value::as_u64).unwrap_or(0),
+                    thumbnail: p.pointer("/images/0/url").and_then(Value::as_str).map(str::to_string),
+                    owner: p.pointer("/owner/display_name").and_then(Value::as_str).unwrap_or("").to_string(),
+                });
+            }
+            next = v.get("next").and_then(Value::as_str).filter(|_| out.len() < 1000).map(str::to_string);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| AppError::Network(e.to_string()))?
+}
+
+#[cfg(test)]
+mod import_tests {
+    #[test]
+    fn user_ids() {
+        assert_eq!(super::user_id_from_url("https://open.spotify.com/user/abc123?si=x").as_deref(), Some("abc123"));
+        assert_eq!(super::user_id_from_url("https://open.spotify.com/intl-de/user/a.b_c").as_deref(), Some("a.b_c"));
+        assert_eq!(super::user_id_from_url("spotify:user:someone").as_deref(), Some("someone"));
+        assert_eq!(super::user_id_from_url("https://open.spotify.com/playlist/x"), None);
+    }
+
+    #[test]
+    #[ignore]
+    fn live_full_playlist() {
+        // A big public playlist (> 100 tracks) to exercise paging.
+        let (title, tracks) = super::fetch_playlist_full("37i9dQZF1DX4o1oenSJRJd").unwrap();
+        println!("{title}: {} tracks; first {} — {}", tracks.len(), tracks[0].title, tracks[0].artist);
+        assert!(tracks.len() > 100);
+        println!("discovered {}", super::discover_op_hash("fetchPlaylist").unwrap());
     }
 }

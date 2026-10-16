@@ -66,6 +66,7 @@ async function wireEvents() {
     if (what === 'history' && state.view === 'history') refreshHistory();
     if (what === 'downloads') refreshDownloads();
     if (what === 'local') refreshLocalCount();
+    if (what === 'followed') refreshFollowed();
     plugins.emit('library-changed', { what });
   });
 }
@@ -87,41 +88,40 @@ async function boot() {
   setSource(state.settings.last_source || 'all');
   setVolumeUI(state.settings.volume ?? 0.7);
 
-  try {
-    applyTheme(await call('load_theme', { id: state.settings.theme }));
-  } catch {
-    applyTheme(await call('load_theme', { id: 'midnight' }).catch(() => ({ vars: {} })));
-  }
-
-  await refreshHistory().catch(() => {});
-  renderHero();
-  refreshTools();
-  const health = await checkHealth();
-  if (!health.ok) {
-    openModal({
-      title: 'yt-dlp is required',
-      subtitle: health.message,
-      body: h('div', {},
-        h('p', {}, 'Tunewire uses yt-dlp for all search, playlist and stream extraction. Install a recent version and make sure it is on your PATH:'),
-        h('pre', { class: 'card', style: 'font-size:12px;white-space:pre-wrap' },
-          'Linux:   pipx install yt-dlp   (or your package manager)\nmacOS:   brew install yt-dlp\nWindows: winget install yt-dlp\n\nAlternatively set TUNEWIRE_YTDLP=/full/path/to/yt-dlp'),
-        h('p', { class: 'muted' }, 'Then press Re-check.')),
-      footer: [h('button', { class: 'btn primary', onclick: async (e) => { const r = await checkHealth(); if (r.ok) { modalStack.at(-1)?.close(); toast('yt-dlp found', 'ok'); } else toast(r.message, 'error'); } }, 'Re-check')],
-    });
-  } else if (/outdated/.test(health.message)) {
-    toast(health.message, 'warn', 10000);
-  }
-
-  const [queue, playback] = await Promise.all([call('get_queue'), call('get_playback_state')]);
+  // Everything the first screen needs, in parallel (all local reads).
+  const theme = call('load_theme', { id: state.settings.theme }).catch(() => call('load_theme', { id: 'midnight' }).catch(() => ({ vars: {} })));
+  const [t, queue, playback] = await Promise.all([theme, call('get_queue'), call('get_playback_state')]);
+  applyTheme(t);
   state.queue = queue;
   state.playback = playback;
   renderQueue();
-  await Promise.all([refreshPlaylists(), refreshFavorites(), refreshDownloads(), refreshLocalCount()]);
   renderPlayback();
+  await Promise.all([refreshHistory().catch(() => {}), refreshPlaylists(), refreshFavorites(), refreshDownloads(), refreshLocalCount(), refreshFollowed()]);
+  renderHero();
+  $('#search-input').focus();
+
+  // Slower checks (they start processes or use the network) after first paint.
+  refreshTools();
+  checkHealth().then((health) => {
+    if (!health.ok) {
+      openModal({
+        title: 'yt-dlp is required',
+        subtitle: health.message,
+        body: h('div', {},
+          h('p', {}, 'Tunewire uses yt-dlp for all search, playlist and stream extraction. Install a recent version and make sure it is on your PATH:'),
+          h('pre', { class: 'card', style: 'font-size:12px;white-space:pre-wrap' },
+            'Linux:   pipx install yt-dlp   (or your package manager)\nmacOS:   brew install yt-dlp\nWindows: winget install yt-dlp\n\nAlternatively set TUNEWIRE_YTDLP=/full/path/to/yt-dlp'),
+          h('p', { class: 'muted' }, 'Then press Re-check.')),
+        footer: [h('button', { class: 'btn primary', onclick: async () => { const r = await checkHealth(); if (r.ok) { modalStack.at(-1)?.close(); toast('yt-dlp found', 'ok'); } else toast(r.message, 'error'); } }, 'Re-check')],
+      });
+    } else if (/outdated/.test(health.message)) {
+      toast(health.message, 'warn', 10000);
+    }
+  });
 
   for (const id of state.settings.enabled_plugins || []) plugins.start(id);
   if (state.settings.auto_update !== false) setTimeout(() => checkForUpdate(false), 8000);
-  $('#search-input').focus();
+  setTimeout(checkReleasesQuietly, 5000);
 }
 
 boot().catch((e) => toast(`Startup failed: ${errMsg(e)}`, 'error', 15000));

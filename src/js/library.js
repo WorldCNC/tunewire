@@ -74,6 +74,10 @@ function renderPlaylistDetail() {
       },
     }));
   } else {
+    if (pl.source_url) {
+      const syncBtn = h('button', { class: 'btn', html: `${icon('refresh')}Sync`, title: `Update from ${pl.source_url}`, onclick: () => syncPlaylist(pl.id, syncBtn) });
+      actions.append(syncBtn);
+    }
     actions.append(
       h('button', { class: 'btn', html: `${icon('edit')}Rename`, onclick: async () => {
         const name = await promptModal({ title: 'Rename playlist', value: pl.name, okLabel: 'Rename' });

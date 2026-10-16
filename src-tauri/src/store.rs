@@ -62,6 +62,19 @@ pub struct Settings {
     pub discord_buttons: bool,
     pub repeat: String,
     pub example_plugin_installed: bool,
+    /// Keep playing related songs when the queue runs out.
+    pub autoplay: bool,
+    pub eq_enabled: bool,
+    /// Gains in dB for EQ_BANDS (31 Hz … 16 kHz).
+    pub eq_gains: Vec<f32>,
+    /// cpal device id ("" = system default).
+    pub output_device: String,
+    /// Tint the accent color from the playing song's cover.
+    pub cover_accent: bool,
+    /// ISO country code for Charts ("ZZ" = global).
+    pub charts_country: String,
+    /// Recent searches, newest first.
+    pub search_history: Vec<String>,
 }
 
 impl Default for Settings {
@@ -92,6 +105,13 @@ impl Default for Settings {
             discord_buttons: true,
             repeat: "off".into(),
             example_plugin_installed: false,
+            autoplay: true,
+            eq_enabled: false,
+            eq_gains: vec![0.0; 10],
+            output_device: String::new(),
+            cover_accent: true,
+            charts_country: "ZZ".into(),
+            search_history: Vec::new(),
         }
     }
 }
@@ -113,6 +133,11 @@ impl Settings {
         self.platform_order = seen;
         self.volume = self.volume.clamp(0.0, 1.0);
         self.search_limit = self.search_limit.clamp(3, 40);
+        self.eq_gains.resize(10, 0.0);
+        for g in self.eq_gains.iter_mut() {
+            *g = if g.is_finite() { g.clamp(-12.0, 12.0) } else { 0.0 };
+        }
+        self.search_history.truncate(30);
         if !matches!(self.spotify_backend.as_str(), "auto" | "spotdl" | "embed" | "off") {
             self.spotify_backend = "auto".into();
         }
@@ -145,11 +170,27 @@ pub struct HistoryEntry {
     pub played_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowedArtist {
+    pub name: String,
+    /// YouTube channel of the artist (releases come from its /releases tab).
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    /// Release URLs already shown to the user (for "new" badges).
+    #[serde(default)]
+    pub seen: Vec<String>,
+    #[serde(default)]
+    pub followed_at: u64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Library {
     pub playlists: Vec<Playlist>,
     pub favorites: Vec<Track>,
+    pub followed: Vec<FollowedArtist>,
     pub history: Vec<HistoryEntry>,
     pub downloads: Vec<crate::downloads::Download>,
 }
@@ -160,7 +201,7 @@ pub struct Store {
     pub library: Mutex<Library>,
 }
 
-fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
+pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
     match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
             // Keep the broken file around instead of silently overwriting it.
@@ -206,9 +247,10 @@ impl Store {
         struct Main<'a> {
             playlists: &'a [Playlist],
             favorites: &'a [Track],
+            followed: &'a [FollowedArtist],
         }
         let lib = self.library.lock().unwrap();
-        let data = serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites })?;
+        let data = serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites, followed: &lib.followed })?;
         drop(lib);
         write_atomic(&self.dir.join("library.json"), &data)
     }

@@ -40,7 +40,9 @@ async function openArtist(name, track = null) {
       h('div', { class: 'meta' }, [page.songs.length && `${page.songs.length} songs on YouTube Music`, page.soundcloud.length && `${page.soundcloud.length} on SoundCloud`].filter(Boolean).join(' · ')),
       h('div', { class: 'actions' },
         h('button', { class: 'btn primary', html: `${icon('play')}Play`, onclick: () => playList(all, 0) }),
-        h('button', { class: 'btn', html: `${icon('shuffle')}Shuffle`, onclick: () => playList([...all].sort(() => Math.random() - 0.5), 0) }))));
+        h('button', { class: 'btn', html: `${icon('shuffle')}Shuffle`, onclick: () => playList([...all].sort(() => Math.random() - 0.5), 0) }),
+        h('button', { class: 'btn', html: `${icon('radio')}Radio`, title: 'Play songs like this artist', disabled: !all.length, onclick: () => startRadio(all[0]) }),
+        followButton(page.name, (page.url && page.url.includes('youtube.com/')) ? page.url : yt, page.thumbnail))));
 
   const section = (title, tracks) => {
     if (!tracks.length) return null;

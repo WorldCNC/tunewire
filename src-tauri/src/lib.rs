@@ -24,12 +24,15 @@ mod controller;
 mod decoder;
 mod discord;
 mod downloads;
+mod eq;
+mod explore;
 mod error;
 mod http;
 mod localfiles;
 mod lyrics;
 mod models;
 mod plugins;
+mod radio;
 mod search;
 mod secrets;
 mod spotdl;
@@ -133,13 +136,23 @@ pub fn run() {
             let handle = app.handle().clone();
             let audio = AudioHandle::spawn(store.settings().volume, move |ev| controller::on_engine_event(&handle, ev));
             let settings = store.settings();
+            // Last session's queue, restored paused (play resumes where it was).
+            let saved: state::SavedQueue = store::load_json(&data.join("queue.json"));
+            let current_item = saved.current.and_then(|i| saved.items.get(i).cloned());
+            let resume = current_item.as_ref().filter(|_| saved.position > 3.0).map(|i| (i.uid, saved.position));
+            let queue = QueueState {
+                next_uid: saved.items.iter().map(|i| i.uid).max().unwrap_or(0),
+                current: current_item.as_ref().and(saved.current),
+                items: saved.items,
+                resume_at: None,
+            };
             app.manage(AppState {
                 store,
                 themes,
                 plugins,
                 cache: Arc::new(SearchCache::default()),
-                queue: Mutex::new(QueueState::default()),
-                now: Mutex::new(NowPlaying { phase: Phase::Idle, item: None, version: None, message: None }),
+                queue: Mutex::new(queue),
+                now: Mutex::new(NowPlaying { phase: Phase::Idle, item: current_item, version: None, message: None }),
                 audio,
                 load_gen: AtomicU64::new(0),
                 next_token: AtomicU64::new(0),
@@ -153,6 +166,9 @@ pub fn run() {
                 last_full: Mutex::new(String::new()),
                 search_gen: AtomicU64::new(0),
                 volume_save_gen: AtomicU64::new(0),
+                resume_position: Mutex::new(resume),
+                queue_save_gen: AtomicU64::new(0),
+                queue_saved_at: Mutex::new(std::time::Instant::now()),
             });
             system::apply_settings(&app.state::<AppState>(), &settings);
 
@@ -192,6 +208,7 @@ pub fn run() {
             system::spotify_login,
             system::spotify_logout,
             system::spotify_account,
+            system::list_output_devices,
             system::ytdlp_install,
             discover::search_tracks,
             discover::load_playlist,
@@ -205,6 +222,20 @@ pub fn run() {
             discover::complete_metadata,
             playback::play_track,
             playback::play_tracks,
+            playback::start_radio,
+            commands::explore::search_suggestions,
+            commands::explore::search_history,
+            commands::explore::clear_search_history,
+            commands::explore::chart_countries,
+            commands::explore::get_charts,
+            commands::explore::list_followed,
+            commands::explore::follow_artist,
+            commands::explore::new_releases,
+            commands::explore::mark_releases_seen,
+            commands::explore::translate_lyrics,
+            commands::explore::cover_color,
+            commands::explore::spotify_user_playlists,
+            commands::explore::sync_playlist,
             playback::play_index_cmd,
             playback::next_track,
             playback::previous_track,

@@ -285,6 +285,10 @@ async fn play_index(app: &AppHandle, index: usize) -> AppResult<()> {
     }
     st.audio.play(loaded);
     st.current_token.store(token, Ordering::SeqCst);
+    let resume = st.resume_position.lock().unwrap().take();
+    if let Some((_, pos)) = resume.filter(|(uid, _)| *uid == item.uid) {
+        st.audio.seek(pos);
+    }
     started(app, item, version);
     Ok(())
 }
@@ -304,6 +308,7 @@ fn started(app: &AppHandle, item: QueueItem, version: TrackVersion) {
     let _ = app.emit("track-started", serde_json::json!({ "item": item, "version": version }));
     emit_queue(app);
     emit_playback(app);
+    maybe_autoplay(app);
 }
 
 /// Index that should play after the current one (None = stop).
@@ -326,11 +331,89 @@ fn next_index(st: &AppState, auto: bool) -> Option<usize> {
     }
 }
 
+static RADIO_INFLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Append songs related to `seed` to the queue. Returns how many were added.
+pub async fn extend_with_radio(app: &AppHandle, seed: crate::models::Track) -> usize {
+    if RADIO_INFLIGHT.swap(true, Ordering::SeqCst) {
+        return 0;
+    }
+    let st = app.state::<AppState>();
+    let mut exclude: std::collections::HashSet<String> = st.queue.lock().unwrap().items.iter().map(|i| i.track.key.clone()).collect();
+    exclude.extend(st.store.library.lock().unwrap().history.iter().take(100).map(|h| h.track.key.clone()));
+    let found = crate::radio::related(&seed, &exclude, 20, &st.cache).await;
+    RADIO_INFLIGHT.store(false, Ordering::SeqCst);
+    match found {
+        Ok(tracks) => {
+            let n = tracks.len();
+            {
+                let mut q = st.queue.lock().unwrap();
+                for t in tracks {
+                    let item = q.make(t, None);
+                    q.items.push(item);
+                }
+            }
+            emit_queue(app);
+            emit_playback(app);
+            n
+        }
+        Err(e) => {
+            emit_status(app, "warn", format!("Autoplay: {e}"));
+            0
+        }
+    }
+}
+
+/// When the last song in the queue starts, line up related ones (autoplay).
+fn maybe_autoplay(app: &AppHandle) {
+    let st = app.state::<AppState>();
+    let s = st.store.settings();
+    if !s.autoplay || s.repeat != "off" {
+        return;
+    }
+    let seed = {
+        let q = st.queue.lock().unwrap();
+        match q.current {
+            Some(i) if i + 1 == q.items.len() => q.items[i].track.clone(),
+            _ => return,
+        }
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        extend_with_radio(&app, seed).await;
+    });
+}
+
 /// Move to the next track according to the repeat mode.
 pub fn advance(app: &AppHandle, auto: bool) {
     let st = app.state::<AppState>();
     match next_index(&st, auto) {
         Some(i) => spawn_play(app, i, auto),
+        None if auto && st.store.settings().autoplay && !RADIO_INFLIGHT.load(Ordering::SeqCst) => {
+            // Queue ran out before autoplay had extended it.
+            let seed = {
+                let q = st.queue.lock().unwrap();
+                q.current.and_then(|i| q.items.get(i).map(|x| x.track.clone()))
+            };
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let st = app.state::<AppState>();
+                if let Some(seed) = seed {
+                    if extend_with_radio(&app, seed).await > 0 {
+                        if let Some(i) = next_index(&st, true) {
+                            spawn_play(&app, i, true);
+                            return;
+                        }
+                    }
+                }
+                st.audio.stop();
+                st.set_now(|n| {
+                    n.phase = Phase::Idle;
+                    n.message = None;
+                });
+                emit_playback(&app);
+            });
+        }
         None => {
             st.audio.stop();
             st.set_now(|n| {

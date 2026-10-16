@@ -158,3 +158,16 @@ pub fn set_repeat(app: AppHandle, st: State<'_, AppState>, mode: String) -> AppR
     emit_playback(&app);
     Ok(s.repeat)
 }
+
+/// Play `track` now and fill the queue with related songs ("Start radio").
+#[tauri::command]
+pub fn start_radio(app: AppHandle, st: State<'_, AppState>, track: Track) {
+    set_queue_and_play(&app, &st, vec![track.clone()], 0);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let n = crate::controller::extend_with_radio(&app, track).await;
+        if n > 0 {
+            crate::state::emit_status(&app, "ok", format!("Radio: {n} songs queued"));
+        }
+    });
+}

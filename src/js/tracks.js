@@ -120,6 +120,7 @@ function trackRow(track, index, opts = {}) {
         'sep',
         { label: `Choose source (${versions.length})…`, icon: 'layers', onClick: () => openVersions(track) },
         { label: liked ? 'Unlike' : 'Like', icon: 'heart', onClick: () => toggleFavorite(track) },
+        { label: 'Start radio', icon: 'radio', onClick: () => startRadio(track) },
         track.artist ? { label: 'Go to artist', icon: 'user', onClick: () => openArtist(track.artist, track) } : null,
         state.downloadKeys.has(track.key)
           ? { label: 'Remove download', icon: 'trash', onClick: () => deleteDownload(track.key) }

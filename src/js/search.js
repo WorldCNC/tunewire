@@ -97,12 +97,12 @@ async function doSearch(q) {
   }
 }
 
-const RECENT_KEY = 'tunewire.recentSearches';
+// Search history lives in settings (the backend records each search).
 function recentSearches() {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+  return (state.settings?.search_history || []).slice(0, 10);
 }
 function rememberSearch(q) {
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify([q, ...recentSearches().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 10))); } catch { /* storage unavailable */ }
+  if (state.settings) state.settings.search_history = [q, ...(state.settings.search_history || []).filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 30);
 }
 
 function renderHero() {
@@ -117,7 +117,7 @@ function renderHero() {
   if (recent.length) {
     blocks.push(h('div', { class: 'home-block' },
       h('div', { class: 'section-title' }, 'Recent searches',
-        h('button', { class: 'btn small', style: 'margin-left:auto', onclick: () => { try { localStorage.removeItem(RECENT_KEY); } catch { /* ignore */ } renderHero(); } }, 'Clear')),
+        h('button', { class: 'btn small', style: 'margin-left:auto', onclick: async () => { await call('clear_search_history', {}).catch(() => {}); state.settings.search_history = []; renderHero(); } }, 'Clear')),
       h('div', { class: 'recent-searches' }, ...recent.map((q) => h('button', { onclick: () => { $('#search-input').value = q; syncSearchClear(); doSearch(q); } }, q)))));
   }
   const played = (state.history || []).slice(0, 8);

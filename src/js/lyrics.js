@@ -22,6 +22,7 @@ function showPanel(name) {
   $('#queue-list').hidden = name !== 'queue';
   $('#queue-actions').hidden = name !== 'queue';
   $('#lyrics-panel').hidden = name !== 'lyrics';
+  $('#lyrics-actions').hidden = name !== 'lyrics';
   if (name === 'lyrics') loadLyrics();
 }
 $('.panel-tabs').addEventListener('click', (e) => {
@@ -33,7 +34,7 @@ async function loadLyrics(force = false) {
   const p = state.playback;
   const track = p?.current?.track;
   const box = $('#lyrics-panel');
-  if (box.hidden && !force) return;
+  if (box.hidden && !force && !fullLyrics.open) return;
   if (!track) {
     lyrics.key = null;
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Play a song to see its lyrics.')));
@@ -57,10 +58,12 @@ async function loadLyrics(force = false) {
   if (lyrics.key !== track.key) return;
   if (!res) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, state.settings?.lyrics === false ? 'Lyrics are turned off in Settings.' : 'No lyrics found for this song.')));
+    renderFullLyrics();
     return;
   }
   if (res.instrumental && !res.synced && !res.plain) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Instrumental')));
+    renderFullLyrics();
     return;
   }
   const credit = h('div', { class: 'lyrics-credit' }, `Lyrics from ${res.source}`);
@@ -70,14 +73,17 @@ async function loadLyrics(force = false) {
       h('button', { class: 'lyric', dataset: { i }, onclick: () => seekTo(l.t) }, l.text || '♪')));
     box.replaceChildren(list, credit);
     syncLyrics(true);
+    renderFullLyrics();
   } else {
     lyrics.plain = res.plain;
     box.replaceChildren(h('div', { class: 'lyrics-lines plain' }, ...res.plain.split('\n').map((l) => h('p', {}, l || ' '))), credit);
+    renderFullLyrics();
   }
 }
 
 /** Highlight the current line and keep it in view. */
 function syncLyrics(force = false) {
+  syncFullLyrics(force);
   if (!lyrics.lines || $('#lyrics-panel').hidden) return;
   const pos = (state.playback?.position || 0) + 0.25;
   let i = -1;

@@ -20,6 +20,15 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
     // Spotify search works without spotDL now (web search, spotDL as fallback).
     let spotify_ok = settings.spotify_backend != "off";
     let spotify = spotify_ok && (source == "spotify" || settings.include_spotify_in_all);
+    let q = query.trim();
+    if !q.is_empty() && !q.contains("://") {
+        let q = q.to_string();
+        let _ = st.store.update_settings(|s| {
+            s.search_history.retain(|h| !h.eq_ignore_ascii_case(&q));
+            s.search_history.insert(0, q);
+            s.search_history.truncate(30);
+        });
+    }
     let gen = st.search_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let res = search::search(query, source, limit, settings.platform_order, st.cache.clone(), settings.include_youtube_in_all, spotify).await?;
 
@@ -62,6 +71,11 @@ fn is_spotify(url: &str) -> bool {
 
 #[tauri::command]
 pub async fn load_playlist(st: State<'_, AppState>, url: String) -> AppResult<RemotePlaylist> {
+    fetch_remote(&st, url).await
+}
+
+/// Any supported playlist/album/track link → tracks.
+pub async fn fetch_remote(st: &AppState, url: String) -> AppResult<RemotePlaylist> {
     let url = url.trim().to_string();
     if is_spotify(&url) {
         return load_spotify(&st.store.settings().spotify_backend, &url).await;

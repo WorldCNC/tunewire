@@ -30,10 +30,12 @@
     spotify_backend: 'auto', include_spotify_in_all: true, spotify_client_id: '', spotify_client_secret: '',
     normalize: true, crossfade: 0, lyrics: true, local_folders: ['/home/you/Music'], downloads_dir: '', ytdlp_source: 'system',
     auto_update: false, discord_rpc: false, discord_client_id: '', discord_buttons: true, repeat: 'off', example_plugin_installed: true,
+    autoplay: true, eq_enabled: false, eq_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], output_device: '', cover_accent: true, charts_country: 'ZZ', search_history: ['daft punk', 'tame impala'],
   };
   let uid = 0;
   const queue = { items: tracks.slice(0, 5).map((t) => ({ uid: ++uid, track: t, platform: null })), current: 0 };
   let mockSpotifyUser = null;
+  const followed = [];
   const playback = { status: 'paused', position: 42, duration: 321, buffered: 0.6, stalled: false, volume: 0.7, repeat: 'off', index: 0, current: queue.items[0], version: tracks[0].versions[0], message: null, preloaded: null };
   const playlists = [{ id: 'p1', name: 'Late night drive', tracks: tracks.slice(2), created: 0, updated: 0 }, { id: 'p2', name: 'Gym', tracks: tracks.slice(0, 3), created: 0, updated: 0 }];
   let favorites = tracks.slice(0, 2);
@@ -68,6 +70,29 @@
     spotify_account: () => mockSpotifyUser,
     spotify_login: () => new Promise((r) => setTimeout(() => r(mockSpotifyUser = 'devuser'), 800)),
     spotify_logout: () => { mockSpotifyUser = null; },
+    list_output_devices: () => [{ id: 'alsa:default', name: 'Built-in Audio', default: true }, { id: 'alsa:hdmi', name: 'HDMI Output', default: false }],
+    search_suggestions: ({ query }) => ['', ' remix', ' live', ' lyrics', ' acoustic'].map((x) => query + x),
+    search_history: () => settings.search_history,
+    clear_search_history: ({ query }) => { settings.search_history = query ? settings.search_history.filter((q) => q !== query) : []; },
+    chart_countries: () => [{ code: 'ZZ', name: 'Global' }, { code: 'US', name: 'United States' }, { code: 'IL', name: 'Israel' }],
+    get_charts: ({ country }) => ({ country, playlists: [
+      { title: `Top 100 Music Videos ${country}`, url: 'https://music.youtube.com/playlist?list=PLmock1', thumbnail: yt('fa5IWHDbftI'), group: 'Video charts' },
+      { title: `Trending 20 ${country}`, url: 'https://music.youtube.com/playlist?list=PLmock2', thumbnail: yt('NMRhx71bGo4'), group: 'Video charts' }],
+      artists: ['Daft Punk', 'Tame Impala', 'Hiatus Kaiyote', 'Bonobo'].map((name, i) => ({ name, url: 'https://www.youtube.com/channel/UCmock' + i, thumbnail: null, rank: i + 1 })) }),
+    list_followed: () => followed,
+    follow_artist: ({ name, url, thumbnail }) => {
+      const i = followed.findIndex((a) => a.name.toLowerCase() === name.toLowerCase());
+      if (i >= 0) { followed.splice(i, 1); return false; }
+      followed.unshift({ name, url, thumbnail, seen: [], followed_at: Date.now() });
+      return true;
+    },
+    new_releases: () => followed.flatMap((a, k) => [0, 1, 2].map((i) => ({ artist: a.name, title: `${a.name} — Release ${i + 1}`, url: `https://music.youtube.com/playlist?list=OLAKmock${k}${i}`, thumbnail: yt('fa5IWHDbftI'), new: i === 0 }))),
+    mark_releases_seen: () => {},
+    translate_lyrics: ({ lines }) => ({ lines: lines.map((l) => (l ? `[en] ${l}` : l)), source_lang: 'fr' }),
+    cover_color: () => '#3d7bd9',
+    spotify_user_playlists: () => [{ name: 'Mock mix', url: 'https://open.spotify.com/playlist/mock1', tracks: 3, thumbnail: null, owner: 'dev' }],
+    sync_playlist: ({ id }) => playlists.find((p) => p.id === id)?.tracks.length || 0,
+    start_radio: ({ track }) => { queue.items = [{ uid: ++uid, track, platform: null }, ...tracks.filter((t) => t.key !== track.key).map((t) => ({ uid: ++uid, track: t, platform: null }))]; startItem(0); },
     discord_status: () => (settings.discord_rpc ? 'connected' : 'off'),
     list_themes: () => [{ id: 'midnight', name: 'Midnight', author: 'Tunewire', dark: true, builtin: true, accent: '#e5a54b', bg: '#121212' }, { id: 'daylight', name: 'Daylight', author: 'Tunewire', dark: false, builtin: true, accent: '#b86e0c', bg: '#fafafa' }, { id: 'synthwave', name: 'Synthwave', author: 'Tunewire', dark: true, builtin: true, accent: '#ff6ec7', bg: '#16101f' }],
     load_theme: async ({ id }) => { settings.theme = id; return (await fetch(`/__themes/${id}.json`)).json(); },

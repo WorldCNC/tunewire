@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles.css" />
   <style id="theme-css"></style>
   <style id="plugin-css"></style>
+  <style id="accent-css"></style>
 </head>
 <body>
   <div id="app" class="app">
@@ -14,6 +15,8 @@
       <div class="brand">Tunewire</div>
       <nav class="nav" id="nav">
         <button class="nav-item active" data-view="search"><i data-icon="search"></i><span>Search</span></button>
+        <button class="nav-item" data-view="charts"><i data-icon="chart"></i><span>Charts</span></button>
+        <button class="nav-item" data-view="releases"><i data-icon="sparkle"></i><span>New releases</span><em class="nav-count new" id="rel-count"></em></button>
         <button class="nav-item" data-view="favorites"><i data-icon="heart"></i><span>Liked</span><em class="nav-count" id="fav-count"></em></button>
         <button class="nav-item" data-view="history"><i data-icon="clock"></i><span>History</span></button>
         <button class="nav-item" data-view="playlists"><i data-icon="list"></i><span>Playlists</span></button>
@@ -40,7 +43,8 @@
       <header class="toolbar">
         <form class="search" id="search-form" autocomplete="off">
           <i data-icon="search"></i>
-          <input id="search-input" type="text" placeholder="Search, or paste a link" spellcheck="false" />
+          <input id="search-input" type="text" placeholder="Search, or paste a link" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="suggest" aria-expanded="false" />
+          <div class="suggest" id="suggest" role="listbox" hidden></div>
           <button type="button" class="search-clear" id="search-clear" title="Clear"><i data-icon="x"></i></button>
         </form>
         <div class="segmented" id="source-select" role="radiogroup" aria-label="Source">
@@ -70,7 +74,7 @@
         <section class="view" id="view-playlists">
           <div class="split">
             <div class="split-side">
-              <div class="page-head"><h1>Playlists</h1><button class="btn" id="new-playlist"><i data-icon="plus"></i>New</button></div>
+              <div class="page-head"><h1>Playlists</h1><div class="actions"><button class="btn" id="import-spotify" title="Import public playlists from a Spotify profile"><span class="src-ico" data-brand="spotify"></span>Import</button><button class="btn" id="new-playlist"><i data-icon="plus"></i>New</button></div></div>
               <form class="url-loader" id="remote-form">
                 <input id="remote-url" class="input" type="text" placeholder="Playlist link (SoundCloud, YouTube, Spotify)" spellcheck="false" />
                 <button class="btn" type="submit">Load</button>
@@ -129,6 +133,8 @@
           <div class="settings" id="settings-body"></div>
         </section>
 
+        <section class="view" id="view-charts"><div id="charts-body"></div></section>
+        <section class="view" id="view-releases"><div id="releases-body"></div></section>
         <section class="view" id="view-artist"><div id="artist-body"></div></section>
         <section class="view" id="view-album"><div id="album-body"></div></section>
 
@@ -173,6 +179,9 @@
         <div class="panel-tabs" role="tablist">
           <button class="active" data-panel="queue" role="tab">Queue <span class="meta" id="queue-count"></span></button>
           <button data-panel="lyrics" role="tab">Lyrics</button>
+        </div>
+        <div class="actions" id="lyrics-actions" hidden>
+          <button class="icon-btn" id="lyrics-full" title="Full screen lyrics"><i data-icon="expand"></i></button>
         </div>
         <div class="actions" id="queue-actions">
           <button class="icon-btn" id="queue-shuffle" title="Shuffle upcoming"><i data-icon="shuffle"></i></button>
@@ -235,6 +244,7 @@
   <script src="js/queue.js"></script>
   <script src="js/library.js"></script>
   <script src="js/artist.js"></script>
+  <script src="js/explore.js"></script>
   <script src="js/offline.js"></script>
   <script src="js/lyrics.js"></script>
   <script src="js/themes.js"></script>

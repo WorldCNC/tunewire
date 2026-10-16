@@ -24,6 +24,7 @@ use rodio::{ChannelCount, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate
 use serde::Serialize;
 
 use crate::decoder::AudioDecoder;
+use crate::eq::{EqParams, Equalizer};
 use crate::error::{AppError, AppResult};
 use crate::stream::{OpenedStream, Shared};
 
@@ -256,6 +257,8 @@ struct FeedSource {
     /// Samples played but not yet published to `ctl.played`.
     pending: u64,
     drained: Arc<AtomicBool>,
+    eq: Equalizer,
+    eq_params: Arc<EqParams>,
 }
 
 impl FeedSource {
@@ -270,6 +273,7 @@ impl FeedSource {
 
     fn refresh_target(&mut self) {
         self.target = if self.ctl.normalize.load(Ordering::Relaxed) { f32::from_bits(self.ctl.gain.load(Ordering::Relaxed)) } else { 1.0 };
+        self.eq.refresh(&self.eq_params);
     }
 }
 
@@ -290,15 +294,17 @@ impl Iterator for FeedSource {
         loop {
             if self.idx < self.cur.len() {
                 let mut s = self.cur[self.idx];
+                let ch = (self.out_count % self.ctl.channels as u64) as usize;
                 self.idx += 1;
                 self.out_count += 1;
+                s = self.eq.process(s, ch);
                 self.pending += 1;
                 if self.pending >= 1024 {
                     self.flush_played();
                 }
                 // Glide towards the target gain (~0.5 s) to avoid audible steps.
                 self.gain += (self.target - self.gain) * 0.00005;
-                if self.gain != 1.0 {
+                if self.gain != 1.0 || self.eq.active() {
                     s = soft_clip(s * self.gain);
                 }
                 return Some(s);
@@ -399,12 +405,15 @@ enum Cmd {
     Volume(f32),
     Seek(f64),
     Config { crossfade: f32, normalize: bool },
+    /// Switch output device (stops playback; the controller restarts it).
+    Device(String),
 }
 
 #[derive(Clone)]
 pub struct AudioHandle {
     tx: mpsc::Sender<Cmd>,
     status: Arc<Mutex<EngineStatus>>,
+    eq: Arc<EqParams>,
 }
 
 impl AudioHandle {
@@ -420,11 +429,21 @@ impl AudioHandle {
             preloaded: None,
         }));
         let st = status.clone();
+        let eq = Arc::new(EqParams::default());
+        let eq2 = eq.clone();
         std::thread::Builder::new()
             .name("audio-engine".into())
-            .spawn(move || engine(rx, st, volume, on_event))
+            .spawn(move || engine(rx, st, volume, eq2, on_event))
             .expect("spawn audio thread");
-        AudioHandle { tx, status }
+        AudioHandle { tx, status, eq }
+    }
+
+    pub fn set_eq(&self, enabled: bool, gains: &[f32]) {
+        self.eq.set(enabled, gains);
+    }
+
+    pub fn set_device(&self, id: &str) {
+        let _ = self.tx.send(Cmd::Device(id.to_string()));
     }
 
     pub fn play(&self, t: LoadedTrack) {
@@ -469,7 +488,7 @@ struct Prepared {
     drained: Arc<AtomicBool>,
 }
 
-fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>) -> Prepared {
+fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>, eq_params: Arc<EqParams>) -> Prepared {
     let LoadedTrack { decoder, shared, duration, reopen, token } = t;
     let channels = decoder.channels();
     let rate = decoder.sample_rate();
@@ -506,6 +525,8 @@ fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>) -> Prepared {
         target: 1.0,
         pending: 0,
         drained: drained.clone(),
+        eq: Equalizer::new(rate, channels),
+        eq_params,
     };
     Prepared { token, ctl, shared, duration, feed, drained }
 }
@@ -538,10 +559,52 @@ fn perceptual(v: f32) -> f32 {
     v * v
 }
 
-fn open_device() -> AppResult<MixerDeviceSink> {
-    let mut sink = DeviceSinkBuilder::open_default_sink().map_err(|e| AppError::AudioDevice(e.to_string()))?;
+/// Open the chosen output (cpal device id), falling back to the default.
+fn open_device(id: &str) -> AppResult<MixerDeviceSink> {
+    use rodio::cpal::traits::HostTrait;
+    let chosen = (!id.is_empty())
+        .then(|| id.parse::<rodio::cpal::DeviceId>().ok())
+        .flatten()
+        .and_then(|id| rodio::cpal::default_host().device_by_id(&id));
+    let opened = match chosen {
+        Some(dev) => DeviceSinkBuilder::from_device(dev).and_then(|b| b.open_stream()).or_else(|_| DeviceSinkBuilder::open_default_sink()),
+        None => DeviceSinkBuilder::open_default_sink(),
+    };
+    let mut sink = opened.map_err(|e| AppError::AudioDevice(e.to_string()))?;
     sink.log_on_drop(false);
     Ok(sink)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OutputDevice {
+    pub id: String,
+    pub name: String,
+    pub default: bool,
+}
+
+/// Output devices for the settings picker.
+pub fn output_devices() -> Vec<OutputDevice> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let host = rodio::cpal::default_host();
+    let default = host.default_output_device().and_then(|d| d.id().ok());
+    let Ok(devs) = host.output_devices() else { return Vec::new() };
+    // ALSA also lists every plugin PCM (resamplers, "discard all samples",
+    // up/downmixers) and the same card several times; keep real outputs once.
+    const NOISE: [&str; 6] = ["Plugin", "Discard all samples", "Rate Converter", "Open Sound System", "JACK Audio", "Speex"];
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<OutputDevice> = devs
+        .filter_map(|d| {
+            let id = d.id().ok()?;
+            let name = d.description().map(|x| x.name().to_string()).unwrap_or_else(|_| id.to_string());
+            let is_default = Some(&id) == default.as_ref();
+            if !is_default && (NOISE.iter().any(|n| name.contains(n)) || id.to_string().contains("usbstream") || !seen.insert(name.clone())) {
+                return None;
+            }
+            Some(OutputDevice { default: is_default, id: id.to_string(), name })
+        })
+        .collect();
+    out.sort_by_key(|d| !d.default);
+    out
 }
 
 fn activate(p: Prepared, device: &MixerDeviceSink, volume: f32, fade: f32, paused: bool) -> Active {
@@ -563,8 +626,9 @@ struct Fade {
     secs: f32,
 }
 
-fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, on_event: impl Fn(EngineEvent)) {
+fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, eq: Arc<EqParams>, on_event: impl Fn(EngineEvent)) {
     let mut device: Option<MixerDeviceSink> = None;
+    let mut device_id = String::new();
     let mut cur: Option<Active> = None;
     let mut next: Option<Prepared> = None;
     let mut fading: Vec<Fade> = Vec::new();
@@ -597,7 +661,7 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
                 }
                 shutdown_next(&mut next);
                 if device.is_none() {
-                    match open_device() {
+                    match open_device(&device_id) {
                         Ok(d) => device = Some(d),
                         Err(e) => {
                             t.shared.cancel();
@@ -607,13 +671,13 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
                         }
                     }
                 }
-                let p = start_decoding(*t, normalize.clone());
+                let p = start_decoding(*t, normalize.clone(), eq.clone());
                 cur = Some(activate(p, device.as_ref().unwrap(), volume, 1.0, false));
                 state = EngineState::Playing;
             }
             Ok(Cmd::Preload(t)) => {
                 shutdown_next(&mut next);
-                next = Some(start_decoding(*t, normalize.clone()));
+                next = Some(start_decoding(*t, normalize.clone(), eq.clone()));
             }
             Ok(Cmd::ClearPreload) => shutdown_next(&mut next),
             Ok(Cmd::Pause) => {
@@ -656,6 +720,20 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
                     *c.ctl.seek_req.lock().unwrap() = Some(target);
                     *c.ctl.base_pos.lock().unwrap() = target;
                     c.ctl.playing_epoch.store(u64::MAX, Ordering::Release);
+                }
+            }
+            Ok(Cmd::Device(id)) => {
+                if id != device_id {
+                    device_id = id;
+                    if let Some(c) = cur.take() {
+                        c.shutdown();
+                    }
+                    for f in fading.drain(..) {
+                        f.out.shutdown();
+                    }
+                    shutdown_next(&mut next);
+                    device = None;
+                    state = EngineState::Idle;
                 }
             }
             Ok(Cmd::Config { crossfade: cf, normalize: n }) => {
@@ -771,6 +849,14 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
 #[cfg(test)]
 mod tests {
     use super::soft_clip;
+    #[test]
+    #[ignore]
+    fn list_devices_live() {
+        for d in super::output_devices() {
+            println!("{}{} [{}]", d.name, if d.default { " (default)" } else { "" }, d.id);
+        }
+    }
+
     #[test]
     fn soft_clip_is_bounded_and_transparent() {
         assert_eq!(soft_clip(0.5), 0.5);

@@ -94,6 +94,58 @@ pub struct AppState {
     pub search_gen: AtomicU64,
     /// Debounces settings.json writes while the volume slider moves.
     pub volume_save_gen: AtomicU64,
+    /// (queue uid, seconds): seek there when that entry next starts playing
+    /// (output device switch, or the position saved at the last exit).
+    pub resume_position: Mutex<Option<(u64, f64)>>,
+    pub queue_save_gen: AtomicU64,
+    pub queue_saved_at: Mutex<std::time::Instant>,
+}
+
+/// The queue as saved in queue.json (restored paused at the next start).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedQueue {
+    pub items: Vec<QueueItem>,
+    pub current: Option<usize>,
+    pub position: f64,
+}
+
+impl AppState {
+    fn saved_queue(&self) -> SavedQueue {
+        let q = self.queue.lock().unwrap();
+        let active = self.now.lock().unwrap().phase == Phase::Active;
+        let position = if active {
+            self.audio.status().position
+        } else {
+            // Not started since launch: keep the position we restored.
+            let uid = q.current.and_then(|i| q.items.get(i)).map(|i| i.uid);
+            self.resume_position.lock().unwrap().filter(|(u, _)| Some(*u) == uid).map(|(_, p)| p).unwrap_or(0.0)
+        };
+        SavedQueue { items: q.items.clone(), current: q.current, position }
+    }
+
+    pub fn save_queue_now(&self) {
+        let data = self.saved_queue();
+        *self.queue_saved_at.lock().unwrap() = std::time::Instant::now();
+        if let Ok(bytes) = serde_json::to_vec(&data) {
+            let _ = crate::store::write_atomic(&self.data_dir.join("queue.json"), &bytes);
+        }
+    }
+}
+
+/// Write queue.json shortly after the last change (batches rapid edits).
+pub fn save_queue_soon(app: &AppHandle) {
+    let Some(st) = app.try_state::<AppState>() else { return };
+    let gen = st.queue_save_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        let st = app.state::<AppState>();
+        if st.queue_save_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
+            let st2 = app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || st2.state::<AppState>().save_queue_now()).await;
+        }
+    });
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,6 +274,11 @@ struct Tick {
 pub fn emit_tick(app: &AppHandle) {
     let Some(st) = app.try_state::<AppState>() else { return };
     let ps = st.playback_state();
+    // Remember the position now and then, so a restart resumes close to it.
+    if ps.status == "playing" && st.queue_saved_at.lock().unwrap().elapsed().as_secs() >= 10 {
+        *st.queue_saved_at.lock().unwrap() = std::time::Instant::now();
+        save_queue_soon(app);
+    }
     st.discord.update(presence(&ps));
     let sig = signature(&ps);
     let changed = *st.last_full.lock().unwrap() != sig;
@@ -256,6 +313,7 @@ fn presence(ps: &PlaybackState) -> Option<discord::Presence> {
 pub fn emit_queue(app: &AppHandle) {
     if let Some(st) = app.try_state::<AppState>() {
         let _ = app.emit("queue-changed", st.queue_snapshot());
+        save_queue_soon(app);
     }
 }
 

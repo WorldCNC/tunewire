@@ -10,9 +10,11 @@ use crate::{localfiles, secrets, spotdl, ytdlp};
 /// Push settings into the running subsystems (engine, Discord, spotDL, yt-dlp).
 pub fn apply_settings(st: &AppState, s: &Settings) {
     st.audio.set_volume(s.volume);
+    st.audio.set_eq(s.eq_enabled, &s.eq_gains);
+    st.audio.set_device(&s.output_device);
     st.audio.configure(s.crossfade, s.normalize);
     st.discord.configure(s.discord_rpc, &s.discord_client_id, s.discord_buttons);
-    spotdl::set_credentials(&s.spotify_client_id, &secrets::get(secrets::SPOTIFY_SECRET).unwrap_or_default());
+    spotdl::set_client_id(&s.spotify_client_id);
     let bundled = ytdlp::bundled_path(&st.data_dir.join("bin"));
     if s.ytdlp_source == "bundled" && bundled.exists() {
         ytdlp::set_binary(&bundled.to_string_lossy());
@@ -56,7 +58,8 @@ pub fn get_settings(st: State<'_, AppState>) -> Settings {
 
 /// Shallow-merge a partial settings object.
 #[tauri::command]
-pub fn update_settings(st: State<'_, AppState>, patch: Value) -> AppResult<Settings> {
+pub fn update_settings(app: AppHandle, st: State<'_, AppState>, patch: Value) -> AppResult<Settings> {
+    let old_device = st.store.settings().output_device;
     let current = serde_json::to_value(st.store.settings())?;
     let mut merged = current.as_object().cloned().unwrap_or_default();
     if let Some(p) = patch.as_object() {
@@ -69,8 +72,23 @@ pub fn update_settings(st: State<'_, AppState>, patch: Value) -> AppResult<Setti
     }
     let new: Settings = serde_json::from_value(Value::Object(merged))?;
     let s = st.store.update_settings(|s| *s = new)?;
+    // Switching output stops the engine; continue the song on the new device.
+    let resume = (s.output_device != old_device && st.now.lock().unwrap().phase == crate::state::Phase::Active)
+        .then(|| (st.audio.status().position, st.queue.lock().unwrap().current))
+        .and_then(|(pos, i)| i.map(|i| (pos, i)));
     apply_settings(&st, &s);
+    if let Some((pos, i)) = resume {
+        let uid = st.queue.lock().unwrap().items.get(i).map(|x| x.uid).unwrap_or(0);
+        *st.resume_position.lock().unwrap() = Some((uid, pos));
+        crate::controller::spawn_play(&app, i, false);
+    }
     Ok(s)
+}
+
+/// Audio outputs for Settings → Sound.
+#[tauri::command]
+pub fn list_output_devices() -> Vec<crate::audio::OutputDevice> {
+    crate::audio::output_devices()
 }
 
 /// Store (or clear, with "") the Spotify client secret in the OS keychain.

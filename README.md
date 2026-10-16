@@ -59,7 +59,26 @@ cd src-tauri && cargo tauri build
 
 For macOS bundles, first generate an `.icns`: `cargo tauri icon icons/icon.png`.
 
-The frontend is static files embedded at compile time. After editing `src/`, run `cargo run` again. No npm is needed.
+## Developing without rebuilding
+
+**Live app.** Run this from `src-tauri`:
+```sh
+cargo tauri dev
+```
+It starts `scripts/devserver.py` and opens a debug build that loads the frontend from it:
+- **Frontend (`src/`):** saving any HTML, CSS or JS file reloads the window within about a second, with no rebuild.
+- **Rust (`src-tauri/src/`):** changes trigger an automatic incremental rebuild and restart, about 10–20 s instead of the 2-minute release build.
+- **Devtools:** right-click → Inspect element.
+
+Install the CLI once with `cargo install tauri-cli --version "^2" --locked`. The dev server needs Python 3.
+
+**Browser preview (UI only):**
+```sh
+python3 scripts/devserver.py      # open http://127.0.0.1:1420 in any browser
+```
+Outside the app there's no Rust backend, so `dev/mock.js` stands in with sample songs, an artist page, synced lyrics, a queue and simulated playback. This is the fastest loop for styling, and it keeps live reload. The mock is injected only by the dev server and is never part of a release build.
+
+**Release builds** embed `src/` at compile time, so only `cargo build --release` / `cargo tauri build` need a full rebuild.
 
 ## Releases and auto-update
 

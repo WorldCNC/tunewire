@@ -4,7 +4,13 @@
   "version": "1.0.0",
   "identifier": "app.tunewire.player",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../src",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeDevCommand": {
+      "script": "python3 scripts/devserver.py",
+      "cwd": "..",
+      "wait": false
+    }
   },
   "app": {
     "withGlobalTauri": true,

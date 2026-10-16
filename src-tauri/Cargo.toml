@@ -12,6 +12,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
 
+[features]
+# Plain `cargo build`/`cargo run` embed the frontend; `cargo tauri dev`
+# disables default features and loads the live dev server instead.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-window-state = "2.5"

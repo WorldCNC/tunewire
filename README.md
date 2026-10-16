@@ -78,7 +78,7 @@ python3 scripts/devserver.py      # open http://127.0.0.1:1420 in any browser
 ```
 Outside the app there's no Rust backend, so `dev/mock.js` stands in with sample songs, an artist page, synced lyrics, a queue and simulated playback. This is the fastest loop for styling, and it keeps live reload. The mock is injected only by the dev server and is never part of a release build.
 
-**Release builds** embed `src/` at compile time, so only `cargo build --release` / `cargo tauri build` need a full rebuild.
+**Standalone builds** (`cargo build`, `cargo build --release`, `cargo run`, `cargo tauri build`) embed `src/` at compile time and run without the dev server. Only `cargo tauri dev` loads the frontend from it. If the window says "Could not connect to 127.0.0.1", that binary was built by `cargo tauri dev`; start it through `cargo tauri dev` again or rebuild with `cargo build --release`.
 
 ## Releases and auto-update
 

@@ -1,6 +1,6 @@
 [package]
 name = "tunewire"
-version = "1.0.2"
+version = "1.0.3"
 description = "Native multi-source music player (SoundCloud / YouTube Music / Spotify via yt-dlp)"
 edition = "2021"
 rust-version = "1.90"

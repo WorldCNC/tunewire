@@ -15,11 +15,13 @@
     <aside class="sidebar">
       <div class="brand">Tunewire</div>
       <nav class="nav" id="nav">
-        <button class="nav-item active" data-view="search"><i data-icon="search"></i><span>Search</span></button>
+        <button class="nav-item active" data-view="home"><i data-icon="home"></i><span>Home</span></button>
+        <button class="nav-item" data-view="search"><i data-icon="search"></i><span>Search</span></button>
         <button class="nav-item" data-view="charts"><i data-icon="chart"></i><span>Charts</span></button>
         <button class="nav-item" data-view="releases"><i data-icon="sparkle"></i><span>New releases</span><em class="nav-count new" id="rel-count"></em></button>
         <button class="nav-item" data-view="favorites"><i data-icon="heart"></i><span>Liked</span><em class="nav-count" id="fav-count"></em></button>
         <button class="nav-item" data-view="history"><i data-icon="clock"></i><span>History</span></button>
+        <button class="nav-item" data-view="stats"><i data-icon="pulse"></i><span>Your stats</span></button>
         <button class="nav-item" data-view="playlists"><i data-icon="list"></i><span>Playlists</span></button>
         <button class="nav-item" data-view="downloads"><i data-icon="download"></i><span>Downloads</span><em class="nav-count" id="dl-count"></em></button>
         <button class="nav-item" data-view="local"><i data-icon="folder"></i><span>Local files</span><em class="nav-count" id="local-count"></em></button>
@@ -30,6 +32,7 @@
         <div id="plugin-nav" class="plugin-nav"></div>
       </nav>
       <div class="nav-foot">
+        <button class="update-pill" id="update-pill" hidden><i data-icon="download"></i><span>Update ready</span><em>Restart</em></button>
         <button class="nav-item" data-view="themes"><i data-icon="palette"></i><span>Themes</span></button>
         <button class="nav-item" data-view="plugins"><i data-icon="puzzle"></i><span>Plugins</span></button>
         <button class="nav-item" data-view="settings"><i data-icon="gear"></i><span>Settings</span></button>
@@ -59,7 +62,10 @@
       </header>
 
       <div class="views">
-        <section class="view active" id="view-search">
+        <section class="view active" id="view-home"><div id="home-body"></div></section>
+        <section class="view" id="view-mix"><div id="mix-body"></div></section>
+        <section class="view" id="view-stats"><div id="stats-body"></div></section>
+        <section class="view" id="view-search">
           <div id="search-home"></div>
           <div id="search-body" hidden>
             <div class="page-head">
@@ -250,6 +256,7 @@
   <script src="js/lyrics.js"></script>
   <script src="js/themes.js"></script>
   <script src="js/plugins.js"></script>
+  <script src="js/foryou.js"></script>
   <script src="js/update.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/shortcuts.js"></script>

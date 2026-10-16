@@ -59,11 +59,13 @@ async function wireEvents() {
     if (level !== 'info' || message !== 'End of queue' || state.queue.items.length) toast(message, level);
     plugins.emit('status', e.payload);
   });
+  await listen('for-you-ready', () => { if (state.view === 'home') renderHome(); });
   await listen('library-changed', (e) => {
     const what = e.payload;
     if (what === 'playlists') refreshPlaylists();
     if (what === 'favorites') refreshFavorites();
     if (what === 'history' && state.view === 'history') refreshHistory();
+    if (what === 'history' && state.view === 'stats') renderStats();
     if (what === 'downloads') refreshDownloads();
     if (what === 'local') refreshLocalCount();
     if (what === 'followed') refreshFollowed();
@@ -99,6 +101,7 @@ async function boot() {
   renderPlayback();
   await Promise.all([refreshHistory().catch(() => {}), refreshPlaylists(), refreshFavorites(), refreshDownloads(), refreshLocalCount(), refreshFollowed()]);
   renderHero();
+  renderHome();
   $('#search-input').focus();
 
   // Slower checks (they start processes or use the network) after first paint.
@@ -121,7 +124,8 @@ async function boot() {
   });
 
   for (const id of state.settings.enabled_plugins || []) plugins.start(id);
-  if (state.settings.auto_update !== false) setTimeout(() => checkForUpdate(false), 8000);
+  if (state.settings.auto_update !== false) scheduleUpdateChecks();
+  showWhatsNew();
   setTimeout(checkReleasesQuietly, 5000);
 }
 

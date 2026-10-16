@@ -144,6 +144,10 @@ pub fn set_volume(app: AppHandle, st: State<'_, AppState>, volume: f32) -> AppRe
 pub fn seek(app: AppHandle, st: State<'_, AppState>, position: f64) {
     st.audio.seek(position);
     emit_soon(&app);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        crate::media::position_changed(&app);
+    });
 }
 
 #[tauri::command]

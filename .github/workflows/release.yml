@@ -53,6 +53,19 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          notes=$(awk -v tag="## ${GITHUB_REF_NAME}" '$0==tag {on=1; next} /^## / {on=0} on' CHANGELOG.md | sed '/./,$!d')
+          {
+            echo 'body<<EOF_NOTES'
+            echo "${notes:-See the commits for this release.}"
+            echo
+            echo '**Windows:** the -setup.exe installer updates itself; .msi is also available. Needs yt-dlp; Settings → Tools can install a managed copy.'
+            echo 'EOF_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,9 +75,7 @@ jobs:
           projectPath: src-tauri
           tagName: ${{ github.ref_name }}
           releaseName: Tunewire ${{ github.ref_name }}
-          releaseBody: |
-            **Windows:** the -setup.exe installer updates itself; .msi is also available.
-            Needs yt-dlp. Settings → Tools can install a managed copy.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

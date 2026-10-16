@@ -240,6 +240,7 @@ pub fn emit_playback(app: &AppHandle) {
         let ps = st.playback_state();
         st.discord.update(presence(&ps));
         *st.last_full.lock().unwrap() = signature(&ps);
+        crate::media::update(app, &ps);
         let _ = app.emit("playback", ps);
     }
 }
@@ -274,16 +275,21 @@ struct Tick {
 pub fn emit_tick(app: &AppHandle) {
     let Some(st) = app.try_state::<AppState>() else { return };
     let ps = st.playback_state();
+    crate::stats::on_tick(&ps);
     // Remember the position now and then, so a restart resumes close to it.
     if ps.status == "playing" && st.queue_saved_at.lock().unwrap().elapsed().as_secs() >= 10 {
         *st.queue_saved_at.lock().unwrap() = std::time::Instant::now();
         save_queue_soon(app);
     }
     st.discord.update(presence(&ps));
+    if ps.status == "playing" {
+        crate::media::update(app, &ps);
+    }
     let sig = signature(&ps);
     let changed = *st.last_full.lock().unwrap() != sig;
     if changed {
         *st.last_full.lock().unwrap() = sig;
+        crate::media::update(app, &ps);
         let _ = app.emit("playback", ps);
     } else {
         let _ = app.emit("playback-tick", Tick { status: ps.status, position: ps.position, duration: ps.duration, buffered: ps.buffered, stalled: ps.stalled });

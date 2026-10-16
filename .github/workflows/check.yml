@@ -1,0 +1,24 @@
+# Compiles and tests on Windows (the platform releases ship for) on every push,
+# so platform-specific code can't break a release unnoticed.
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Build
+        working-directory: src-tauri
+        run: cargo build --locked
+      - name: Offline tests
+        working-directory: src-tauri
+        run: cargo test --locked

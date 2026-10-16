@@ -32,6 +32,13 @@
     auto_update: false, discord_rpc: false, discord_client_id: '', discord_buttons: true, repeat: 'off', example_plugin_installed: true,
     autoplay: true, eq_enabled: false, eq_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], output_device: '', cover_accent: true, charts_country: 'ZZ', search_history: ['daft punk', 'tame impala'], background: 'art', background_strength: 45, background_image: '',
   };
+  const mix = (id, kind, title, subtitle, ts) => ({ id, kind, title, subtitle, covers: ts.map((t) => t.thumbnail).filter(Boolean).slice(0, 4), tracks: ts });
+  const forYou = (stale) => ({
+    daily: stale ? [] : [mix('daily-1', 'daily', 'Daily Mix 1', 'Daft Punk, Justice, Cassius and more', tracks.slice(0, 6)), mix('daily-2', 'daily', 'Daily Mix 2', 'Tame Impala, Mild High Club and more', tracks.slice(2, 7))],
+    discover: stale ? null : mix('discover', 'discover', 'Discover Weekly', 'New music picked for you · refreshed every Monday', tracks.slice(1, 6)),
+    local: [mix('repeat', 'repeat', 'On Repeat', 'Your most played songs of the last 30 days', tracks.slice(0, 5))],
+    stale, empty: false,
+  });
   let uid = 0;
   const queue = { items: tracks.slice(0, 5).map((t) => ({ uid: ++uid, track: t, platform: null })), current: 0 };
   let mockSpotifyUser = null;
@@ -148,6 +155,23 @@
     play_url: () => ({ title: 'Link', url: 'x', platform: 'youtube', tracks: tracks.slice(0, 1) }),
     load_playlist: () => ({ title: 'Remote playlist', url: 'x', platform: 'soundcloud', tracks: tracks.slice(1, 5) }),
     set_spotify_secret: () => null, ytdlp_install: () => ({ ok: true, version: 'mock' }),
+    for_you: () => forYou(true),
+    refresh_for_you: async () => { await new Promise((r) => setTimeout(r, 400)); return forYou(false); },
+    listening_stats: ({ range }) => {
+      const top = tracks.slice(0, 6);
+      const series = range === 'year' ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] : Array.from({ length: 28 }, (_, i) => `Oct ${i + 1}`);
+      return {
+        range, from: 0, to: Date.now(), minutes: 1834.5, plays: 412, skips: 37, tracks: 128, artists: 46, new_artists: 19, days_active: 25, streak: 6, longest_streak: 12,
+        top_tracks: top.map((t, i) => ({ track: t, plays: 40 - i * 5, minutes: (40 - i * 5) * 4 })),
+        top_artists: [['Daft Punk', 'fa5IWHDbftI'], ['Tame Impala', 'wU26xVT_vBU'], ['Steve Lacy', 'GDpmVUEjagg'], ['Djo', '5NV6Rdv1a3I']].map(([name, id], i) => ({ name, plays: 90 - i * 15, minutes: 400 - i * 60, thumbnail: yt(id), top_track: tracks[i] })),
+        hours: Array.from({ length: 24 }, (_, h) => Math.max(0, 60 - Math.abs(h - 21) * 7)),
+        weekdays: [120, 180, 90, 200, 260, 310, 150],
+        series: series.map((label, i) => ({ label, minutes: 20 + ((i * 37) % 90) })),
+        platforms: [{ label: 'YouTube Music', minutes: 1200 }, { label: 'SoundCloud', minutes: 400 }, { label: 'Spotify', minutes: 234.5 }],
+        busiest_day: { label: 'Oct 11 2026', minutes: 214 }, estimated: false, years: [2026, 2025], first_play: Date.now() - 400 * 864e5,
+      };
+    },
+    save_share_image: ({ name }) => `/home/you/Pictures/${name}.png`,
   };
 
   window.__TAURI__ = {

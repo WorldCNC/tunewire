@@ -26,10 +26,12 @@ mod discord;
 mod downloads;
 mod eq;
 mod explore;
+mod foryou;
 mod error;
 mod http;
 mod localfiles;
 mod lyrics;
+mod media;
 mod models;
 mod plugins;
 mod radio;
@@ -39,6 +41,7 @@ mod spotdl;
 mod spotify;
 mod spotify_play;
 mod state;
+mod stats;
 mod store;
 mod stream;
 mod themes;
@@ -99,7 +102,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_main(app: &AppHandle) {
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -172,6 +175,20 @@ pub fn run() {
                 queue_saved_at: Mutex::new(std::time::Instant::now()),
             });
             system::apply_settings(&app.state::<AppState>(), &settings);
+            {
+                let st = app.state::<AppState>();
+                let history = st.store.library.lock().unwrap().history.clone();
+                stats::init(&st.store.dir, &history);
+            }
+            // Build today's mixes in the background so Home opens instantly.
+            let h = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                let st = h.state::<AppState>();
+                if commands::foryou::for_you(st.clone()).stale && commands::foryou::refresh_for_you(st, None).await.is_ok() {
+                    let _ = tauri::Emitter::emit(&h, "for-you-ready", ());
+                }
+            });
             // Python + yt_dlp import take ~0.5 s; pay it now, not on the first song.
             tauri::async_runtime::spawn(async {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -188,6 +205,8 @@ pub fn run() {
                     }
                 });
             }
+            media::init(app);
+            media::update(app.handle(), &app.state::<AppState>().playback_state());
             if let Err(e) = setup_tray(app) {
                 // Some Linux desktops have no tray; that's fine.
                 eprintln!("tunewire: tray unavailable: {e}");
@@ -230,6 +249,10 @@ pub fn run() {
             playback::play_tracks,
             playback::start_radio,
             playback::prefetch_track,
+            commands::foryou::for_you,
+            commands::foryou::refresh_for_you,
+            commands::foryou::listening_stats,
+            commands::foryou::save_share_image,
             commands::explore::search_suggestions,
             commands::explore::search_history,
             commands::explore::clear_search_history,
@@ -296,6 +319,11 @@ pub fn run() {
             customize::set_plugin_setting,
             customize::plugins_dir,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_, ev| {
+            if let tauri::RunEvent::Exit = ev {
+                stats::flush();
+            }
+        });
 }

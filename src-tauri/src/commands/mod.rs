@@ -3,6 +3,7 @@
 pub mod customize;
 pub mod discover;
 pub mod explore;
+pub mod foryou;
 pub mod library;
 pub mod offline;
 pub mod playback;

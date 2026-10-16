@@ -195,7 +195,7 @@ fn shuffle<T>(v: &mut [T], mut x: u64) {
     }
 }
 
-fn primary_artist(a: &str) -> String {
+pub(crate) fn primary_artist(a: &str) -> String {
     let first = a.split([',', '&']).next().unwrap_or(a);
     let first = first.split(" feat").next().unwrap_or(first).split(" ft.").next().unwrap_or(first);
     crate::search::norm_text(first)

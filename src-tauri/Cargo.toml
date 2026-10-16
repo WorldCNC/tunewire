@@ -43,6 +43,8 @@ librespot-metadata = { version = "0.8", default-features = false, features = ["r
 librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
+souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [profile.release]
 codegen-units = 1

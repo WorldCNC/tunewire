@@ -61,6 +61,9 @@ const ICONS = {
   alert: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
   bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  home: '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  gift: '<rect x="3" y="8" width="18" height="5" rx="1"/><path d="M5 13v8h14v-8M12 8v13M12 8S10 3 7.5 4 9 8 12 8zm0 0s2-5 4.5-4S15 8 12 8z"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   radio: '<circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/>',
@@ -216,7 +219,7 @@ const state = {
   favKeys: new Set(),
   history: [],
   results: [],
-  view: 'search',
+  view: 'home',
   source: 'all',
   selectedPlaylist: null, // id of local playlist, or 'remote'
   remote: null,           // RemotePlaylist currently shown
@@ -358,6 +361,8 @@ function showView(name, { push = true } = {}) {
   if (name === 'local') renderLocal();
   if (name === 'charts') renderCharts();
   if (name === 'releases') renderReleases();
+  if (name === 'home') renderHome();
+  if (name === 'stats') renderStats();
 }
 
 function goBack() {

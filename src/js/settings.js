@@ -68,7 +68,7 @@ function renderSettings() {
 
   const spotdl = state.tools?.spotdl;
   const backend = h('select', {},
-    ...[['auto', 'Automatic'], ['spotdl', 'spotDL only'], ['embed', 'Embed page only'], ['off', 'Off']]
+    ...[['auto', 'Automatic'], ['embed', 'Spotify web only'], ['spotdl', 'spotDL for links'], ['off', 'Off']]
       .map(([v, l]) => h('option', { value: v, selected: s.spotify_backend === v }, l)));
   backend.addEventListener('change', () => updateSettings({ spotify_backend: backend.value }));
   const credId = h('input', { type: 'text', value: s.spotify_client_id || '', placeholder: 'Client ID', style: 'width:150px', spellcheck: 'false' });
@@ -95,11 +95,11 @@ function renderSettings() {
       settingToggle('Search YouTube in “All”', 'Adds regular YouTube uploads (live versions, covers) to combined searches.', 'include_youtube_in_all'),
       settingToggle('Close to tray', 'Closing the window keeps music playing. Quit from the tray icon.', 'close_to_tray')),
     group('Spotify', 'spotify',
-      settingRow('Metadata source', 'Spotify audio is DRM-protected, so songs play from a matching YouTube Music or SoundCloud upload. spotDL adds search and is the fallback for playlist import; the embed page loads pasted links instantly.', backend),
-      settingRow('spotDL', spotdl ? `Version ${spotdl}` : 'Not found. Install with <code>pipx install spotdl</code> or <code>uv tool install spotdl</code>.',
+      settingRow('Metadata source', 'Search uses Spotify’s own web search (no account needed); pasted links load from the public embed page. spotDL is only a fallback. Spotify audio is DRM-protected, so songs play from a matching YouTube Music or SoundCloud upload.', backend),
+      settingRow('spotDL (optional fallback)', spotdl ? `Version ${spotdl}` : 'Not installed. Optional: <code>pipx install spotdl</code> or <code>uv tool install spotdl</code>.',
         h('div', { class: 'actions' }, h('span', { class: `status-pill ${spotdl ? 'ok' : 'bad'}` }, spotdl ? 'Installed' : 'Missing'), recheck(refreshTools))),
-      settingToggle('Search Spotify in “All”', 'Waits up to 15 seconds for Spotify, then shows the other results without it.', 'include_spotify_in_all'),
-      settingRow('Spotify app credentials', 'Optional. spotDL’s built-in credentials are shared and often rate-limited, which can make a search take a minute. A free app from <code>developer.spotify.com/dashboard</code> avoids that (redirect URI: <code>http://127.0.0.1:9900/</code>). The secret is stored in your system keychain, not in a file.', h('div', { class: 'actions' }, credId, credSecret))),
+      settingToggle('Search Spotify in “All”', 'Adds Spotify results to combined searches (about half a second).', 'include_spotify_in_all'),
+      settingRow('Spotify app credentials (spotDL)', 'Only used by the spotDL fallback. Its built-in credentials are shared and often rate-limited, which can make it take a minute. A free app from <code>developer.spotify.com/dashboard</code> avoids that (redirect URI: <code>http://127.0.0.1:9900/</code>). The secret is stored in your system keychain, not in a file.', h('div', { class: 'actions' }, credId, credSecret))),
     group('Sound', null,
       settingToggle('Volume normalization', 'Evens out loudness between songs and platforms. Measured from the first seconds of each song, with a soft limiter against clipping.', 'normalize'),
       settingRow('Crossfade', 'Overlap the end of a song with the start of the next. At 0, songs still play back to back without a gap.', crossfadeControl())),

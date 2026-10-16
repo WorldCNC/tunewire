@@ -17,7 +17,8 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
     if settings.last_source != source {
         let _ = st.store.update_settings(|s| s.last_source = source.clone());
     }
-    let spotify_ok = matches!(settings.spotify_backend.as_str(), "auto" | "spotdl") && spotdl::available().await;
+    // Spotify search works without spotDL now (web search, spotDL as fallback).
+    let spotify_ok = settings.spotify_backend != "off";
     let spotify = spotify_ok && (source == "spotify" || settings.include_spotify_in_all);
     let gen = st.search_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let res = search::search(query, source, limit, settings.platform_order, st.cache.clone(), settings.include_youtube_in_all, spotify).await?;

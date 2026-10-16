@@ -645,7 +645,15 @@ async fn search_platform(platform: Platform, query: String, limit: usize, cache:
         return Ok((crate::localfiles::search(&query, limit), false));
     }
     if platform == Platform::Spotify {
-        let versions = crate::spotdl::save(&query).await?;
+        // Spotify's own web search (instant); spotDL only if that fails.
+        let versions = match crate::spotify::search(&query, limit).await {
+            Ok(v) => v,
+            Err(e) if crate::spotdl::available().await => {
+                let v = crate::spotdl::save(&query).await.map_err(|_| e)?;
+                v
+            }
+            Err(e) => return Err(e),
+        };
         if versions.is_empty() {
             return Err(AppError::EmptyResults);
         }
@@ -704,9 +712,7 @@ fn single_platform(source: &str, spotify: bool) -> AppResult<Platform> {
         "youtube" => Ok(Platform::Youtube),
         "local" => Ok(Platform::Local),
         "spotify" if spotify => Ok(Platform::Spotify),
-        "spotify" => Err(AppError::Unsupported(
-            "Spotify search needs spotDL. Install it (`pipx install spotdl` or `uv tool install spotdl`) and set Settings → Spotify backend to Auto or spotDL.".into(),
-        )),
+        "spotify" => Err(AppError::Unsupported("Spotify support is turned off (Settings → Spotify)".into())),
         other => Err(AppError::Invalid(format!("unknown source '{other}'"))),
     }
 }

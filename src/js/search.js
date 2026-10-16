@@ -109,8 +109,8 @@ function renderHero() {
   const home = $('#search-home');
   const spot = state.tools?.spotdl;
   const intro = h('p', { class: 'home-intro' },
-    'Searches ', badge('ytmusic'), ', ', badge('soundcloud'), ' and ', badge('youtube'),
-    spot ? [' (plus ', badge('spotify'), ' via spotDL)'] : '',
+    'Searches ', badge('ytmusic'), ', ', badge('soundcloud'), ', ', badge('youtube'),
+    [' and ', badge('spotify')],
     ' at once. Each song appears once, with an icon for every source that has it. You can also paste a track or playlist link.');
   const blocks = [h('div', { class: 'home-block' }, h('h1', { style: 'margin-bottom:8px' }, 'Search'), intro)];
   const recent = recentSearches();

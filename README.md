@@ -100,11 +100,12 @@ The decoder runs on its own thread and feeds a bounded channel. The rodio source
 
 **Version choice and fallback.** Clicking a song that has several versions opens the version picker, with the highest-priority platform preselected. Double-click (or the ▶ button) plays the default right away, and the platform badges play that specific version. If extraction fails, the next platform in your order is tried. If every version fails, Tunewire searches for an equivalent upload as a last resort.
 
-**Spotify.** Spotify audio is DRM-protected, so it always plays through the best YouTube Music or SoundCloud match. Metadata comes from two sources:
-- **spotDL** (`pipx install spotdl` or `uv tool install spotdl`) gives real Spotify search: choose the **Spotify** source, or turn on "Include Spotify in All". It's also the fallback for importing playlists and albums. spotDL's built-in Spotify credentials are shared by everyone and often rate-limited (searches can take a minute). Paste your own free app's ID and secret (developer.spotify.com/dashboard) in Settings → Spotify to make it fast. In "All" searches, Spotify is capped at 15 s so it never blocks other results.
-- **The public embed page** (no key) gives instant playlist and album imports, and is used first in Auto mode.
+**Spotify.** Spotify audio is DRM-protected, so it always plays through the best YouTube Music or SoundCloud match. Metadata comes from three sources:
+- **Search:** Spotify's own web search, the same GraphQL endpoint `open.spotify.com/search` uses, with the anonymous token every public embed page carries. No account, API key or spotDL needed. Results arrive in about 0.7 s once the token is cached. If Spotify changes the search query ID, the current one is re-read from the web player's JavaScript automatically.
+- **Pasted track, album and playlist links:** the public embed page, which is instant.
+- **spotDL (optional):** a fallback for both, if installed. Its built-in Spotify credentials are shared and often rate-limited; your own app's ID and secret (Settings → Spotify, redirect URI `http://127.0.0.1:9900/`) fix that.
 
-Choose the mode in Settings → *Spotify backend*: Auto, spotDL only, embed page only, or off. When creating the Spotify app, use the redirect URI `http://127.0.0.1:9900/` and select Web API (only the client ID and secret are actually used).
+This relies on unofficial Spotify endpoints, so it can break when Spotify changes their site; the fallbacks keep search working when spotDL is installed. Choose the mode in Settings → Spotify.
 
 **Discord Rich Presence.** Settings → Discord. Shows "Listening to <song>" with artwork, artist, a progress bar and an optional "Open on <platform>" button, over Discord's local IPC (`discord-rich-presence` crate). Updates are rate-limited to Discord's limits, and it reconnects automatically if Discord restarts. The activity name comes from the Discord application ID in Settings. Create your own app named "Tunewire" at discord.com/developers and paste its ID. **Vesktop users:** enable Vesktop Settings → arRPC, otherwise there is no Discord socket to connect to. Settings → Discord shows a live connection status.
 
@@ -245,7 +246,7 @@ Events: `playback` (about 4 Hz while playing), `queue-changed`, `track-started`,
 
 ## Known limitations
 
-- **Spotify:** playback is always a matched upload, and a match can occasionally be wrong. Search needs spotDL and is slow unless you add your own Spotify app credentials.
+- **Spotify:** playback is always a matched upload, and a match can occasionally be wrong. Search uses unofficial web endpoints that Spotify may change.
 - **YouTube Music search:** yt-dlp's flat results carry no artist or duration. They're borrowed from YouTube results when the same video appears there; otherwise the artist is inferred from your query words.
 - **Seeking ahead:** seeking past what has downloaded waits for the download to reach that point. Downloads usually finish within seconds.
 - **No Opus/WebM decoding:** symphonia lacks Opus, so the format selector avoids it. A source that only offers Opus fails over to the next platform.

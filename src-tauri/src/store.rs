@@ -77,7 +77,7 @@ impl Default for Settings {
             close_to_tray: false,
             include_youtube_in_all: true,
             spotify_backend: "auto".into(),
-            include_spotify_in_all: false,
+            include_spotify_in_all: true,
             spotify_client_id: String::new(),
             spotify_client_secret: String::new(),
             normalize: true,

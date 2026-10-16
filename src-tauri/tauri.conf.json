@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tunewire",
+  "version": "0.1.0",
+  "identifier": "app.tunewire.player",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Tunewire",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' https: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:; worker-src blob:; connect-src ipc: http://ipc.localhost https:; object-src 'none'; frame-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Music",
+    "shortDescription": "Native multi-source music player",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUzRTdEMzE1N0QwMUUzREYKUldUZjR3RjlGZFBuNDc2U1MraWhGTWVIWW10YUpxQ3pGTWdxOTA5U3h0QW9nSFcxdjV6T0pGNDYK",
+      "endpoints": [
+        "https://github.com/WorldCNC/tunewire/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

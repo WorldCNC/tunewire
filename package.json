@@ -1,0 +1,11 @@
+{
+  "name": "tunewire",
+  "private": true,
+  "description": "Only used by CI to provide the Tauri CLI; the app itself has no JS build step.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0"
+  }
+}

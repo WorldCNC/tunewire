@@ -1,0 +1,40 @@
+[package]
+name = "tunewire"
+version = "0.1.0"
+description = "Native multi-source music player (SoundCloud / YouTube Music / Spotify via yt-dlp)"
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "tunewire_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-window-state = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "sync", "time", "macros", "rt-multi-thread", "io-util"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3", "mp4", "flac", "vorbis", "wav"] }
+ureq = "3.4"
+strsim = "0.11"
+thiserror = "2"
+discord-rich-presence = "1.1"
+symphonia-adapter-libopus = "=0.2.3"
+symphonia = { version = "0.5.5", default-features = false, features = ["mkv", "ogg", "isomp4", "aac", "mp3", "flac", "vorbis", "pcm", "wav"] }
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-updater = "2.14"
+tauri-plugin-process = "2.4"
+lofty = "0.22"
+sha2 = "0.10"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

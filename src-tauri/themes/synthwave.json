@@ -1,0 +1,32 @@
+{
+  "id": "synthwave",
+  "name": "Synthwave",
+  "author": "Tunewire",
+  "dark": true,
+  "vars": {
+    "--bg": "#16101f",
+    "--bg-elev": "#1c1427",
+    "--bg-elev-2": "#241a32",
+    "--surface-hover": "#231a30",
+    "--selected": "#2f2340",
+    "--border": "#30243f",
+    "--text": "#efe6fa",
+    "--text-dim": "#b3a3c8",
+    "--text-faint": "#7d6c94",
+    "--accent": "#ff6ec7",
+    "--accent-contrast": "#25081a",
+    "--accent-soft": "rgba(255, 110, 199, 0.12)",
+    "--danger": "#ff6b81",
+    "--warn": "#ffcf5c",
+    "--ok": "#6fe0b8",
+    "--radius": "3px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(0, 0, 0, 0.5)",
+    "--badge-soundcloud": "#ff5500",
+    "--badge-ytmusic": "#ff0033",
+    "--badge-youtube": "#ff0000",
+    "--badge-spotify": "#1ed760"
+  },
+  "css": ""
+}

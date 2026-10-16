@@ -1,0 +1,138 @@
+'use strict';
+
+// ===========================================================================
+// Downloads & local files
+// ===========================================================================
+
+async function refreshDownloads() {
+  try { state.downloads = await call('list_downloads'); } catch { state.downloads = []; }
+  state.downloadKeys = new Set(state.downloads.map((d) => d.key));
+  $('#dl-count').textContent = state.downloads.length || '';
+  if (state.view === 'downloads') renderDownloads();
+}
+
+async function downloadTracks(tracks) {
+  const todo = tracks.filter((t) => !state.downloadKeys.has(t.key) && !t.versions.every((v) => v.platform === 'local'));
+  if (!todo.length) return toast('Already downloaded', 'info', 1500);
+  try {
+    const n = await call('download_tracks', { tracks: todo });
+    toast(n === 1 ? `Downloading “${todo[0].title}”` : `Downloading ${n} songs`, 'info', 2000);
+  } catch (e) { toast(errMsg(e), 'error'); }
+}
+
+async function deleteDownload(key) {
+  try { await call('delete_download', { key }); toast('Download removed', 'info', 1500); } catch (e) { toast(errMsg(e), 'error'); }
+}
+
+function fmtSize(b) {
+  return b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(1)} MB`;
+}
+
+function onDownloadEvent({ key, title, state: s, message }) {
+  if (s === 'done' || s === 'error') state.downloading.delete(key);
+  else state.downloading.set(key, { title, state: s });
+  if (s === 'error') toast(`Download failed: ${title}. ${message || ''}`, 'error');
+  if (s === 'done' && state.downloading.size === 0) toast('Downloads finished', 'ok', 2000);
+  renderDownloadActivity();
+}
+
+function renderDownloadActivity() {
+  const box = $('#dl-active');
+  if (!box) return;
+  const items = [...state.downloading.values()];
+  box.replaceChildren(...(items.length ? [h('div', { class: 'notice' },
+    h('span', { class: 'spinner' }),
+    `${items.filter((i) => i.state === 'downloading').length} downloading, ${items.filter((i) => i.state === 'queued').length} waiting: `,
+    items.slice(0, 3).map((i) => i.title).join(', ') + (items.length > 3 ? '…' : ''))] : []));
+}
+
+async function renderDownloads() {
+  $('#dl-dir').innerHTML = `Saved to <code>${esc(await call('downloads_dir').catch(() => ''))}</code>. Downloaded songs play from disk, even offline.`;
+  renderDownloadActivity();
+  const list = $('#dl-list');
+  const dl = state.downloads;
+  const total = dl.reduce((s, d) => s + d.size, 0);
+  $('#dl-meta').textContent = dl.length ? `${dl.length} songs, ${fmtSize(total)}` : '';
+  if (!dl.length) {
+    $('#dl-head').hidden = true;
+    list.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'No downloads yet.'), h('p', { class: 'small' }, 'Use “Download” in a song’s menu, or on an album or playlist.')));
+    return;
+  }
+  tableHead($('#dl-head'));
+  const tracks = dl.map((d) => d.track);
+  list.replaceChildren(...dl.map((d, i) => trackRow(d.track, i, {
+    sub: `${fmtSize(d.size)} · ${PLATFORMS[d.version.platform]?.label || ''}`,
+    onPlay: () => playList(tracks, i),
+    extraMenu: ['sep', { label: 'Delete file', icon: 'trash', onClick: () => deleteDownload(d.key) }],
+  })));
+  markPlaying();
+}
+$('#dl-play').addEventListener('click', () => playList(state.downloads.map((d) => d.track), 0));
+$('#dl-folder').addEventListener('click', async () => {
+  const dir = await pickFolder('Choose download folder');
+  if (dir) { await updateSettings({ downloads_dir: dir }); renderDownloads(); }
+});
+
+async function pickFolder(title) {
+  try {
+    const r = await window.__TAURI__.dialog.open({ directory: true, multiple: false, title });
+    return Array.isArray(r) ? r[0] : r;
+  } catch (e) {
+    toast(`Folder picker unavailable: ${errMsg(e)}`, 'error');
+    return null;
+  }
+}
+
+// Local library ---------------------------------------------------------------
+let localTracks = [];
+let localLimit = 300;
+
+async function refreshLocalCount() {
+  try { localTracks = await call('list_local'); } catch { localTracks = []; }
+  $('#local-count').textContent = localTracks.length || '';
+  $('#source-local').hidden = !localTracks.length;
+  if (state.view === 'local') renderLocal();
+}
+
+function renderLocal() {
+  const folders = state.settings?.local_folders || [];
+  $('#local-folders').replaceChildren(...folders.map((f) => h('div', { class: 'folder' },
+    h('span', { html: icon('folder') }), h('span', { class: 'path', title: f }, f),
+    h('button', { class: 'icon-btn small', title: 'Remove folder', html: icon('x'), onclick: async () => {
+      try { await call('remove_local_folder', { path: f }); state.settings = await call('get_settings'); renderLocal(); } catch (e) { toast(errMsg(e), 'error'); }
+    } }))));
+  const q = $('#local-filter').value.trim().toLowerCase();
+  const shown = q ? localTracks.filter((t) => `${t.title} ${t.artist} ${t.versions[0]?.album || ''}`.toLowerCase().includes(q)) : localTracks;
+  $('#local-meta').textContent = localTracks.length ? `${localTracks.length} songs in ${folders.length} folder${folders.length === 1 ? '' : 's'}` : '';
+  const list = $('#local-list');
+  if (!folders.length) {
+    $('#local-head').hidden = true;
+    list.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Add a folder with music files to play them here and include them in search.'), h('p', { class: 'small' }, 'MP3, M4A/AAC, FLAC, Ogg, Opus and WAV are supported.')));
+    return;
+  }
+  if (!shown.length) {
+    $('#local-head').hidden = true;
+    list.replaceChildren(h('div', { class: 'empty' }, h('p', {}, q ? 'No matches.' : 'No audio files found in these folders.')));
+    return;
+  }
+  tableHead($('#local-head'));
+  const rows = shown.slice(0, localLimit).map((t, i) => trackRow(t, i, { sub: t.versions[0]?.album || null, onPlay: () => playList(shown, i) }));
+  if (shown.length > localLimit) rows.push(h('button', { class: 'btn small show-more', onclick: () => { localLimit += 500; renderLocal(); } }, `Show more (${shown.length - localLimit} left)`));
+  list.replaceChildren(...rows);
+  markPlaying();
+}
+$('#local-filter').addEventListener('input', debounce(() => { localLimit = 300; renderLocal(); }, 150));
+$('#local-play').addEventListener('click', () => playList(localTracks, 0));
+$('#local-add').addEventListener('click', async () => {
+  const dir = await pickFolder('Add music folder');
+  if (!dir) return;
+  toast('Scanning folder…', 'info', 2000);
+  try {
+    const n = await call('add_local_folder', { path: dir });
+    state.settings = await call('get_settings');
+    toast(`${n} songs in your local library`, 'ok');
+  } catch (e) { toast(errMsg(e), 'error'); }
+});
+$('#local-rescan').addEventListener('click', async () => {
+  try { const n = await call('rescan_local'); toast(`${n} songs found`, 'ok', 2000); } catch (e) { toast(errMsg(e), 'error'); }
+});

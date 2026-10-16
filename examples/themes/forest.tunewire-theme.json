@@ -1,0 +1,32 @@
+{
+  "id": "forest",
+  "name": "Forest",
+  "author": "Tunewire examples",
+  "dark": true,
+  "vars": {
+    "--bg": "#0f1511",
+    "--bg-elev": "#151d17",
+    "--bg-elev-2": "#1b251e",
+    "--surface-hover": "#223027",
+    "--border": "#28372d",
+    "--text": "#e6efe8",
+    "--text-dim": "#9fb3a5",
+    "--text-faint": "#6a8070",
+    "--accent": "#7ed99b",
+    "--accent-contrast": "#0b1a10",
+    "--accent-soft": "rgba(126, 217, 155, 0.14)",
+    "--danger": "#ff7b72",
+    "--warn": "#e3b341",
+    "--ok": "#7ed99b",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 12px 32px rgba(0, 0, 0, 0.5)",
+    "--badge-soundcloud": "#f0883e",
+    "--badge-ytmusic": "#f85149",
+    "--badge-youtube": "#da3633",
+    "--badge-spotify": "#3fb950",
+    "--selected": "#22302a"
+  },
+  "css": ""
+}

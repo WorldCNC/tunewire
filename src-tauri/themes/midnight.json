@@ -1,0 +1,32 @@
+{
+  "id": "midnight",
+  "name": "Midnight",
+  "author": "Tunewire",
+  "dark": true,
+  "vars": {
+    "--bg": "#121212",
+    "--bg-elev": "#181818",
+    "--bg-elev-2": "#202020",
+    "--surface-hover": "#1f1f1f",
+    "--selected": "#2a2a2a",
+    "--border": "#262626",
+    "--text": "#ebebeb",
+    "--text-dim": "#a0a0a0",
+    "--text-faint": "#6c6c6c",
+    "--accent": "#e5a54b",
+    "--accent-contrast": "#1a1205",
+    "--accent-soft": "rgba(229, 165, 75, 0.12)",
+    "--danger": "#e5675f",
+    "--warn": "#e5a54b",
+    "--ok": "#6dbf8b",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(0, 0, 0, 0.45)",
+    "--badge-soundcloud": "#ff5500",
+    "--badge-ytmusic": "#ff0033",
+    "--badge-youtube": "#ff0000",
+    "--badge-spotify": "#1ed760"
+  },
+  "css": ""
+}

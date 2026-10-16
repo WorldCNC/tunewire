@@ -1,0 +1,7 @@
+/* Plugin styles are global; prefix your classes. */
+.npn h3 { font-size: 18px; margin: 0 0 2px; }
+.npn h4 { font-size: 13px; margin: 18px 0 6px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
+.npn-sub { color: var(--text-dim); margin: 0 0 12px; }
+.npn textarea { width: 100%; max-width: 640px; resize: vertical; }
+.npn-row { display: flex; gap: 8px; margin: 8px 0; }
+.npn ul { margin: 0; padding-left: 18px; color: var(--text-dim); }

@@ -1,0 +1,32 @@
+{
+  "id": "daylight",
+  "name": "Daylight",
+  "author": "Tunewire",
+  "dark": false,
+  "vars": {
+    "--bg": "#fafafa",
+    "--bg-elev": "#f2f2f2",
+    "--bg-elev-2": "#ffffff",
+    "--surface-hover": "#ebebeb",
+    "--selected": "#e0e0e0",
+    "--border": "#dcdcdc",
+    "--text": "#1d1d1d",
+    "--text-dim": "#5c5c5c",
+    "--text-faint": "#8f8f8f",
+    "--accent": "#b86e0c",
+    "--accent-contrast": "#ffffff",
+    "--accent-soft": "rgba(184, 110, 12, 0.1)",
+    "--danger": "#c8392f",
+    "--warn": "#a8670a",
+    "--ok": "#2f8a52",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(0, 0, 0, 0.14)",
+    "--badge-soundcloud": "#f05000",
+    "--badge-ytmusic": "#e0002d",
+    "--badge-youtube": "#e00000",
+    "--badge-spotify": "#159c48"
+  },
+  "css": ""
+}

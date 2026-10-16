@@ -21,13 +21,9 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
-            args: ""
+            args: "--bundles appimage,deb,rpm"
           - platform: windows-latest
-            args: ""
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+            args: "--bundles nsis,msi"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +40,6 @@ jobs:
           node-version: lts/*
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -67,7 +61,10 @@ jobs:
           projectPath: src-tauri
           tagName: ${{ github.ref_name }}
           releaseName: Tunewire ${{ github.ref_name }}
-          releaseBody: See the commits since the previous release for changes.
+          releaseBody: |
+            **Linux:** the AppImage updates itself; .deb and .rpm are also available.
+            **Windows:** the -setup.exe installer updates itself; .msi is also available.
+            Needs yt-dlp. Settings → Tools can install a managed copy.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

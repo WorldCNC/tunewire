@@ -66,7 +66,7 @@ The frontend is static files embedded at compile time. After editing `src/`, run
 Tunewire updates itself with `tauri-plugin-updater`. Releases live on GitHub, and every update is verified against the public key built into the app before it's installed. Settings → Tools → Updates has "Check now" and the startup check toggle.
 
 - **Signing key:** `~/.tauri/tunewire.key`, with its password in `~/.tauri/tunewire.key.password`. Never commit these; `.gitignore` excludes them. If the key is lost, existing installs can no longer verify updates, so back it up.
-- **CI:** `.github/workflows/release.yml` builds Linux (AppImage, .deb, .rpm), Windows (NSIS, MSI) and macOS (Apple Silicon and Intel) on every `v*` tag, signs them, and publishes a release with `latest.json`.
+- **CI:** `.github/workflows/release.yml` builds Linux (AppImage, .deb, .rpm) and Windows (NSIS, MSI) on every `v*` tag, signs them, and publishes a release with `latest.json`.
 - **Repository secrets:** `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 - **Cutting a release:** `scripts/release.sh 0.2.0` bumps the version, commits, tags and pushes; GitHub Actions does the rest.
 - **What updates:** auto-update works for the AppImage, the Windows installer and the macOS app. `.deb`/`.rpm` installs update through the package manager.

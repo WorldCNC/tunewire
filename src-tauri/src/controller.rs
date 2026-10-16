@@ -136,6 +136,34 @@ async fn load_item(
     if cancelled() {
         return Err(AppError::Cancelled);
     }
+    let mut found = None;
+    if let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() {
+        if !tried.contains(&Platform::Ytmusic) {
+            say("Finding the exact recording…".into());
+            if let Ok(Some(isrc)) = crate::spotify::isrc(&sp.id).await {
+                found = search::resolve_isrc(&isrc, &sp, &st.cache).await.ok();
+            }
+            if cancelled() {
+                return Err(AppError::Cancelled);
+            }
+        }
+    }
+    if let Some(v) = found {
+        say(format!("Loading from {}…", v.platform.label()));
+        match load_version(&st, &v, token).await {
+            Ok((loaded, v)) => {
+                remember_match(&st, item, &v);
+                return Ok((loaded, v));
+            }
+            Err(e) => {
+                tried.push(v.platform);
+                last_err = Some(e);
+            }
+        }
+        if cancelled() {
+            return Err(AppError::Cancelled);
+        }
+    }
     say("Searching for a playable equivalent…".into());
     let pref = st.store.settings().platform_order;
     let exclude: Vec<Platform> = tried.into_iter().filter(|p| !matches!(p, Platform::Spotify | Platform::Local)).collect();
@@ -148,7 +176,12 @@ async fn load_item(
     }
     say(format!("Loading from {}…", v.platform.label()));
     let (loaded, v) = load_version(&st, &v, token).await?;
-    // Remember the match so the version picker / next play can use it.
+    remember_match(&st, item, &v);
+    Ok((loaded, v))
+}
+
+/// Remember a matched upload so the version picker / next play can use it.
+fn remember_match(st: &AppState, item: &mut QueueItem, v: &TrackVersion) {
     if !item.track.has(v.platform) {
         item.track.versions.push(v.clone());
         let mut q = st.queue.lock().unwrap();
@@ -156,7 +189,6 @@ async fn load_item(
             qi.track = item.track.clone();
         }
     }
-    Ok((loaded, v))
 }
 
 fn superseded(st: &AppState, gen: u64) -> bool {

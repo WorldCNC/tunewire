@@ -1,7 +1,7 @@
 //! Spotify support. Spotify audio is DRM-protected and yt-dlp has no Spotify
-//! music extractor, so playback always goes through a matched YouTube Music /
-//! SoundCloud upload. yt-dlp is tried first anyway, so this keeps working if a
-//! future yt-dlp gains support.
+//! music extractor, so playback goes through a matched upload: first the exact
+//! recording found by its ISRC on YouTube Music (see `isrc`), otherwise a
+//! title/artist/duration match on YouTube Music / SoundCloud / YouTube.
 //!
 //! Track metadata (title/artist/duration) comes from Spotify's public embed
 //! page (no API key, no OAuth, no client ID). This is the one place the app
@@ -330,5 +330,95 @@ mod live_search_tests {
         let fresh = super::discover_search_hash().unwrap();
         println!("discovered hash {fresh}");
         assert_eq!(fresh.len(), 64);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Playback matching: the track's ISRC (the recording's industry ID) from the
+// web player's metadata endpoint, with the same anonymous token. Searching it
+// on YouTube Music finds the exact official audio, not a cover or live cut.
+// ---------------------------------------------------------------------------
+
+static ISRC_CACHE: Mutex<Option<std::collections::HashMap<String, Option<String>>>> = Mutex::new(None);
+
+/// Base62 track id → 32-hex "gid" used by the metadata endpoint.
+fn gid(id: &str) -> Option<String> {
+    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let mut n: u128 = 0;
+    for c in id.bytes() {
+        let d = ALPHABET.iter().position(|&a| a == c)? as u128;
+        n = n.checked_mul(62)?.checked_add(d)?;
+    }
+    (id.len() == 22).then(|| format!("{n:032x}"))
+}
+
+fn isrc_blocking(id: &str) -> AppResult<Option<String>> {
+    let gid = gid(id).ok_or_else(|| AppError::Invalid("malformed Spotify id".into()))?;
+    let url = format!("https://spclient.wg.spotify.com/metadata/4/track/{gid}?market=from_token");
+    let mut tok = token(false)?;
+    for _ in 0..2 {
+        let mut r = crate::http::agent()
+            .get(&url)
+            .header("Authorization", format!("Bearer {tok}"))
+            .header("Accept", "application/json")
+            .header("App-Platform", "WebPlayer")
+            .header("User-Agent", crate::http::USER_AGENT)
+            .call()
+            .map_err(|e| AppError::Network(e.to_string()))?;
+        match r.status().as_u16() {
+            200 => {
+                let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?;
+                return Ok(v
+                    .get("external_id")
+                    .and_then(Value::as_array)
+                    .and_then(|a| a.iter().find(|x| x.get("type").and_then(Value::as_str) == Some("isrc")))
+                    .and_then(|x| x.get("id").and_then(Value::as_str))
+                    .filter(|s| s.len() == 12 && s.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .map(str::to_ascii_uppercase));
+            }
+            401 => tok = token(true)?,
+            s => return Err(AppError::Network(format!("Spotify metadata returned HTTP {s}"))),
+        }
+    }
+    Err(AppError::Network("Spotify metadata unavailable".into()))
+}
+
+/// ISRC of a Spotify track (cached; `None` when Spotify lists none).
+pub async fn isrc(track_id: &str) -> AppResult<Option<String>> {
+    if let Some(hit) = ISRC_CACHE.lock().unwrap().as_ref().and_then(|m| m.get(track_id).cloned()) {
+        return Ok(hit);
+    }
+    let id = track_id.to_string();
+    let found = tauri::async_runtime::spawn_blocking(move || isrc_blocking(&id))
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))??;
+    ISRC_CACHE.lock().unwrap().get_or_insert_with(Default::default).insert(track_id.to_string(), found.clone());
+    Ok(found)
+}
+
+#[cfg(test)]
+mod isrc_tests {
+    #[test]
+    fn gid_conversion() {
+        assert_eq!(super::gid("4uLU6hMCjMI75M1A2tKUQC").as_deref(), Some("93bc414a606747b2b612491ef83d5a3e"));
+        assert_eq!(super::gid("short"), None);
+    }
+
+    #[test]
+    #[ignore]
+    fn live_isrc() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert_eq!(rt.block_on(super::isrc("4uLU6hMCjMI75M1A2tKUQC")).unwrap().as_deref(), Some("GBARL9300135"));
+        let cache = crate::search::SearchCache::default();
+        for q in ["separatist", "daft punk one more time", "tame impala let it happen", "hiatus kaiyote nakamarra"] {
+            let sp = rt.block_on(super::search(q, 3)).unwrap().remove(0);
+            let t0 = std::time::Instant::now();
+            let isrc = rt.block_on(super::isrc(&sp.id)).unwrap();
+            let m = isrc.as_deref().map(|i| rt.block_on(crate::search::resolve_isrc(i, &sp, &cache)));
+            println!("{} — {} [{:?}] → {:?} in {:?}", sp.title, sp.artist, isrc, m.as_ref().map(|r| r.as_ref().map(|v| (&v.title, &v.url)).map_err(|e| e.to_string())), t0.elapsed());
+            let Some(Ok(v)) = m else { continue };
+            let s = rt.block_on(crate::ytdlp::extract_stream(&v.url)).unwrap();
+            println!("   stream ok, duration {:?} vs spotify {:?}", s.duration, sp.duration);
+        }
     }
 }

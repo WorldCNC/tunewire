@@ -918,6 +918,29 @@ pub async fn resolve_equivalent(
     })
 }
 
+/// Exact recording by ISRC: YouTube Music indexes ISRCs, so its song search
+/// returns the official audio of that recording first. The title is still
+/// checked so an unrelated hit never plays.
+pub async fn resolve_isrc(isrc: &str, spotify: &TrackVersion, cache: &SearchCache) -> AppResult<TrackVersion> {
+    let (found, _) = search_platform(Platform::Ytmusic, isrc.to_string(), 5, cache).await?;
+    let tn = Norm::of(spotify);
+    found
+        .into_iter()
+        .take(3)
+        .find(|v| {
+            let n = Norm::of(v);
+            n.markers == tn.markers && n.variant == tn.variant && title_similarity(&tn, &n) >= 0.8
+        })
+        .map(|mut v| {
+            // Flat results carry no artist/duration; the recording is the same.
+            v.artist = spotify.artist.clone();
+            v.duration = v.duration.or(spotify.duration);
+            v.album = v.album.or(spotify.album.clone());
+            v
+        })
+        .ok_or_else(|| AppError::Unavailable(format!("no YouTube Music upload for ISRC {isrc}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

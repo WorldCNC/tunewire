@@ -88,6 +88,12 @@ pub struct AppState {
     pub discord: discord::DiscordHandle,
     pub consecutive_failures: AtomicU32,
     pub data_dir: PathBuf,
+    /// Signature of the last full playback event (see `emit_tick`).
+    pub last_full: Mutex<String>,
+    /// Bumped per search; stale background work compares against it.
+    pub search_gen: AtomicU64,
+    /// Debounces settings.json writes while the volume slider moves.
+    pub volume_save_gen: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,7 +187,49 @@ pub fn emit_playback(app: &AppHandle) {
     if let Some(st) = app.try_state::<AppState>() {
         let ps = st.playback_state();
         st.discord.update(presence(&ps));
+        *st.last_full.lock().unwrap() = signature(&ps);
         let _ = app.emit("playback", ps);
+    }
+}
+
+/// Everything except progress: if this is unchanged, a tick is enough.
+fn signature(ps: &PlaybackState) -> String {
+    format!(
+        "{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{:?}",
+        ps.status,
+        ps.current.as_ref().map(|c| c.uid),
+        ps.version.as_ref().map(|v| &v.url),
+        ps.message,
+        ps.index,
+        ps.repeat,
+        ps.volume,
+        ps.preloaded,
+        ps.duration.map(|d| d as i64)
+    )
+}
+
+#[derive(Clone, Serialize)]
+struct Tick {
+    status: &'static str,
+    position: f64,
+    duration: Option<f64>,
+    buffered: Option<f64>,
+    stalled: bool,
+}
+
+/// Periodic progress update: a full event only when the state changed,
+/// otherwise just position/buffering (a few bytes instead of the whole track).
+pub fn emit_tick(app: &AppHandle) {
+    let Some(st) = app.try_state::<AppState>() else { return };
+    let ps = st.playback_state();
+    st.discord.update(presence(&ps));
+    let sig = signature(&ps);
+    let changed = *st.last_full.lock().unwrap() != sig;
+    if changed {
+        *st.last_full.lock().unwrap() = sig;
+        let _ = app.emit("playback", ps);
+    } else {
+        let _ = app.emit("playback-tick", Tick { status: ps.status, position: ps.position, duration: ps.duration, buffered: ps.buffered, stalled: ps.stalled });
     }
 }
 

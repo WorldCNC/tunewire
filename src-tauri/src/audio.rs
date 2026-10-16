@@ -251,7 +251,26 @@ struct FeedSource {
     channels: ChannelCount,
     rate: SampleRate,
     gain: f32,
+    /// Gain target, refreshed once per chunk (not per sample).
+    target: f32,
+    /// Samples played but not yet published to `ctl.played`.
+    pending: u64,
     drained: Arc<AtomicBool>,
+}
+
+impl FeedSource {
+    /// Publish played-sample count (cheap: once per ~10 ms of audio).
+    #[inline]
+    fn flush_played(&mut self) {
+        if self.pending > 0 {
+            self.ctl.played.fetch_add(self.pending, Ordering::Relaxed);
+            self.pending = 0;
+        }
+    }
+
+    fn refresh_target(&mut self) {
+        self.target = if self.ctl.normalize.load(Ordering::Relaxed) { f32::from_bits(self.ctl.gain.load(Ordering::Relaxed)) } else { 1.0 };
+    }
 }
 
 #[inline]
@@ -273,15 +292,18 @@ impl Iterator for FeedSource {
                 let mut s = self.cur[self.idx];
                 self.idx += 1;
                 self.out_count += 1;
-                self.ctl.played.fetch_add(1, Ordering::Relaxed);
-                let target = if self.ctl.normalize.load(Ordering::Relaxed) { f32::from_bits(self.ctl.gain.load(Ordering::Relaxed)) } else { 1.0 };
+                self.pending += 1;
+                if self.pending >= 1024 {
+                    self.flush_played();
+                }
                 // Glide towards the target gain (~0.5 s) to avoid audible steps.
-                self.gain += (target - self.gain) * 0.00005;
+                self.gain += (self.target - self.gain) * 0.00005;
                 if self.gain != 1.0 {
                     s = soft_clip(s * self.gain);
                 }
                 return Some(s);
             }
+            self.flush_played();
             // Finish a partially emitted frame with silence before switching.
             if self.out_count % self.ctl.channels as u64 != 0 {
                 self.out_count += 1;
@@ -295,6 +317,7 @@ impl Iterator for FeedSource {
                     }
                     if self.ctl.playing_epoch.swap(current, Ordering::AcqRel) != current {
                         self.ctl.played.store(0, Ordering::Relaxed);
+                        self.pending = 0;
                     }
                     if c.samples.is_empty() {
                         self.drained.store(true, Ordering::Release);
@@ -303,6 +326,7 @@ impl Iterator for FeedSource {
                     self.ctl.underrun.store(false, Ordering::Relaxed);
                     self.cur = c.samples;
                     self.idx = 0;
+                    self.refresh_target();
                 }
                 Err(TryRecvError::Empty) => {
                     self.ctl.underrun.store(true, Ordering::Relaxed);
@@ -479,6 +503,8 @@ fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>) -> Prepared {
         channels: NonZero::new(channels).unwrap(),
         rate: NonZero::new(rate).unwrap(),
         gain: 1.0,
+        target: 1.0,
+        pending: 0,
         drained: drained.clone(),
     };
     Prepared { token, ctl, shared, duration, feed, drained }
@@ -558,7 +584,10 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
         // Tight loop near track ends / during fades, relaxed otherwise.
         let near_end = cur.as_ref().and_then(|c| c.remaining()).map(|r| r < (crossfade as f64 + 3.0)).unwrap_or(false);
         let timeout = if near_end || !fading.is_empty() { 15 } else { 100 };
-        match rx.recv_timeout(Duration::from_millis(timeout)) {
+        let idle = cur.is_none() && fading.is_empty();
+        // Nothing playing: sleep until a command arrives.
+        let msg = if idle { rx.recv().map_err(|_| RecvTimeoutError::Disconnected) } else { rx.recv_timeout(Duration::from_millis(timeout)) };
+        match msg {
             Ok(Cmd::Play(t)) => {
                 if let Some(c) = cur.take() {
                     c.shutdown();

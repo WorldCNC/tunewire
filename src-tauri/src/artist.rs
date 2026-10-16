@@ -217,13 +217,3 @@ mod live_tests {
     }
 }
 
-#[cfg(test)]
-mod dump {
-    #[test]
-    #[ignore]
-    fn dump_artist_json() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let a = rt.block_on(super::artist("Fred again..", Some("https://soundcloud.com/fredagain".into()))).unwrap();
-        std::fs::write(std::env::temp_dir().join("artist.json"), serde_json::to_string(&a).unwrap()).unwrap();
-    }
-}

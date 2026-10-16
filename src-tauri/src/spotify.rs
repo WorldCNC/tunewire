@@ -8,8 +8,6 @@
 //! fetches something without yt-dlp. It is metadata only and can be turned off
 //! in Settings ("Spotify metadata bridge").
 
-use std::time::Duration;
-
 use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
@@ -34,13 +32,11 @@ fn fetch_embed(kind: &str, id: &str) -> AppResult<Value> {
     if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(AppError::Invalid("malformed Spotify id".into()));
     }
-    let agent: ureq::Agent = ureq::config::Config::builder()
-        .timeout_global(Some(Duration::from_secs(20)))
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36")
-        .build()
-        .into();
     let url = format!("https://open.spotify.com/embed/{kind}/{id}");
-    let mut resp = agent.get(&url).call().map_err(|e| AppError::Network(e.to_string()))?;
+    let mut resp = crate::http::agent().get(&url).header("User-Agent", crate::http::USER_AGENT).call().map_err(|e| AppError::Network(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(AppError::Unavailable(format!("Spotify returned HTTP {}", resp.status().as_u16())));
+    }
     let html = resp
         .body_mut()
         .with_config()

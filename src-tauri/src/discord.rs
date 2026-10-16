@@ -79,7 +79,9 @@ fn run(rx: Receiver<Msg>, status: Status) {
     let mut next_connect = Instant::now();
 
     loop {
-        match rx.recv_timeout(Duration::from_millis(500)) {
+        // Disabled: sleep until reconfigured instead of polling.
+        let msg = if enabled { rx.recv_timeout(Duration::from_millis(500)) } else { rx.recv().map_err(|_| RecvTimeoutError::Disconnected) };
+        match msg {
             Ok(Msg::Config { enabled: e, client_id: c, buttons: b }) => {
                 if c != client_id || !e {
                     if let Some(mut cl) = client.take() {

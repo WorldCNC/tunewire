@@ -25,6 +25,7 @@ mod decoder;
 mod discord;
 mod downloads;
 mod error;
+mod http;
 mod localfiles;
 mod lyrics;
 mod models;
@@ -147,6 +148,9 @@ pub fn run() {
                 discord,
                 consecutive_failures: AtomicU32::new(0),
                 data_dir: data,
+                last_full: Mutex::new(String::new()),
+                search_gen: AtomicU64::new(0),
+                volume_save_gen: AtomicU64::new(0),
             });
             system::apply_settings(&app.state::<AppState>(), &settings);
 

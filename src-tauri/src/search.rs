@@ -208,11 +208,6 @@ pub fn split_artist_title(raw_title: &str, uploader: &str) -> (String, String) {
     (clean_uploader(uploader), raw_title.trim().to_string())
 }
 
-/// User-facing title: noise removed, casing preserved.
-pub fn pretty_title(t: &str) -> String {
-    strip_noise(t)
-}
-
 fn artist_tokens(artist: &str) -> HashSet<String> {
     tokens(artist)
         .into_iter()
@@ -475,7 +470,7 @@ pub fn build_track(versions: Vec<TrackVersion>, score: f64) -> Track {
             .find_map(|p| versions.iter().find(|v| v.platform == *p && !v.artist.is_empty()))
             .unwrap_or(&versions[0])
     };
-    let title = pretty_title(&pick(&title_order).title);
+    let title = strip_noise(&pick(&title_order).title);
     let artist = pick(&artist_order).artist.clone();
     let duration = versions.iter().filter(|v| !v.preview).find_map(|v| v.duration).or(versions[0].duration);
     let thumbnail = versions
@@ -830,7 +825,7 @@ pub fn needs_completion(tracks: &[Track]) -> Vec<String> {
         .flat_map(|t| t.versions.iter())
         .filter(|v| v.partial && v.platform == Platform::Ytmusic)
         .map(|v| v.url.clone())
-        .take(10)
+        .take(8)
         .collect()
 }
 
@@ -855,7 +850,7 @@ pub async fn resolve_equivalent(
     duration: Option<f64>,
     pref: &[Platform],
     exclude: &[Platform],
-    cache: &SearchCache,
+    cache: &std::sync::Arc<SearchCache>,
 ) -> AppResult<TrackVersion> {
     let target = TrackVersion {
         platform: Platform::Spotify,
@@ -883,9 +878,17 @@ pub async fn resolve_equivalent(
             order.push(p);
         }
     }
+    // Search every candidate platform concurrently, then judge in preference order.
+    let tasks: Vec<_> = order
+        .into_iter()
+        .map(|p| {
+            let (q, cache) = (query.clone(), cache.clone());
+            (p, tauri::async_runtime::spawn(async move { search_platform(p, q, 8, &cache).await }))
+        })
+        .collect();
     let mut last_err = AppError::EmptyResults;
-    for p in order {
-        match search_platform(p, query.clone(), 8, cache).await {
+    for (p, task) in tasks {
+        match task.await.unwrap_or_else(|e| Err(AppError::YtDlp(e.to_string()))) {
             Ok((mut found, _)) => {
                 if p == Platform::Ytmusic {
                     enrich_ytmusic(&mut found, &[], &query);
@@ -894,7 +897,7 @@ pub async fn resolve_equivalent(
                 let strict = found.iter().find(|v| !v.preview && same_track(&tn, &Norm::of(v)));
                 let loose = found.iter().find(|v| {
                     let n = Norm::of(v);
-                    !v.preview && n.markers == tn.markers && title_similarity(&tn, &n) >= 0.85
+                    !v.preview && n.markers == tn.markers && n.variant == tn.variant && title_similarity(&tn, &n) >= 0.85
                 });
                 if let Some(v) = strict.or(loose) {
                     return Ok(v.clone());

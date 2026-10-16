@@ -47,15 +47,7 @@ function renderPlayback() {
     playBtn.innerHTML = want === 'loading' ? '<span class="spinner"></span>' : icon(want);
   }
 
-  const dur = p.duration;
-  if (!state.draggingProgress) {
-    $('#t-pos').textContent = fmtTime(p.position);
-    setProgress(dur ? p.position / dur : 0);
-  }
-  $('#t-dur').textContent = fmtTime(dur);
-  $('#p-buffered').style.width = `${Math.min(1, p.buffered ?? 0) * 100}%`;
-  progressEl.classList.toggle('disabled', !(p.status === 'playing' || p.status === 'paused') || !dur);
-  progressEl.classList.toggle('stalled', !!p.stalled);
+  renderProgress();
 
   const like = $('#np-like');
   const liked = track && state.favKeys.has(track.key);
@@ -71,8 +63,38 @@ function renderPlayback() {
   if (!volumeDragging) setVolumeUI(p.volume);
   document.title = track && p.status === 'playing' ? `${track.title} — ${track.artist || 'Tunewire'}` : 'Tunewire';
   if (p.status === 'playing' || p.status === 'error') state.loadingKey = null;
-  markPlaying();
-  updateQueueIndicators();
+  // Walking every row is only needed when the playing track or status changes.
+  const mark = `${track?.key}|${p.status}|${state.loadingKey}`;
+  if (mark !== lastMark) {
+    lastMark = mark;
+    markPlaying();
+    updateQueueIndicators();
+  }
+}
+
+let lastMark = '';
+
+/** Time, seek bar and buffering only — runs for every progress tick. */
+function renderProgress() {
+  const p = state.playback;
+  if (!p) return;
+  const dur = p.duration;
+  if (!state.draggingProgress) {
+    $('#t-pos').textContent = fmtTime(p.position);
+    setProgress(dur ? p.position / dur : 0);
+  }
+  $('#t-dur').textContent = fmtTime(dur);
+  $('#p-buffered').style.width = `${Math.min(1, p.buffered ?? 0) * 100}%`;
+  progressEl.classList.toggle('disabled', !(p.status === 'playing' || p.status === 'paused') || !dur);
+  progressEl.classList.toggle('stalled', !!p.stalled);
+  const msg = $('#np-via');
+  if (p.stalled && !msg.dataset.stalled) {
+    msg.dataset.stalled = '1';
+    renderPlayback();
+  } else if (!p.stalled && msg.dataset.stalled) {
+    delete msg.dataset.stalled;
+    renderPlayback();
+  }
 }
 
 function setProgress(frac) {

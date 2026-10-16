@@ -11,6 +11,14 @@ async function wireEvents() {
     syncLyrics();
     plugins.emit('playback', e.payload);
   });
+  // Progress-only updates (a few bytes, ~4×/s): no full re-render.
+  await listen('playback-tick', (e) => {
+    if (!state.playback) return;
+    Object.assign(state.playback, e.payload);
+    renderProgress();
+    syncLyrics();
+    plugins.emit('playback', state.playback);
+  });
   await listen('queue-changed', (e) => {
     state.queue = e.payload;
     renderQueue();

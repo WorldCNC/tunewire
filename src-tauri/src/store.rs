@@ -1,5 +1,8 @@
-//! JSON persistence for settings and the local library (playlists, favorites,
-//! history). Writes are atomic (temp file + rename).
+//! JSON persistence for settings and the local library. Writes are atomic
+//! (temp file + rename). The library is split so frequent writes stay small:
+//!   library.json   playlists + favorites
+//!   history.json   playback history (written on every track start)
+//!   downloads.json offline downloads
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,12 +39,13 @@ pub struct Settings {
     pub plugin_settings: HashMap<String, HashMap<String, Value>>,
     pub close_to_tray: bool,
     pub include_youtube_in_all: bool,
-    pub spotify_bridge: bool,
     /// "auto" (spotDL if installed, else embed page) | "spotdl" | "embed" | "off"
     pub spotify_backend: String,
     pub include_spotify_in_all: bool,
     /// Optional personal Spotify app credentials for spotDL (its shared ones are rate-limited).
     pub spotify_client_id: String,
+    /// Legacy: only read once to migrate a plain-text secret into the OS
+    /// keychain (see lib.rs). Safe to delete after the next release.
     pub spotify_client_secret: String,
     pub normalize: bool,
     /// Crossfade length in seconds (0 = gapless, no overlap).
@@ -72,7 +76,6 @@ impl Default for Settings {
             plugin_settings: HashMap::new(),
             close_to_tray: false,
             include_youtube_in_all: true,
-            spotify_bridge: true,
             spotify_backend: "auto".into(),
             include_spotify_in_all: false,
             spotify_client_id: String::new(),
@@ -181,7 +184,14 @@ impl Store {
         std::fs::create_dir_all(&dir).map_err(|e| AppError::Storage(format!("{}: {e}", dir.display())))?;
         let mut settings: Settings = load_json(&dir.join("settings.json"));
         settings.normalize();
-        let library: Library = load_json(&dir.join("library.json"));
+        // library.json may still contain history/downloads from older versions.
+        let mut library: Library = load_json(&dir.join("library.json"));
+        if dir.join("history.json").exists() {
+            library.history = load_json(&dir.join("history.json"));
+        }
+        if dir.join("downloads.json").exists() {
+            library.downloads = load_json(&dir.join("downloads.json"));
+        }
         Ok(Store { dir, settings: Mutex::new(settings), library: Mutex::new(library) })
     }
 
@@ -190,13 +200,50 @@ impl Store {
         write_atomic(&self.dir.join("settings.json"), &data)
     }
 
+    /// Playlists + favorites.
     pub fn save_library(&self) -> AppResult<()> {
-        let data = serde_json::to_vec(&*self.library.lock().unwrap())?;
+        #[derive(Serialize)]
+        struct Main<'a> {
+            playlists: &'a [Playlist],
+            favorites: &'a [Track],
+        }
+        let lib = self.library.lock().unwrap();
+        let data = serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites })?;
+        drop(lib);
         write_atomic(&self.dir.join("library.json"), &data)
+    }
+
+    fn save_history(&self) -> AppResult<()> {
+        let data = serde_json::to_vec(&self.library.lock().unwrap().history)?;
+        write_atomic(&self.dir.join("history.json"), &data)
+    }
+
+    fn save_downloads(&self) -> AppResult<()> {
+        let data = serde_json::to_vec(&self.library.lock().unwrap().downloads)?;
+        write_atomic(&self.dir.join("downloads.json"), &data)
+    }
+
+    pub fn update_history<T>(&self, f: impl FnOnce(&mut Vec<HistoryEntry>) -> AppResult<T>) -> AppResult<T> {
+        let r = f(&mut self.library.lock().unwrap().history)?;
+        self.save_history()?;
+        Ok(r)
+    }
+
+    pub fn update_downloads<T>(&self, f: impl FnOnce(&mut Vec<crate::downloads::Download>) -> AppResult<T>) -> AppResult<T> {
+        let r = f(&mut self.library.lock().unwrap().downloads)?;
+        self.save_downloads()?;
+        Ok(r)
     }
 
     pub fn settings(&self) -> Settings {
         self.settings.lock().unwrap().clone()
+    }
+
+    /// Change settings in memory only (call `save_settings` later).
+    pub fn update_settings_nosave(&self, f: impl FnOnce(&mut Settings)) {
+        let mut s = self.settings.lock().unwrap();
+        f(&mut s);
+        s.normalize();
     }
 
     pub fn update_settings(&self, f: impl FnOnce(&mut Settings)) -> AppResult<Settings> {
@@ -217,15 +264,15 @@ impl Store {
     }
 
     pub fn push_history(&self, track: &Track, platform: Option<Platform>) -> AppResult<()> {
-        self.update_library(|lib| {
+        self.update_history(|history| {
             let mut t = track.clone();
             t.score = 0.0;
             // Collapse immediate repeats.
-            if lib.history.first().map(|h| h.track.key == t.key).unwrap_or(false) {
-                lib.history.remove(0);
+            if history.first().map(|h| h.track.key == t.key).unwrap_or(false) {
+                history.remove(0);
             }
-            lib.history.insert(0, HistoryEntry { track: t, platform, played_at: now_ms() });
-            lib.history.truncate(HISTORY_MAX);
+            history.insert(0, HistoryEntry { track: t, platform, played_at: now_ms() });
+            history.truncate(HISTORY_MAX);
             Ok(())
         })
     }

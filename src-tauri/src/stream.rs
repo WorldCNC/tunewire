@@ -18,7 +18,10 @@ use std::time::Duration;
 use crate::error::{AppError, AppResult};
 use crate::ytdlp::{validate_url, StreamInfo};
 
+/// First request size; later sequential requests grow up to `MAX_CHUNK`
+/// (fewer round trips), and shrink back after a random-access jump.
 const CHUNK: u64 = 512 * 1024;
+const MAX_CHUNK: u64 = 4 * 1024 * 1024;
 const MAX_TRIES: u32 = 4;
 const MAX_STREAM_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -39,18 +42,7 @@ fn cache_dir() -> PathBuf {
     })
 }
 
-fn agent() -> &'static ureq::Agent {
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::config::Config::builder()
-            .http_status_as_error(false)
-            .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_recv_response(Some(Duration::from_secs(15)))
-            .timeout_recv_body(Some(Duration::from_secs(30)))
-            .build()
-            .into()
-    })
-}
+use crate::http::agent;
 
 // ---------------------------------------------------------------------------
 // Shared buffer (file + downloaded ranges)
@@ -552,6 +544,7 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
     std::thread::spawn(move || {
         let result = (|| -> AppResult<()> {
             let mut cursor = 0u64;
+            let mut chunk = CHUNK;
             loop {
                 if s2.cancelled() {
                     return Err(AppError::Cancelled);
@@ -563,7 +556,10 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
                         return Ok(());
                     }
                     match want.filter(|w| st.available_until(*w).is_none()) {
-                        Some(w) => w,
+                        Some(w) => {
+                            chunk = CHUNK; // the user is seeking: answer fast
+                            w
+                        }
                         None => match st.next_gap(cursor, total) {
                             Some(g) => g,
                             None => return Ok(()),
@@ -574,14 +570,17 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
                 let end = {
                     let st = s2.state.lock().unwrap();
                     let next_have = st.ranges.iter().map(|r| r.0).filter(|s| *s > start).min().unwrap_or(total);
-                    (start + CHUNK).min(next_have).min(total) - 1
+                    (start + chunk).min(next_have).min(total) - 1
                 };
                 let got = with_retry(Some(&s2), || {
                     let resp = request(&url, &headers, Some((start, end)))?;
                     write_body(resp, &s2, start, true)
                 });
                 match got {
-                    Ok(n) => cursor = start + n,
+                    Ok(n) => {
+                        cursor = start + n;
+                        chunk = (chunk * 2).min(MAX_CHUNK);
+                    }
                     Err(AppError::Extraction(m)) if m.contains("range not satisfiable") => return Ok(()),
                     Err(e) => return Err(e),
                 }

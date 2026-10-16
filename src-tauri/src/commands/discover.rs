@@ -19,6 +19,7 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
     }
     let spotify_ok = matches!(settings.spotify_backend.as_str(), "auto" | "spotdl") && spotdl::available().await;
     let spotify = spotify_ok && (source == "spotify" || settings.include_spotify_in_all);
+    let gen = st.search_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let res = search::search(query, source, limit, settings.platform_order, st.cache.clone(), settings.include_youtube_in_all, spotify).await?;
 
     // YouTube Music entries with guessed artist/duration get completed in the
@@ -27,6 +28,12 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
     if !urls.is_empty() {
         let cache = st.cache.clone();
         tauri::async_runtime::spawn(async move {
+            let current = |app: &AppHandle| tauri::Manager::state::<AppState>(app).search_gen.load(std::sync::atomic::Ordering::SeqCst) == gen;
+            // Give the user a moment: if they search again, skip this work entirely.
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            if !current(&app) {
+                return;
+            }
             let (a, b) = urls.split_at(urls.len().div_ceil(2));
             let (a, b) = (a.to_vec(), b.to_vec());
             let ta = tauri::async_runtime::spawn(async move { ytdlp::batch_meta(&a).await });
@@ -39,7 +46,9 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
             }
             if !metas.is_empty() {
                 search::apply_metadata(&cache, &metas);
-                let _ = app.emit("metadata-updated", metas);
+                if current(&app) {
+                    let _ = app.emit("metadata-updated", metas);
+                }
             }
         });
     }

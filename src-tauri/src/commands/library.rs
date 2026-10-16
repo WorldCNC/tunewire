@@ -142,8 +142,8 @@ pub fn list_history(st: State<'_, AppState>, limit: Option<usize>) -> Vec<Histor
 
 #[tauri::command]
 pub fn clear_history(app: AppHandle, st: State<'_, AppState>) -> AppResult<()> {
-    st.store.update_library(|lib| {
-        lib.history.clear();
+    st.store.update_history(|h| {
+        h.clear();
         Ok(())
     })?;
     emit_library(&app, "history");

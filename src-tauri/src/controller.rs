@@ -331,7 +331,7 @@ pub fn on_engine_event(app: &AppHandle, ev: EngineEvent) {
     let Some(st) = app.try_state::<AppState>() else { return };
     match ev {
         EngineEvent::Tick => {
-            emit_playback(app);
+            crate::state::emit_tick(app);
             maybe_preload(app);
         }
         EngineEvent::Advanced { token } => {

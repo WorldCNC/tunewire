@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -21,15 +20,6 @@ pub struct Lyrics {
 fn cache() -> &'static Mutex<HashMap<String, Option<Lyrics>>> {
     static C: OnceLock<Mutex<HashMap<String, Option<Lyrics>>>> = OnceLock::new();
     C.get_or_init(Default::default)
-}
-
-fn agent() -> ureq::Agent {
-    ureq::config::Config::builder()
-        .timeout_global(Some(Duration::from_secs(12)))
-        .http_status_as_error(false)
-        .user_agent("Tunewire/0.1 (desktop music player)")
-        .build()
-        .into()
 }
 
 fn enc(s: &str) -> String {
@@ -50,9 +40,8 @@ fn parse(v: &Value) -> Option<Lyrics> {
 }
 
 fn fetch(artist: &str, title: &str, album: Option<&str>, duration: Option<f64>) -> AppResult<Option<Lyrics>> {
-    let a = agent();
     let get = |url: String| -> AppResult<Option<Value>> {
-        let mut r = a.get(&url).call().map_err(|e| AppError::Network(e.to_string()))?;
+        let mut r = crate::http::agent().get(&url).header("User-Agent", "Tunewire (desktop music player)").call().map_err(|e| AppError::Network(e.to_string()))?;
         if r.status().as_u16() == 404 {
             return Ok(None);
         }

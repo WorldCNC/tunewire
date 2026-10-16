@@ -122,11 +122,20 @@ pub fn emit_soon(app: &AppHandle) {
 }
 
 #[tauri::command]
-pub fn set_volume(st: State<'_, AppState>, volume: f32) -> AppResult<f32> {
+pub fn set_volume(app: AppHandle, st: State<'_, AppState>, volume: f32) -> AppResult<f32> {
     let v = volume.clamp(0.0, 1.0);
     st.audio.set_volume(v);
     if (st.store.settings().volume - v).abs() > f32::EPSILON {
-        st.store.update_settings(|s| s.volume = v)?;
+        st.store.update_settings_nosave(|s| s.volume = v);
+        // Write settings.json once the slider has been still for 600 ms.
+        let gen = st.volume_save_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            let st = tauri::Manager::state::<AppState>(&app);
+            if st.volume_save_gen.load(Ordering::SeqCst) == gen {
+                let _ = st.store.save_settings();
+            }
+        });
     }
     Ok(v)
 }

@@ -331,10 +331,13 @@ pub fn install_bundled(dir: &std::path::Path) -> AppResult<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
     let asset = release_asset().ok_or_else(|| AppError::Unsupported("no official yt-dlp build for this platform".into()))?;
-    let agent: ureq::Agent = ureq::config::Config::builder().timeout_global(Some(Duration::from_secs(300))).build().into();
+    let agent = crate::http::agent();
     let base = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
     let sums = agent
         .get(&format!("{base}/SHA2-256SUMS"))
+        .config()
+        .http_status_as_error(true)
+        .build()
         .call()
         .map_err(|e| AppError::Network(e.to_string()))?
         .body_mut()
@@ -351,6 +354,10 @@ pub fn install_bundled(dir: &std::path::Path) -> AppResult<std::path::PathBuf> {
     let mut data = Vec::new();
     agent
         .get(&format!("{base}/{asset}"))
+        .config()
+        .http_status_as_error(true)
+        .timeout_recv_body(Some(Duration::from_secs(600)))
+        .build()
         .call()
         .map_err(|e| AppError::Network(e.to_string()))?
         .into_body()

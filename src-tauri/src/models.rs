@@ -93,7 +93,7 @@ impl Track {
     pub fn from_version(v: TrackVersion) -> Track {
         Track {
             key: crate::search::track_key(&v.artist, &v.title),
-            title: crate::search::pretty_title(&v.title),
+            title: crate::search::strip_noise(&v.title),
             artist: v.artist.clone(),
             duration: v.duration,
             thumbnail: v.thumbnail.clone(),

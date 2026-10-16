@@ -34,6 +34,8 @@ pub struct AudioDecoder {
     spec: SignalSpec,
     buf: Vec<f32>,
     idx: usize,
+    /// Reused conversion buffer (re-created only if the format/size changes).
+    scratch: Option<SampleBuffer<f32>>,
     total: Option<Duration>,
     /// Samples to drop after an accurate seek (decoder lands before target).
     skip: usize,
@@ -92,6 +94,7 @@ impl AudioDecoder {
             spec,
             buf: Vec::new(),
             idx: 0,
+            scratch: None,
             total,
             skip: 0,
             ended: false,
@@ -142,8 +145,13 @@ impl AudioDecoder {
                     if audio.frames() == 0 {
                         continue;
                     }
+                    let need = audio.capacity() * spec.channels.count();
+                    let fits = self.scratch.as_ref().map(|b| b.capacity() >= need && spec == self.spec).unwrap_or(false);
+                    if !fits {
+                        self.scratch = Some(SampleBuffer::<f32>::new(audio.capacity() as u64, spec));
+                    }
                     self.spec = spec;
-                    let mut sb = SampleBuffer::<f32>::new(audio.capacity() as u64, spec);
+                    let sb = self.scratch.as_mut().unwrap();
                     sb.copy_interleaved_ref(audio);
                     self.buf.extend_from_slice(sb.samples());
                     if self.skip > 0 {

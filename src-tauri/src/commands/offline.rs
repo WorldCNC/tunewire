@@ -55,9 +55,9 @@ pub fn download_tracks(app: AppHandle, st: State<'_, AppState>, tracks: Vec<Trac
                 Ok((version, path)) => {
                     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                     let d = Download { key: track.key.clone(), track: track.clone(), version, path: path.to_string_lossy().into_owned(), size, added: store::now_ms() };
-                    let _ = st.store.update_library(|lib| {
-                        lib.downloads.retain(|x| x.key != d.key);
-                        lib.downloads.insert(0, d);
+                    let _ = st.store.update_downloads(|dl| {
+                        dl.retain(|x| x.key != d.key);
+                        dl.insert(0, d);
                         Ok(())
                     });
                     emit_library(&app, "downloads");
@@ -79,11 +79,11 @@ pub fn list_downloads(st: State<'_, AppState>) -> Vec<Download> {
 
 #[tauri::command]
 pub fn delete_download(app: AppHandle, st: State<'_, AppState>, key: String) -> AppResult<()> {
-    st.store.update_library(|lib| {
-        if let Some(d) = lib.downloads.iter().find(|d| d.key == key) {
+    st.store.update_downloads(|dl| {
+        if let Some(d) = dl.iter().find(|d| d.key == key) {
             let _ = std::fs::remove_file(&d.path);
         }
-        lib.downloads.retain(|d| d.key != key);
+        dl.retain(|d| d.key != key);
         Ok(())
     })?;
     emit_library(&app, "downloads");

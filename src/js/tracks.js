@@ -202,6 +202,7 @@ function skeletonRows(n = 8) {
 }
 
 function markPlaying() {
+  lastMark = `${playingKey()}|${state.playback?.status}|${state.loadingKey}`;
   const key = playingKey();
   const status = state.playback?.status;
   for (const row of $$('.track[data-key]')) {

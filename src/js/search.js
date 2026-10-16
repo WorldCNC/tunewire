@@ -42,7 +42,6 @@ $('#search-clear').addEventListener('click', () => {
 async function doSearch(q) {
   showView('search');
   showSearchBody(true);
-  renderTopResult(null);
   $('#results-head').hidden = true;
   state.sort = null;
   if (!isUrl(q)) rememberSearch(q);
@@ -137,9 +136,7 @@ function showSearchBody(show) {
   $('#search-body').hidden = !show;
 }
 
-function renderTopResult() {
-  $('#top-result').replaceChildren();
-}
+
 
 function renderResults(onPlayIndex = null) {
   const list = $('#search-results');

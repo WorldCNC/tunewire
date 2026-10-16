@@ -20,8 +20,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            args: "--bundles appimage,deb,rpm"
+          # Linux is paused for now; uncomment to build AppImage/.deb/.rpm again.
+          # - platform: ubuntu-22.04
+          #   args: "--bundles appimage,deb,rpm"
           - platform: windows-latest
             args: "--bundles nsis,msi"
     runs-on: ${{ matrix.platform }}
@@ -62,7 +63,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Tunewire ${{ github.ref_name }}
           releaseBody: |
-            **Linux:** the AppImage updates itself; .deb and .rpm are also available.
             **Windows:** the -setup.exe installer updates itself; .msi is also available.
             Needs yt-dlp. Settings → Tools can install a managed copy.
           releaseDraft: false

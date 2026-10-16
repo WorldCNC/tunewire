@@ -34,6 +34,7 @@ mod search;
 mod secrets;
 mod spotdl;
 mod spotify;
+mod spotify_play;
 mod state;
 mod store;
 mod stream;
@@ -115,6 +116,7 @@ pub fn run() {
             stream::set_cache_dir(cache.join("streams"));
             let store = Store::open(data.clone())?;
             localfiles::init(&data);
+            spotify_play::init(data.clone());
 
             // One-time migration: move a plain-text Spotify secret into the keychain.
             let legacy = store.settings().spotify_client_secret;
@@ -187,6 +189,9 @@ pub fn run() {
             system::get_settings,
             system::update_settings,
             system::set_spotify_secret,
+            system::spotify_login,
+            system::spotify_logout,
+            system::spotify_account,
             system::ytdlp_install,
             discover::search_tracks,
             discover::load_playlist,

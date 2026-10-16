@@ -33,6 +33,7 @@
   };
   let uid = 0;
   const queue = { items: tracks.slice(0, 5).map((t) => ({ uid: ++uid, track: t, platform: null })), current: 0 };
+  let mockSpotifyUser = null;
   const playback = { status: 'paused', position: 42, duration: 321, buffered: 0.6, stalled: false, volume: 0.7, repeat: 'off', index: 0, current: queue.items[0], version: tracks[0].versions[0], message: null, preloaded: null };
   const playlists = [{ id: 'p1', name: 'Late night drive', tracks: tracks.slice(2), created: 0, updated: 0 }, { id: 'p2', name: 'Gym', tracks: tracks.slice(0, 3), created: 0, updated: 0 }];
   let favorites = tracks.slice(0, 2);
@@ -64,6 +65,9 @@
     update_settings: ({ patch }) => (settings = { ...settings, ...patch }),
     health_check: () => ({ ok: true, version: 'mock', message: 'Mock backend (browser preview)', path: 'yt-dlp' }),
     tools_status: () => ({ spotdl: null, spotify_secret_saved: false, bundled_ytdlp: false, local_tracks: 1 }),
+    spotify_account: () => mockSpotifyUser,
+    spotify_login: () => new Promise((r) => setTimeout(() => r(mockSpotifyUser = 'devuser'), 800)),
+    spotify_logout: () => { mockSpotifyUser = null; },
     discord_status: () => (settings.discord_rpc ? 'connected' : 'off'),
     list_themes: () => [{ id: 'midnight', name: 'Midnight', author: 'Tunewire', dark: true, builtin: true, accent: '#e5a54b', bg: '#121212' }, { id: 'daylight', name: 'Daylight', author: 'Tunewire', dark: false, builtin: true, accent: '#b86e0c', bg: '#fafafa' }, { id: 'synthwave', name: 'Synthwave', author: 'Tunewire', dark: true, builtin: true, accent: '#ff6ec7', bg: '#16101f' }],
     load_theme: async ({ id }) => { settings.theme = id; return (await fetch(`/__themes/${id}.json`)).json(); },

@@ -34,6 +34,16 @@ async fn load_version(st: &AppState, v: &TrackVersion, token: u64) -> AppResult<
         return Ok((loaded, v.clone()));
     }
 
+    if v.platform == Platform::Spotify {
+        // Real Spotify audio (librespot); only reached when logged in.
+        let opened = crate::spotify_play::open(&v.id).await?;
+        let fallback = v.duration;
+        let loaded = tauri::async_runtime::spawn_blocking(move || audio::prepare(opened, fallback, token))
+            .await
+            .map_err(|e| AppError::Extraction(e.to_string()))??;
+        return Ok((loaded, v.clone()));
+    }
+
     let info = ytdlp::extract_stream(&v.url).await?;
     let mut version = v.clone();
     if v.partial {
@@ -115,8 +125,8 @@ async fn load_item(
         if cancelled() {
             return Err(AppError::Cancelled);
         }
-        if v.platform == Platform::Spotify {
-            continue; // DRM: always played through a matched upload (below)
+        if v.platform == Platform::Spotify && !crate::spotify_play::has_login() {
+            continue; // not logged in: played through a matched upload (below)
         }
         say(format!("Loading from {}…", v.platform.label()));
         match load_version(&st, &v, token).await {

@@ -31,6 +31,10 @@ tauri-plugin-updater = "2.14"
 tauri-plugin-process = "2.4"
 lofty = "0.22"
 sha2 = "0.10"
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-audio = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 
 [profile.release]
 codegen-units = 1

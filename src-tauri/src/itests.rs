@@ -251,6 +251,38 @@ fn reader_serves_partial_file_while_downloading() {
     assert!(all == *body);
 }
 
+/// A seekable source behind a header (like Spotify's decrypted Ogg files),
+/// served through the disk buffer: byte-exact, seekable ahead, decodable.
+#[test]
+fn source_adapter_skips_header_and_seeks() {
+    /// Slow reader so the decoder seeks ahead of the copy thread.
+    struct Slow(std::io::Cursor<Vec<u8>>);
+    impl Read for Slow {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            std::thread::sleep(Duration::from_millis(2));
+            let n = b.len().min(16 * 1024);
+            self.0.read(&mut b[..n])
+        }
+    }
+    impl std::io::Seek for Slow {
+        fn seek(&mut self, p: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.0.seek(p)
+        }
+    }
+    let wav = tone_wav();
+    let mut data = vec![0xAAu8; 167];
+    data.extend_from_slice(&wav);
+    let opened = stream::open_source(Slow(std::io::Cursor::new(data)), 167, wav.len() as u64, Some("wav".into())).unwrap();
+    let mut dec = AudioDecoder::new(opened.reader, opened.hint.as_deref()).unwrap();
+    assert_eq!((dec.channels(), dec.sample_rate()), (2, RATE));
+    assert!(audible(&mut dec, 0.3).1 > 0);
+    dec.try_seek(Duration::from_secs(5)).unwrap();
+    let (n, loud) = audible(&mut dec, 0.5);
+    assert!(n > 0 && loud > n / 3, "audio after seeking ahead");
+    let path = opened.shared.wait_complete(Duration::from_secs(20)).unwrap();
+    assert!(std::fs::read(path).unwrap() == wav, "buffer must equal the source minus its header");
+}
+
 /// Real-time engine test on the default output device. Run with a null ALSA
 /// device: `ALSA_CONFIG_PATH=<file with pcm.!default {type null}> cargo test -- --ignored engine`
 #[test]

@@ -84,6 +84,20 @@ function renderSettings() {
       renderSettings();
     } catch (e) { toast(errMsg(e), 'error'); }
   });
+  const user = state.spotifyUser;
+  const account = h('div', { class: 'actions' },
+    h('span', { class: `status-pill ${user ? 'ok' : ''}` }, user ? `Logged in: ${user}` : 'Not logged in'),
+    user
+      ? h('button', { class: 'btn small', onclick: async () => { await call('spotify_logout'); state.spotifyUser = null; toast('Logged out of Spotify', 'info', 1500); renderSettings(); } }, 'Log out')
+      : h('button', { class: 'btn small primary', onclick: async (e) => {
+          e.target.disabled = true;
+          e.target.textContent = 'Waiting for browser…';
+          try {
+            state.spotifyUser = await call('spotify_login');
+            toast(`Logged in to Spotify as ${state.spotifyUser}`, 'ok', 2500);
+          } catch (err) { toast(errMsg(err), 'error'); }
+          renderSettings();
+        } }, 'Log in with Spotify'));
   const clientId = h('input', { type: 'text', value: s.discord_client_id || '', placeholder: 'Application ID', style: 'width:190px', spellcheck: 'false' });
   clientId.addEventListener('change', () => updateSettings({ discord_client_id: clientId.value.trim() }));
   const recheck = (fn) => h('button', { class: 'btn small', onclick: async () => { await fn(); renderSettings(); } }, 'Check again');
@@ -95,7 +109,8 @@ function renderSettings() {
       settingToggle('Search YouTube in “All”', 'Adds regular YouTube uploads (live versions, covers) to combined searches.', 'include_youtube_in_all'),
       settingToggle('Close to tray', 'Closing the window keeps music playing. Quit from the tray icon.', 'close_to_tray')),
     group('Spotify', 'spotify',
-      settingRow('Metadata source', 'Search uses Spotify’s own web search (no account needed); pasted links load from the public embed page. spotDL is only a fallback. Spotify audio is DRM-protected, so songs play from a matching YouTube Music or SoundCloud upload.', backend),
+      settingRow('Spotify account', 'Log in to play Spotify’s own audio (Ogg Vorbis up to 320 kbps) when you pick Spotify as the source. Needs <b>Spotify Premium</b>; your login opens in the browser and only a reusable token is stored on this computer. Without it, Spotify songs play from the same recording on YouTube Music.', account),
+      settingRow('Metadata source', 'Search uses Spotify’s own web search (no account needed); pasted links load from the public embed page. spotDL is only a fallback.', backend),
       settingRow('spotDL (optional fallback)', spotdl ? `Version ${spotdl}` : 'Not installed. Optional: <code>pipx install spotdl</code> or <code>uv tool install spotdl</code>.',
         h('div', { class: 'actions' }, h('span', { class: `status-pill ${spotdl ? 'ok' : 'bad'}` }, spotdl ? 'Installed' : 'Missing'), recheck(refreshTools))),
       settingToggle('Search Spotify in “All”', 'Adds Spotify results to combined searches (about half a second).', 'include_spotify_in_all'),
@@ -124,6 +139,7 @@ function renderSettings() {
 
 async function refreshTools() {
   state.tools = await call('tools_status').catch(() => ({ spotdl: null }));
+  state.spotifyUser = await call('spotify_account').catch(() => null);
   const el = $('#health-spotdl');
   const mode = state.settings?.spotify_backend;
   el.className = `health ${state.tools.spotdl ? 'ok' : mode === 'off' || mode === 'embed' ? 'off' : 'bad'}`;

@@ -398,6 +398,70 @@ pub fn open_local(path: &Path) -> AppResult<OpenedStream> {
     Ok(OpenedStream { reader: StreamReader::new(shared.clone(), false), shared, hint, hls: None })
 }
 
+/// Serve a seekable byte source (e.g. a decrypted Spotify file) through the
+/// same disk buffer: bytes `[base, base + total)` of `src` appear as `[0, total)`.
+/// A background thread copies it in, jumping to wherever the decoder seeks.
+pub fn open_source<R: Read + Seek + Send + 'static>(mut src: R, base: u64, total: u64, hint: Option<String>) -> AppResult<OpenedStream> {
+    let shared = Shared::temp()?;
+    shared.state.lock().unwrap().total = Some(total);
+    let s2 = shared.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> AppResult<()> {
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut cursor = 0u64;
+            let mut src_pos = None;
+            loop {
+                if s2.cancelled() {
+                    return Err(AppError::Cancelled);
+                }
+                let start = {
+                    let want = s2.take_want();
+                    let st = s2.state.lock().unwrap();
+                    if st.complete(total) {
+                        return Ok(());
+                    }
+                    match want.filter(|w| st.available_until(*w).is_none()) {
+                        Some(w) => w,
+                        None => match st.next_gap(cursor, total) {
+                            Some(g) => g,
+                            None => return Ok(()),
+                        },
+                    }
+                };
+                if src_pos != Some(start) {
+                    src.seek(SeekFrom::Start(base + start))?;
+                }
+                let end = {
+                    let st = s2.state.lock().unwrap();
+                    st.ranges.iter().map(|r| r.0).filter(|s| *s > start).min().unwrap_or(total).min(start + CHUNK)
+                };
+                let mut pos = start;
+                while pos < end {
+                    let want = ((end - pos) as usize).min(buf.len());
+                    let n = src.read(&mut buf[..want]).map_err(|e| AppError::Network(e.to_string()))?;
+                    if n == 0 {
+                        return Err(AppError::Network("stream ended early".into()));
+                    }
+                    s2.write_at(pos, &buf[..n])?;
+                    pos += n as u64;
+                    if s2.cancelled() || s2.state.lock().unwrap().want.is_some() {
+                        break;
+                    }
+                }
+                cursor = pos;
+                src_pos = Some(pos);
+            }
+        })();
+        s2.finish(result.err().filter(|e| !matches!(e, AppError::Cancelled)).map(|e| e.to_string()));
+    });
+    wait_for(&shared, (64 * 1024).min(total));
+    if let Some(e) = shared.error() {
+        return Err(AppError::Network(e));
+    }
+    let reader = StreamReader::new(shared.clone(), true);
+    Ok(OpenedStream { reader, shared, hint, hls: None })
+}
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------

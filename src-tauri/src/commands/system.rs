@@ -81,6 +81,26 @@ pub fn set_spotify_secret(st: State<'_, AppState>, secret: String) -> AppResult<
     Ok(())
 }
 
+/// Log in to Spotify in the browser (Premium) for real Spotify playback.
+#[tauri::command]
+pub async fn spotify_login() -> AppResult<String> {
+    crate::spotify_play::login().await
+}
+
+#[tauri::command]
+pub async fn spotify_logout() {
+    crate::spotify_play::logout().await
+}
+
+/// Logged-in Spotify username, if any.
+#[tauri::command]
+pub async fn spotify_account() -> Option<String> {
+    if !crate::spotify_play::has_login() {
+        return None;
+    }
+    crate::spotify_play::username().await
+}
+
 /// Download/update the bundled yt-dlp and switch to it.
 #[tauri::command]
 pub async fn ytdlp_install(app: AppHandle, st: State<'_, AppState>) -> AppResult<ytdlp::Health> {

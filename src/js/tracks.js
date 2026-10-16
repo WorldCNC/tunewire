@@ -241,7 +241,7 @@ function openVersions(track, opts = {}) {
       const tags = h('span', { class: 'v-name' }, PLATFORMS[v.platform]?.label || v.platform,
         i === 0 ? h('span', { class: 'tag' }, 'default') : null,
         v.preview ? h('span', { class: 'tag warn' }, '30 s preview') : null,
-        v.platform === 'spotify' ? h('span', { class: 'tag' }, 'plays a matched upload') : null);
+        v.platform === 'spotify' && !state.spotifyUser ? h('span', { class: 'tag' }, 'plays via YouTube Music') : null);
       const el = h('button', { class: `version ${v.platform}${v.platform === selected ? ' selected' : ''}` },
         h('span', { class: 'vlogo', html: plogo(v.platform) }),
         h('div', { style: 'min-width:0' }, tags, h('div', { class: 'v-title' }, [v.title, v.artist].filter(Boolean).join(' · '))),
@@ -264,8 +264,8 @@ function openVersions(track, opts = {}) {
       playTrack(track, selected);
     }
   };
-  const note = track.versions.some((v) => v.platform === 'spotify')
-    ? h('p', { class: 'muted small', style: 'margin:12px 2px 0' }, 'Spotify audio is DRM-protected, so it plays from the closest YouTube Music or SoundCloud match.')
+  const note = track.versions.some((v) => v.platform === 'spotify') && !state.spotifyUser
+    ? h('p', { class: 'muted small', style: 'margin:12px 2px 0' }, 'To play Spotify’s own audio, log in under Settings → Spotify (Premium). Until then Spotify plays the same recording from YouTube Music.')
     : null;
   const footer = opts.queueUid != null
     ? [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: go }, 'Use this source')]

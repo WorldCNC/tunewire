@@ -7,7 +7,8 @@
 /** Default version index for a track according to the user's platform order. */
 function sortedVersions(track) {
   const order = state.settings?.platform_order || ['ytmusic', 'soundcloud', 'youtube', 'spotify'];
-  return [...track.versions].sort((a, b) =>
+  // Uploads standing in for another version (Spotify matches) aren't sources of their own.
+  return track.versions.filter((v) => !v.matched_for).sort((a, b) =>
     (a.preview - b.preview) || (order.indexOf(a.platform) - order.indexOf(b.platform)));
 }
 
@@ -241,10 +242,14 @@ function openVersions(track, opts = {}) {
       const tags = h('span', { class: 'v-name' }, PLATFORMS[v.platform]?.label || v.platform,
         i === 0 ? h('span', { class: 'tag' }, 'default') : null,
         v.preview ? h('span', { class: 'tag warn' }, '30 s preview') : null,
-        v.platform === 'spotify' && !state.spotifyUser ? h('span', { class: 'tag' }, 'plays via YouTube Music') : null);
+        v.platform === 'spotify' && !state.spotifyUser ? h('span', { class: 'tag' }, 'via YouTube Music') : null);
+      const match = v.platform === 'spotify' && !state.spotifyUser && track.versions.find((x) => x.matched_for === 'spotify');
+      const sub = match
+        ? `Plays “${match.title}” from ${PLATFORMS[match.platform]?.label}${match.isrc_match ? ' (same recording)' : ' (closest match)'}`
+        : [v.title, v.artist].filter(Boolean).join(' · ');
       const el = h('button', { class: `version ${v.platform}${v.platform === selected ? ' selected' : ''}` },
         h('span', { class: 'vlogo', html: plogo(v.platform) }),
-        h('div', { style: 'min-width:0' }, tags, h('div', { class: 'v-title' }, [v.title, v.artist].filter(Boolean).join(' · '))),
+        h('div', { style: 'min-width:0' }, tags, h('div', { class: 'v-title' }, sub)),
         h('div', { class: 'v-right' }, v.preview ? '0:30' : fmtTime(v.duration)));
       el.addEventListener('click', () => { selected = v.platform; render(); });
       el.addEventListener('dblclick', () => { selected = v.platform; go(); });

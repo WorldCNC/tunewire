@@ -34,7 +34,15 @@ function renderPlayback() {
     msg.textContent = p.message || 'Playback failed';
   } else if (p.stalled) {
     msg.innerHTML = `<span class="spinner"></span>Buffering…`;
+  } else if (p.version && track && p.version.matched_for) {
+    // An upload standing in for the version the user picked (Spotify).
+    const from = PLATFORMS[p.version.matched_for]?.label, via = PLATFORMS[p.version.platform]?.label;
+    msg.title = p.version.isrc_match
+      ? `${from} recording, streamed from ${via} (same recording, matched by ISRC)`
+      : `Closest ${via} match for the ${from} track`;
+    msg.replaceChildren(miniLogo(p.version.matched_for), h('span', {}, from), h('span', { class: 'via-sep' }, `via ${via}`));
   } else if (p.version && track) {
+    msg.title = '';
     msg.replaceChildren(miniLogo(p.version.platform), h('span', {}, PLATFORMS[p.version.platform]?.label));
   } else {
     msg.textContent = '';

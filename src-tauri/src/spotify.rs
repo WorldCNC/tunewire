@@ -67,6 +67,8 @@ fn version(title: &str, artist: &str, duration_ms: Option<f64>, uri: &str, thumb
         artist_url: None,
         album: None,
         rank: 0,
+        matched_for: None,
+        isrc_match: false,
     }
 }
 
@@ -280,6 +282,8 @@ fn parse_tracks(v: &Value) -> Vec<TrackVersion> {
                 artist_url: None,
                 album,
                 rank: i,
+                matched_for: None,
+                isrc_match: false,
             })
         })
         .collect()

@@ -71,6 +71,12 @@ pub struct TrackVersion {
     /// Rank inside its own platform's result list (0 = top). Not persisted meaningfully.
     #[serde(default, skip_serializing)]
     pub rank: usize,
+    /// This upload plays in place of another platform's version (e.g. Spotify).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_for: Option<Platform>,
+    /// The match was found by ISRC (same recording), not by title/artist.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub isrc_match: bool,
 }
 
 /// One logical song, possibly available on several platforms.

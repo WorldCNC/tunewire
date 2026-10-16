@@ -121,12 +121,18 @@ async fn load_item(
     };
     let mut tried: Vec<Platform> = Vec::new();
     let mut last_err: Option<AppError> = None;
+    let chose_spotify = item.platform == Some(Platform::Spotify) && !crate::spotify_play::has_login();
     for v in candidates(&st, item) {
         if cancelled() {
             return Err(AppError::Cancelled);
         }
         if v.platform == Platform::Spotify && !crate::spotify_play::has_login() {
             continue; // not logged in: played through a matched upload (below)
+        }
+        // Spotify picked explicitly: play its recording (ISRC match), not
+        // whatever other upload happened to be grouped with the song.
+        if chose_spotify && v.platform != Platform::Spotify && v.matched_for != Some(Platform::Spotify) {
+            continue;
         }
         say(format!("Loading from {}…", v.platform.label()));
         match load_version(&st, &v, token).await {
@@ -151,7 +157,11 @@ async fn load_item(
         if !tried.contains(&Platform::Ytmusic) {
             say("Finding the exact recording…".into());
             if let Ok(Some(isrc)) = crate::spotify::isrc(&sp.id).await {
-                found = search::resolve_isrc(&isrc, &sp, &st.cache).await.ok();
+                found = search::resolve_isrc(&isrc, &sp, &st.cache).await.ok().map(|mut v| {
+                    v.matched_for = Some(Platform::Spotify);
+                    v.isrc_match = true;
+                    v
+                });
             }
             if cancelled() {
                 return Err(AppError::Cancelled);
@@ -178,7 +188,12 @@ async fn load_item(
     let pref = st.store.settings().platform_order;
     let exclude: Vec<Platform> = tried.into_iter().filter(|p| !matches!(p, Platform::Spotify | Platform::Local)).collect();
     let v = match search::resolve_equivalent(&item.track.artist, &item.track.title, item.track.duration, &pref, &exclude, &st.cache).await {
-        Ok(v) => v,
+        Ok(mut v) => {
+            if item.track.has(Platform::Spotify) {
+                v.matched_for = Some(Platform::Spotify);
+            }
+            v
+        }
         Err(e) => return Err(last_err.filter(|_| !matches!(e, AppError::Unavailable(_))).unwrap_or(e)),
     };
     if cancelled() {
@@ -192,7 +207,8 @@ async fn load_item(
 
 /// Remember a matched upload so the version picker / next play can use it.
 fn remember_match(st: &AppState, item: &mut QueueItem, v: &TrackVersion) {
-    if !item.track.has(v.platform) {
+    let known = if v.matched_for.is_some() { item.track.versions.iter().any(|x| x.url == v.url) } else { item.track.has(v.platform) };
+    if !known {
         item.track.versions.push(v.clone());
         let mut q = st.queue.lock().unwrap();
         if let Some(qi) = q.items.iter_mut().find(|i| i.uid == item.uid) {

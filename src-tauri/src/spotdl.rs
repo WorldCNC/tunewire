@@ -110,6 +110,8 @@ fn parse_song(s: &Value, rank: usize) -> Option<TrackVersion> {
         artist_url: None,
         album: s.get("album_name").and_then(Value::as_str).map(str::to_string),
         rank,
+        matched_for: None,
+        isrc_match: false,
     })
 }
 

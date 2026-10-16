@@ -238,12 +238,14 @@ fn presence(ps: &PlaybackState) -> Option<discord::Presence> {
         return None;
     }
     let (item, v) = (ps.current.as_ref()?, ps.version.as_ref()?);
+    // A stand-in upload shows (and links to) the version the user picked.
+    let shown = v.matched_for.and_then(|p| item.track.versions.iter().find(|x| x.platform == p)).unwrap_or(v);
     Some(discord::Presence {
         key: item.track.key.clone(),
         title: item.track.title.chars().take(120).collect(),
         artist: if item.track.artist.is_empty() { "Unknown artist".into() } else { item.track.artist.chars().take(120).collect() },
-        platform: v.platform.label().into(),
-        url: if v.platform == Platform::Local { String::new() } else { v.url.clone() },
+        platform: shown.platform.label().into(),
+        url: if shown.platform == Platform::Local { String::new() } else { shown.url.clone() },
         cover: v.thumbnail.clone().or(item.track.thumbnail.clone()).map(|u| u.replace("-original.", "-t500x500.").replace("/mqdefault.jpg", "/hqdefault.jpg")),
         playing: ps.status == "playing",
         position: ps.position,

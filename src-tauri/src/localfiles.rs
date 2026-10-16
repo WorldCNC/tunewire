@@ -102,6 +102,8 @@ pub fn read_file(p: &Path) -> TrackVersion {
         artist_url: None,
         album,
         rank: 0,
+        matched_for: None,
+        isrc_match: false,
     }
 }
 

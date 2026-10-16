@@ -568,7 +568,7 @@ pub fn parse_entry(e: &Value, platform: Platform, rank: usize) -> Option<TrackVe
     let preview = platform == Platform::Soundcloud && duration.map(|d| (d - 30.0).abs() < 0.6).unwrap_or(false);
     let artist_url = sv(e, "uploader_url").or_else(|| sv(e, "channel_url"));
     let album = sv(e, "album");
-    Some(TrackVersion { platform, url, id, title, artist, duration, thumbnail, preview, partial, artist_url, album, rank })
+    Some(TrackVersion { platform, url, id, title, artist, duration, thumbnail, preview, partial, artist_url, album, rank, matched_for: None, isrc_match: false })
 }
 
 fn percent_encode(s: &str) -> String {
@@ -871,6 +871,8 @@ pub async fn resolve_equivalent(
         artist_url: None,
         album: None,
         rank: 0,
+        matched_for: None,
+        isrc_match: false,
     };
     let tn = Norm::of(&target);
     let query = format!("{artist} {}", strip_noise(title)).trim().to_string();
@@ -946,7 +948,7 @@ mod tests {
     use super::*;
 
     fn v(p: Platform, title: &str, artist: &str, d: Option<f64>, rank: usize) -> TrackVersion {
-        TrackVersion { platform: p, url: format!("u{rank}{title}"), id: String::new(), title: title.into(), artist: artist.into(), duration: d, thumbnail: None, preview: false, partial: false, artist_url: None, album: None, rank }
+        TrackVersion { platform: p, url: format!("u{rank}{title}"), id: String::new(), title: title.into(), artist: artist.into(), duration: d, thumbnail: None, preview: false, partial: false, artist_url: None, album: None, rank, matched_for: None, isrc_match: false }
     }
 
     #[test]

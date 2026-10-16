@@ -89,6 +89,8 @@ mod live_tests {
             artist_url: None,
             album: None,
             rank: 0,
+            matched_for: None,
+            isrc_match: false,
         };
         let t0 = std::time::Instant::now();
         let p = rt.block_on(super::fetch(&v, &dir)).expect("download");

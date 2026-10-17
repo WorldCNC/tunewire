@@ -1,0 +1,2 @@
+# Gallery files are installed by checksum: never convert line endings.
+gallery/** -text

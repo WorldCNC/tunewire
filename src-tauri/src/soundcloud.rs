@@ -168,7 +168,7 @@ pub async fn stream(url: &str) -> AppResult<StreamInfo> {
             let mime = c.pointer("/format/mime_type").and_then(Value::as_str).unwrap_or("");
             let preset = c.get("preset").and_then(Value::as_str).unwrap_or("");
             match (proto, mime.contains("mp4a"), mime.contains("mpeg")) {
-                ("hls", true, _) => 0 + usize::from(!preset.contains("160")),
+                ("hls", true, _) => usize::from(!preset.contains("160")),
                 ("progressive", _, true) => 2,
                 ("hls", _, true) => 3,
                 _ => 9,

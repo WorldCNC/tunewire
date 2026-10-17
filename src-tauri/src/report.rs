@@ -136,7 +136,7 @@ pub fn install_panic_hook() {
         let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         if should_send("crash", &format!("{msg} at {at}")) {
-            send_blocking(payload("crash", &format!("{msg}"), &format!("at {at} (thread {thread})")));
+            send_blocking(payload("crash", &msg.to_string(), &format!("at {at} (thread {thread})")));
         }
         default(info);
     }));

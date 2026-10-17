@@ -83,7 +83,9 @@ const PROFILE_LINK = (id) => `${SHARE_BASE}#u=${id}`;
 
 /** Publish (or update) a local playlist online and return its id. */
 async function publishPlaylist(pl, { visibility, collaborative } = {}) {
-  pl = state.playlists.find((p) => p.id === pl.id) || pl; // latest copy
+  // Ask the backend: an in-flight library refresh can briefly leave an older
+  // copy (without the online link) in memory.
+  try { pl = (await call('list_playlists')).find((p) => p.id === pl.id) || pl; } catch { /* keep */ }
   if (!(await requireAccount({ why: 'Sign in to share playlists' }))) return null;
   const meta = { title: pl.name, description: pl.description || '', cover: pl.cover || null };
   if (visibility) meta.visibility = visibility;
@@ -238,6 +240,17 @@ async function syncCloudPlaylists() {
     }
   } catch { /* offline */ }
 }
+
+// Safety net for missed live updates: refresh linked playlists every minute,
+// when the window comes back, and when one is opened.
+let lastCloudSync = 0;
+function syncSoon(minGap = 20000) {
+  if (!signedIn() || Date.now() - lastCloudSync < minGap) return;
+  lastCloudSync = Date.now();
+  syncCloudPlaylists();
+}
+setInterval(() => syncSoon(55000), 60000);
+window.addEventListener('focus', () => syncSoon());
 
 async function leaveCloudPlaylist(pl) {
   try {
@@ -463,6 +476,8 @@ function renderTogether() {
     return;
   }
   const st = jam.remote;
+  // Until the server confirms presence, at least show yourself.
+  if (!jam.people.some((p) => p.key === cloud.session.user_id)) jam.people = [{ key: cloud.session.user_id, name: cloud.session.name, avatar: cloud.session.avatar, host: jam.host }, ...jam.people];
   box.replaceChildren(...[
     h('div', { class: 'jam-head' },
       h('b', {}, jam.host ? 'You’re hosting' : 'Listening together'),

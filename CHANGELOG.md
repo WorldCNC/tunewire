@@ -3,6 +3,20 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
+## v1.0.4
+
+- Accounts: sign in (or continue as a guest) to share and listen together; your music still lives on your computer
+- Share a song or a playlist with a link; people can open it, save it, or follow it to get your updates
+- Collaborative playlists: invite friends, everyone adds, removes and reorders songs, changes show up live
+- Listen Together: start a session, send the link, everyone hears the same song at the same moment; guests add songs and send reactions
+- Friends: see what people you follow are playing, find people, profile pages, compare your Wrapped
+- Much faster: search across all sources in about half a second, SoundCloud songs start in under half a second, artist and album pages in under a second
+- Spotify imports: your whole library (Liked Songs and playlists) or someone's public playlists, now without developer keys
+- Far less memory: right-sized covers, long lists load as you scroll, no live blur
+- Smoother: no flicker when animations end or when reordering a playlist; download button fills up as a playlist downloads
+- Error reports help fix problems faster (can be turned off in Settings → Privacy)
+- Updates are checked every hour
+
 ## v1.0.3
 
 - New look: your own title bar, Your Library sidebar (pins, folders, filters, sort), big playlist headers in the cover's color, Spotify-style song rows and player bar

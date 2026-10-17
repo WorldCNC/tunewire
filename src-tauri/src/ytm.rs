@@ -365,7 +365,7 @@ pub async fn search_extras(query: &str) -> AppResult<SearchExtras> {
             let track = video_id.as_ref().map(|vid| {
                 let parts: Vec<&str> = subtitle.split(" • ").collect();
                 let artist = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-                let duration = parts.iter().filter_map(|p| parse_duration(p)).last();
+                let duration = parts.iter().filter_map(|p| parse_duration(p)).next_back();
                 song_track(vid, title.clone(), artist, None, duration, thumbnail.clone(), None)
             });
             Some(Card { kind, title, subtitle, browse_id: nav_browse(&title_run), video_id, thumbnail, track })
@@ -633,10 +633,9 @@ pub async fn mood_page(params: &str) -> AppResult<Vec<Shelf>> {
         .filter_map(|s| {
             let (title, body) = if let Some(c) = s.get("musicCarouselShelfRenderer") {
                 (text(c.pointer("/header/musicCarouselShelfBasicHeaderRenderer/title")), c)
-            } else if let Some(g) = s.get("gridRenderer") {
-                (text(g.pointer("/header/gridHeaderRenderer/title")), g)
             } else {
-                return None;
+                let g = s.get("gridRenderer")?;
+                (text(g.pointer("/header/gridHeaderRenderer/title")), g)
             };
             let cards = shelf_items(body);
             (!cards.is_empty()).then_some(Shelf { title, cards })

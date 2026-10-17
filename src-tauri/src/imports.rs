@@ -82,7 +82,7 @@ fn image(v: &Value) -> Option<String> {
     // Smallest image that's still at least 300 px, else the biggest.
     imgs.iter()
         .filter(|i| i.get("width").and_then(Value::as_u64).unwrap_or(640) >= 300)
-        .last()
+        .next_back()
         .or_else(|| imgs.first())
         .and_then(|i| i.get("url").and_then(Value::as_str))
         .map(str::to_string)

@@ -311,7 +311,7 @@ impl Iterator for FeedSource {
             }
             self.flush_played();
             // Finish a partially emitted frame with silence before switching.
-            if self.out_count % self.ctl.channels as u64 != 0 {
+            if !self.out_count.is_multiple_of(self.ctl.channels as u64) {
                 self.out_count += 1;
                 return Some(0.0);
             }

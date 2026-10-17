@@ -871,7 +871,7 @@ pub fn needs_completion(tracks: &[Track]) -> Vec<String> {
 /// Patch cached search results with completed metadata.
 pub fn apply_metadata(cache: &SearchCache, metas: &[crate::ytdlp::Meta]) {
     let mut map = cache.map.lock().unwrap();
-    for (_, (_, versions)) in map.iter_mut() {
+    for (_, versions) in map.values_mut() {
         for v in versions.iter_mut() {
             if let Some(m) = metas.iter().find(|m| m.url == v.url) {
                 m.apply(v);

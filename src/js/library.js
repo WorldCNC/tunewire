@@ -16,6 +16,7 @@ async function refreshPlaylists({ silent = false } = {}) {
 
 function openPlaylist(id, { push = true } = {}) {
   state.selectedPlaylist = id;
+  if (state.playlists.find((p) => p.id === id)?.cloud_id) syncSoon(5000);
   showView('playlist', { push, reopen: () => openPlaylist(id, { push: false }) });
   renderPlaylistDetail();
 }

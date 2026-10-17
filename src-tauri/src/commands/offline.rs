@@ -130,6 +130,6 @@ pub async fn rescan_local(app: AppHandle, st: State<'_, AppState>) -> AppResult<
 #[tauri::command]
 pub fn list_local() -> Vec<Track> {
     let mut v: Vec<Track> = localfiles::all().into_iter().map(Track::from_version).collect();
-    v.sort_by(|a, b| (a.artist.to_lowercase(), a.title.to_lowercase()).cmp(&(b.artist.to_lowercase(), b.title.to_lowercase())));
+    v.sort_by_key(|a| (a.artist.to_lowercase(), a.title.to_lowercase()));
     v
 }

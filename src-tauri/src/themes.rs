@@ -144,7 +144,7 @@ impl ThemeStore {
                 Some(t)
             })
             .collect();
-        v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        v.sort_by_key(|a| a.name.to_lowercase());
         v
     }
 

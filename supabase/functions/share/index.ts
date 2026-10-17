@@ -91,9 +91,10 @@ export async function preview(kind: string, code: string, env: Env, f: typeof fe
     return { kind, title: clip(o.t, 100), description: clip(`Song${typeof o.a === "string" && o.a ? ` · ${o.a}` : ""} · Listen on Tunewire`, 200), image: httpsImage(o.i) || DEFAULT_IMAGE, target, large: false };
   }
   if (kind === "u" && UUID.test(code)) {
-    const [p] = await rest(env, `profiles?id=eq.${code}&select=name,avatar`, f).catch(() => []);
+    const [p] = await rest(env, `profiles?id=eq.${code}&select=*`, f).catch(() => []);
     if (!p) return generic;
-    return { kind, title: clip(`${p.name} on Tunewire`, 100), description: "See their public playlists and what they listen to.", image: httpsImage(p.avatar) || DEFAULT_IMAGE, target, large: false };
+    const banner = httpsImage(p.banner);
+    return { kind, title: clip(`${p.name} on Tunewire`, 100), description: "See their public playlists, followers and who they follow.", image: banner || httpsImage(p.avatar) || DEFAULT_IMAGE, target, large: !!banner };
   }
   if (kind === "j") return { ...generic, title: "Listen together on Tunewire", description: "You're invited to a listening session: everyone hears the same song at the same moment." };
   if (kind === "c") return { ...generic, title: "Join a collaborative playlist", description: "You're invited to add songs to a playlist together on Tunewire." };

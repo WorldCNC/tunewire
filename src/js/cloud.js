@@ -23,9 +23,15 @@ async function cloudInit() {
 async function loadProfileName() {
   if (!cloud.session) return;
   try {
-    const [p] = await db('GET', `profiles?id=eq.${cloud.session.user_id}&select=name,avatar,share_activity,share_wrapped`);
+    const [p] = await db('GET', `profiles?id=eq.${cloud.session.user_id}&select=*`);
     if (p) { cloud.session.name = p.name; cloud.session.avatar = p.avatar || cloud.session.avatar; cloud.profile = p; }
   } catch { /* offline */ }
+}
+
+/** The Discord banner and accent color (read at sign-in) onto the profile. */
+async function saveDiscordLook(s) {
+  if (!s || (!s.banner && s.accent_color == null)) return;
+  try { await db('PATCH', `profiles?id=eq.${s.user_id}`, { banner: s.banner || null, accent_color: s.accent_color ?? null }); } catch { /* older database: no banner columns yet */ }
 }
 
 function cloudOn() { return !!cloud.cfg; }
@@ -79,6 +85,7 @@ async function requireAccount({ why = 'Sign in to use this' } = {}) {
       status.textContent = 'Continue in your browser…';
       try {
         cloud.session = await call('cloud_sign_in', { provider: 'discord' });
+        await saveDiscordLook(cloud.session);
         await loadProfileName();
         cloudChanged();
         done = true;

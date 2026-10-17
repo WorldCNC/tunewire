@@ -7,6 +7,7 @@ app's update and "What's new" dialogs. Keep entries short and user-facing.
 
 - Listen Together, rebuilt: only the host controls playback, the host can hand over or remove people and approve suggested songs, guests can chat and vote to skip, a sync indicator shows how close you are, and you can keep your own room link
 - Friends need your approval to follow you; sharing what you play is off until you turn it on, and you choose whether friends can compare Wrapped
+- Profiles show your Discord banner and colors, with tabs for playlists, followers and following
 - Notifications for follow requests, accepted follows, changes to your shared playlists and friends starting a session
 - Shared playlists show whether they're synced, who's editing, and a Retry if something didn't sync; renames and new covers now reach everyone
 - Undo after deleting a playlist, removing songs or clearing history

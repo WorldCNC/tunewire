@@ -258,3 +258,14 @@ select tests.check(report_allow('ip:1', 2, 60), 'first report');
 select tests.check(report_allow('ip:1', 2, 60), 'second report');
 select tests.check(not report_allow('ip:1', 2, 60), 'third is refused');
 reset role;
+
+-- Profile banners: only Discord banner images, only on your own profile.
+select tests.act(:A);
+update profiles set banner = 'https://cdn.discordapp.com/banners/123456789012345678/a_0123456789abcdef0123456789abcdef.gif?size=1024', accent_color = 5793266 where id = auth.uid();
+select tests.check((select banner from profiles where id = auth.uid()) like 'https://cdn.discordapp.com/banners/%', 'own banner saved');
+select tests.fails($$update profiles set banner = 'https://evil.test/x.png' where id = auth.uid()$$, 'profiles_banner_check');
+select tests.fails($$update profiles set accent_color = -1 where id = auth.uid()$$, 'profiles_accent_color_check');
+select tests.act(:B);
+update profiles set banner = null where id = '00000000-0000-0000-0000-00000000000a';
+select tests.check((select banner from profiles where id = '00000000-0000-0000-0000-00000000000a') is not null, 'others cannot change your banner');
+reset role;

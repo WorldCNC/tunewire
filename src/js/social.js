@@ -1323,50 +1323,102 @@ function openNotifications() {
 }
 
 // Profiles ------------------------------------------------------------------------------------
+// A Discord-style header (their Discord banner, or their accent color), and
+// tabs for public playlists, followers and following.
+const DISCORD_BANNER = /^https:\/\/cdn\.discordapp\.com\/banners\/[0-9]+\/(a_)?[0-9a-f]+\.(png|gif|webp)(\?size=[0-9]+)?$/;
+const hexColor = (n) => `#${Number(n).toString(16).padStart(6, '0')}`;
+
 let profileSeq = 0;
-async function openProfile(userId, { push = true } = {}) {
+async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
   if (!cloudOn() || !UUID_RE.test(userId)) return;
   const seq = ++profileSeq;
-  showView('profile', { push, reopen: () => openProfile(userId, { push: false }) });
+  showView('profile', { push, reopen: () => openProfile(userId, { push: false, tab }) });
   const body = $('#profile-body');
-  body.replaceChildren(h('div', { class: 'hero skeleton-hero' }, h('div', { class: 'hero-art round sk' }), h('div', { class: 'hero-meta grow' }, h('div', { class: 'sk w-20' }), h('div', { class: 'sk sk-title w-60' }), h('div', { class: 'sk w-40' }))));
+  body.replaceChildren(loadingBox('Loading profile', h('div', { class: 'profile-head' }, h('div', { class: 'profile-banner sk' }), h('div', { class: 'profile-id' }, h('div', { class: 'profile-avatar sk' }), h('div', { class: 'grow' }, h('div', { class: 'sk sk-title w-40' }), h('div', { class: 'sk w-20' }))))));
   try {
-    const [[p], lists, followers, following] = await Promise.all([
-      db('GET', `profiles?id=eq.${userId}&select=id,name,avatar`),
+    const [[p], lists, followers, following, mine] = await Promise.all([
+      db('GET', `profiles?id=eq.${userId}&select=*`),
       db('GET', `playlists?owner=eq.${userId}&visibility=eq.public&select=id,title,cover,tracks->0->thumbnail&order=updated_at.desc`),
-      db('GET', `follows?followee=eq.${userId}&select=follower,status,profiles!follows_follower_fkey(id,name,avatar)`),
-      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee`),
+      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(id,name,avatar)&order=created_at.desc`),
+      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(id,name,avatar)&order=created_at.desc`),
+      signedIn() ? db('GET', `follows?follower=eq.${me()}&select=followee,status`) : Promise.resolve([]),
     ]);
     if (seq !== profileSeq) return;
     if (!p) { body.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'This profile doesn’t exist.'))); return; }
-    const mine = signedIn() && p.id === me();
+    const isMe = signedIn() && p.id === me();
     const accepted = followers.filter((f) => f.status === 'accepted');
-    const myFollow = signedIn() ? followers.find((f) => f.follower === me()) : null;
-    const label = () => (!myFollow ? 'Follow' : myFollow.status === 'accepted' ? 'Following' : 'Requested');
-    const followBtn = h('button', { class: 'ab-follow', 'aria-live': 'polite' }, label());
-    followBtn.addEventListener('click', async () => {
-      if (myFollow) { if (await unfollow(p.id)) openProfile(userId, { push: false }); }
-      else if (await follow(p.id)) { toast(`Request sent. You’ll follow ${p.name} once they accept.`, 'ok', 2500); openProfile(userId, { push: false }); }
-    });
-    const art = h('div', { class: 'hero-art round' });
-    if (p.avatar && /^https:\/\//.test(p.avatar)) art.append(h('img', { src: p.avatar, 'data-px': 300, alt: '', referrerpolicy: 'no-referrer' })); else art.innerHTML = icon('user');
-    body.replaceChildren(...[
-      h('div', { class: 'hero' }, art, h('div', { class: 'hero-meta' }, h('div', { class: 'hero-kicker' }, 'Profile'), h('h1', { class: 'hero-title' }, p.name),
-        h('div', { class: 'hero-line' }, `${lists.length} public playlist${lists.length === 1 ? '' : 's'}`, h('span', { class: 'dot' }, `${accepted.length} follower${accepted.length === 1 ? '' : 's'}`), h('span', { class: 'dot' }, `${following.length} following`)))),
-      h('div', { class: 'action-bar' }, mine ? null : followBtn,
-        h('button', { class: 'ab-icon', title: 'Copy profile link', 'aria-label': 'Copy profile link', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(p.id)); toast('Profile link copied', 'ok', 1500); } }),
-        mine ? h('button', { class: 'btn small', onclick: () => askCloudPrivacy(true) }, 'Privacy') : null),
-      lists.length ? h('div', {}, h('div', { class: 'section-title' }, 'Public playlists'),
-        h('div', { class: 'card-row' }, ...lists.map((l, i) => cardTile({ kind: 'playlist', title: l.title, subtitle: `Playlist · ${p.name}`, thumbnail: l.cover || l.thumbnail, browse_id: null, track: null, _cloud: l.id }, i))))
-        : h('p', { class: 'meta' }, mine ? 'Make a playlist public (⋯ → Share link → Public) to show it here.' : 'No public playlists yet.'),
-      mine && accepted.length ? h('div', {}, h('div', { class: 'section-title' }, 'Your followers'),
-        h('div', { class: 'friends-list wide' }, ...accepted.map((f) => h('div', { class: 'friend' }, avatarEl(f.profiles?.avatar, f.profiles?.name),
-          h('button', { class: 'friend-name', onclick: () => openProfile(f.follower) }, f.profiles?.name || 'Someone'),
-          h('button', { class: 'btn small', onclick: async () => {
-            if (!(await confirmModal({ title: `Remove ${f.profiles?.name || 'this follower'}?`, message: 'They stop seeing what you play and your Wrapped. They aren’t told.', okLabel: 'Remove', danger: true }))) return;
-            try { await db('DELETE', `follows?follower=eq.${f.follower}&followee=eq.${me()}`); openProfile(userId, { push: false }); } catch (e) { toast(errMsg(e), 'error'); }
-          } }, 'Remove'))))) : null].filter(Boolean));
-    $$('#profile-body .tile').forEach((tile, i) => { tile.onclick = (e) => { e.stopPropagation(); openSharedPlaylist(lists[i].id); }; const pb = tile.querySelector('.tile-play'); if (pb) pb.onclick = async (e) => { e.stopPropagation(); const [row] = await db('GET', `playlists?id=eq.${lists[i].id}&select=tracks`); playList(row.tracks.map(fromCloudTrack), 0); }; });
+    const myStatus = new Map(mine.map((f) => [f.followee, f.status]));
+
+    // Header: banner, avatar, name, counts.
+    const banner = h('div', { class: 'profile-banner' });
+    const accent = p.accent_color != null ? hexColor(p.accent_color) : null;
+    if (typeof p.banner === 'string' && DISCORD_BANNER.test(p.banner)) banner.style.backgroundImage = `url("${p.banner}")`;
+    else banner.classList.add('no-image');
+    if (accent) banner.style.setProperty('--accent-c', accent);
+    const avatar = h('div', { class: 'profile-avatar' });
+    if (p.avatar && /^https:\/\//.test(p.avatar)) avatar.append(h('img', { src: p.avatar, 'data-px': 300, alt: '', referrerpolicy: 'no-referrer' }));
+    else { avatar.textContent = (p.name || '?')[0].toUpperCase(); if (accent) avatar.style.background = accent; }
+
+    const followBtn = (uid, name) => {
+      if (!signedIn() || uid === me()) return null;
+      const st = myStatus.get(uid);
+      const b = h('button', { class: `btn small${st ? '' : ' primary'}` }, !st ? 'Follow' : st === 'accepted' ? 'Following' : 'Requested');
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        if (st) { if (await unfollow(uid)) myStatus.delete(uid); }
+        else if (await follow(uid)) { myStatus.set(uid, 'pending'); toast(`Request sent to ${name}`, 'ok', 2000); }
+        render();
+      });
+      return b;
+    };
+    const tabBtn = (id, label) => h('button', { role: 'tab', 'aria-selected': String(tab === id), class: tab === id ? 'active' : '', onclick: () => { tab = id; render(); } }, label);
+    const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+    const personList = (rows, empty) => (rows.length
+      ? h('div', { class: 'people-grid' }, ...rows.map((r) => h('div', { class: 'person-card' },
+        h('button', { class: 'person-open', onclick: () => openProfile(r.id) }, avatarEl(r.avatar, r.name, 'avatar lg'), h('b', {}, r.name || 'Someone'), r.id === me() ? h('span', { class: 'meta' }, 'You') : null),
+        followBtn(r.id, r.name))))
+      : h('p', { class: 'meta' }, empty));
+
+    const render = () => {
+      const head = h('div', { class: 'profile-head' }, banner,
+        h('div', { class: 'profile-id' }, avatar,
+          h('div', { class: 'grow min-w-0' },
+            h('div', { class: 'hero-kicker' }, 'Profile'),
+            h('h1', { class: 'profile-name' }, p.name),
+            h('div', { class: 'profile-counts' },
+              h('button', { onclick: () => { tab = 'followers'; render(); } }, h('b', {}, String(accepted.length)), accepted.length === 1 ? ' follower' : ' followers'),
+              h('button', { onclick: () => { tab = 'following'; render(); } }, h('b', {}, String(following.length)), ' following'),
+              h('span', {}, count(lists.length, 'public playlist', 'public playlists')))),
+          h('div', { class: 'profile-actions' },
+            isMe ? h('button', { class: 'btn small', onclick: () => askCloudPrivacy(true) }, 'Privacy') : followBtn(p.id, p.name),
+            h('button', { class: 'ab-icon', title: 'Copy profile link', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(p.id)); toast('Profile link copied', 'ok', 1500); } }))));
+      const tabs = h('div', { class: 'profile-tabs chips', role: 'tablist' },
+        tabBtn('playlists', `Playlists · ${lists.length}`), tabBtn('followers', `Followers · ${accepted.length}`), tabBtn('following', `Following · ${following.length}`));
+
+      let content;
+      if (tab === 'playlists') {
+        content = lists.length
+          ? h('div', { class: 'card-row' }, ...lists.map((l, i) => cardTile({ kind: 'playlist', title: l.title, subtitle: `Playlist · ${p.name}`, thumbnail: l.cover || l.thumbnail, browse_id: null, track: null, _cloud: l.id }, i)))
+          : h('p', { class: 'meta' }, isMe ? 'Make a playlist public (⋯ → Share link → Public) to show it here.' : 'No public playlists yet.');
+      } else if (tab === 'followers') {
+        const rows = accepted.map((f) => ({ ...f.profiles, id: f.follower }));
+        content = h('div', {}, personList(rows, isMe ? 'Nobody follows you yet. Send friends your profile link.' : 'No followers yet.'),
+          isMe && rows.length ? h('details', { class: 'manage-followers' }, h('summary', {}, 'Remove followers'),
+            ...rows.map((r) => h('div', { class: 'friend' }, avatarEl(r.avatar, r.name), h('span', { class: 'grow' }, r.name || 'Someone'),
+              h('button', { class: 'btn small', onclick: async () => {
+                if (!(await confirmModal({ title: `Remove ${r.name || 'this follower'}?`, message: 'They stop seeing what you play and your Wrapped. They aren’t told.', okLabel: 'Remove', danger: true }))) return;
+                try { await db('DELETE', `follows?follower=eq.${r.id}&followee=eq.${me()}`); openProfile(userId, { push: false, tab: 'followers' }); } catch (e) { toast(errMsg(e), 'error'); }
+              } }, 'Remove')))) : null);
+      } else {
+        content = personList(following.map((f) => ({ ...f.profiles, id: f.followee })), isMe ? 'You don’t follow anyone yet. Find people in the Friends panel.' : 'Not following anyone yet.');
+      }
+      body.replaceChildren(head, tabs, h('div', { class: 'profile-tab' }, content));
+      if (tab === 'playlists') {
+        $$('#profile-body .tile').forEach((tile, i) => { tile.onclick = (e) => { e.stopPropagation(); openSharedPlaylist(lists[i].id); }; const pb = tile.querySelector('.tile-play'); if (pb) pb.onclick = async (e) => { e.stopPropagation(); const [row] = await db('GET', `playlists?id=eq.${lists[i].id}&select=tracks`); playList(row.tracks.map(fromCloudTrack), 0); }; });
+      }
+    };
+    render();
     heroColor(body, p.avatar);
   } catch (e) { if (seq === profileSeq) body.replaceChildren(h('div', { class: 'empty' }, h('p', {}, errMsg(e)))); }
 }

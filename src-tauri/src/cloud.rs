@@ -50,6 +50,33 @@ pub struct CloudSession {
     pub avatar: Option<String>,
     /// ms timestamp.
     pub expires_at: u64,
+    /// Discord profile banner and accent color, read at sign-in only (the
+    /// Discord token comes with the sign-in, not with refreshes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub banner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<u32>,
+}
+
+/// Banner image URL (Discord CDN) and accent color from a Discord user object.
+fn discord_look(me: &Value) -> (Option<String>, Option<u32>) {
+    let id = me.get("id").and_then(Value::as_str).filter(|i| i.chars().all(|c| c.is_ascii_digit()));
+    let hash = me.get("banner").and_then(Value::as_str).filter(|h| h.trim_start_matches("a_").chars().all(|c| c.is_ascii_hexdigit()));
+    let banner = match (id, hash) {
+        (Some(id), Some(h)) => Some(format!("https://cdn.discordapp.com/banners/{id}/{h}.{}?size=1024", if h.starts_with("a_") { "gif" } else { "png" })),
+        _ => None,
+    };
+    let accent = me.get("accent_color").and_then(Value::as_u64).filter(|c| *c <= 0xFF_FFFF).map(|c| c as u32);
+    (banner, accent)
+}
+
+/// The signed-in Discord account's banner, via the sign-in's Discord token.
+fn discord_profile(provider_token: &str) -> (Option<String>, Option<u32>) {
+    let res = crate::http::agent().get("https://discord.com/api/v10/users/@me").header("Authorization", &format!("Bearer {provider_token}")).call();
+    match res {
+        Ok(mut r) if r.status().as_u16() == 200 => r.body_mut().read_to_string().ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).map(|v| discord_look(&v)).unwrap_or((None, None)),
+        _ => (None, None),
+    }
 }
 
 struct Inner {
@@ -185,7 +212,10 @@ fn adopt(v: &Value) -> AppResult<CloudSession> {
     }
     let meta = user.get("user_metadata").cloned().unwrap_or(Value::Null);
     let s = |k: &str| meta.get(k).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_string);
+    let (banner, accent_color) = v.get("provider_token").and_then(Value::as_str).filter(|t| !t.is_empty()).map(discord_profile).unwrap_or((None, None));
     let session = CloudSession {
+        banner,
+        accent_color,
         access_token: access,
         user_id: user.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
         name: s("full_name").or_else(|| s("name")).or_else(|| s("user_name")).unwrap_or_else(|| "Listener".into()),
@@ -370,6 +400,18 @@ mod tests {
         assert_eq!(parse_callback("error=access_denied"), Err(None));
         assert_eq!(parse_callback(""), Err(None));
         assert_eq!(percent_decode("a%2Fb%zz%"), "a/b%zz%");
+    }
+
+    #[test]
+    fn discord_banners_become_cdn_urls() {
+        let (b, c) = discord_look(&serde_json::json!({ "id": "80351110224678912", "banner": "a_06c16474723fe537c283b8efa61a30c8", "accent_color": 5793266 }));
+        assert_eq!(b.as_deref(), Some("https://cdn.discordapp.com/banners/80351110224678912/a_06c16474723fe537c283b8efa61a30c8.gif?size=1024"));
+        assert_eq!(c, Some(5793266));
+        let (b, _) = discord_look(&serde_json::json!({ "id": "1", "banner": "06c16474723fe537c283b8efa61a30c8" }));
+        assert!(b.unwrap().ends_with(".png?size=1024"));
+        // No banner, or something that isn't a banner hash: none.
+        assert_eq!(discord_look(&serde_json::json!({ "id": "1", "banner": null })).0, None);
+        assert_eq!(discord_look(&serde_json::json!({ "id": "1", "banner": "../../x" })).0, None);
     }
 
     #[test]

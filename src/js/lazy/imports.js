@@ -143,6 +143,9 @@ function csvRows(text) {
 
 // Spotify library ----------------------------------------------------------------------
 
+// What the Spotify sign-in and listing are doing (shown while waiting).
+listen('spotify-login-step', (e) => { const el = document.querySelector('.sp-step'); if (el) el.textContent = String(e.payload); });
+
 async function openSpotifyImport() {
   const body = h('div', { class: 'import-box' });
   const footer = h('div', { class: 'actions' });
@@ -156,7 +159,7 @@ async function openSpotifyImport() {
   footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), loginBtn);
   loginBtn.addEventListener('click', async () => {
     loginBtn.disabled = true;
-    body.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Waiting for you to log in in your browser…'),
+    body.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), h('span', { class: 'sp-step' }, 'Waiting for you to log in in your browser…')),
       h('p', { class: 'muted small' }, 'Didn’t open? Check your browser for a new tab. After you approve, come back here.'));
     footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
     waiting = true;

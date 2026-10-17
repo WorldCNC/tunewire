@@ -130,25 +130,85 @@ fn spotify_track(t: &Value) -> Option<Track> {
     }))
 }
 
-/// Opens Spotify's login page in the browser; then lists what can be imported.
-pub async fn spotify_login() -> AppResult<SpotifyLibrary> {
-    if token().is_err() {
-        let tok = crate::spotify_play::oauth(&["user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await?;
-        *TOKEN.lock().unwrap() = Some((tok, std::time::Instant::now()));
+/// What the import is doing, shown in its window and written to
+/// <data>/spotify-import.log (steps and errors only, never tokens), so a
+/// failure can be traced.
+pub struct Steps<'a> {
+    app: &'a AppHandle,
+    log: Option<std::path::PathBuf>,
+}
+
+impl<'a> Steps<'a> {
+    pub fn new(app: &'a AppHandle) -> Self {
+        use tauri::Manager;
+        let log = app.path().app_data_dir().ok().map(|d| d.join("spotify-import.log"));
+        if let Some(p) = &log {
+            let _ = std::fs::write(p, format!("Spotify import, {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+        }
+        Steps { app, log }
     }
+    pub fn step(&self, label: &str) {
+        let _ = self.app.emit("spotify-login-step", label);
+        if let Some(p) = &self.log {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(p) {
+                let _ = writeln!(f, "{} {label}", chrono::Local::now().format("%H:%M:%S"));
+            }
+        }
+    }
+}
+
+/// Opens Spotify's login page in the browser; then lists what can be imported.
+/// Listing has a time limit and a page limit: a reply that keeps pointing at
+/// another page could otherwise keep the import "waiting" forever.
+pub async fn spotify_login(app: &AppHandle) -> AppResult<SpotifyLibrary> {
+    let steps = Steps::new(app);
+    if token().is_err() {
+        steps.step("Waiting for you to log in in your browser…");
+        let tok = crate::spotify_play::oauth(&["user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await.inspect_err(|e| steps.step(&format!("Sign-in failed: {e}")))?;
+        *TOKEN.lock().unwrap() = Some((tok, std::time::Instant::now()));
+        steps.step("Signed in. Reading your library…");
+    }
+    match tokio::time::timeout(Duration::from_secs(90), list_library(&steps)).await {
+        Ok(Ok(lib)) => {
+            steps.step(&format!("Found {} playlists and {} liked songs", lib.playlists.len(), lib.liked));
+            Ok(lib)
+        }
+        Ok(Err(e)) => {
+            steps.step(&format!("Failed: {e}"));
+            Err(e)
+        }
+        Err(_) => {
+            steps.step("Gave up: Spotify took longer than 90 s to list the library");
+            Err(AppError::Timeout("Spotify took too long to list your library; try again".into()))
+        }
+    }
+}
+
+async fn list_library(steps: &Steps<'_>) -> AppResult<SpotifyLibrary> {
     let me = api("/me".into()).await?;
     let user = me.get("display_name").and_then(Value::as_str).or_else(|| me.get("id").and_then(Value::as_str)).unwrap_or("you").to_string();
+    steps.step(&format!("Account: {user}"));
     // Liked Songs and playlists are listed separately: one refused doesn't hide the other.
     let liked = match api("/me/tracks?limit=1".into()).await {
         Ok(v) => v.get("total").and_then(Value::as_u64).unwrap_or(0) as usize,
         Err(e @ AppError::Unavailable(_)) => return Err(e),
-        Err(_) => 0,
+        Err(e) => {
+            steps.step(&format!("Liked Songs unavailable: {e}"));
+            0
+        }
     };
     let mut playlists = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let mut next = Some("/me/playlists?limit=50".to_string());
-    while let Some(url) = next.take() {
+    for page_no in 1..=40 {
+        let Some(url) = next.take() else { break };
+        if !seen.insert(url.clone()) {
+            break; // the same page again
+        }
         let page = api(url).await?;
-        for p in page.get("items").and_then(Value::as_array).into_iter().flatten() {
+        let items = page.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+        for p in &items {
             let Some(id) = p.get("id").and_then(Value::as_str) else { continue };
             playlists.push(SpotifyPlaylistInfo {
                 id: id.to_string(),
@@ -158,10 +218,11 @@ pub async fn spotify_login() -> AppResult<SpotifyLibrary> {
                 thumbnail: image(p),
             });
         }
-        next = page.get("next").and_then(Value::as_str).map(str::to_string);
-        if playlists.len() > 1000 {
+        steps.step(&format!("Playlists page {page_no}: {} (total so far {})", items.len(), playlists.len()));
+        if items.is_empty() {
             break;
         }
+        next = page.get("next").and_then(Value::as_str).map(str::to_string);
     }
     Ok(SpotifyLibrary { user, liked, playlists })
 }

@@ -84,8 +84,8 @@ pub async fn artist_soundcloud(url: String, name: String) -> AppResult<Vec<Track
 // Imports --------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn spotify_library_login() -> AppResult<SpotifyLibrary> {
-    imports::spotify_login().await.inspect_err(|e| crate::report::report_app_error("Spotify library login", e))
+pub async fn spotify_library_login(app: AppHandle) -> AppResult<SpotifyLibrary> {
+    imports::spotify_login(&app).await.inspect_err(|e| crate::report::report_app_error("Spotify library login", e))
 }
 
 #[derive(Serialize)]

@@ -4,12 +4,20 @@
 // Your Library (sidebar), playlist pages, Liked Songs
 // ===========================================================================
 
+/** What the open playlist page shows: redraw only when this changes. */
+const shownSig = (p) => (p ? `${p.name}|${p.description || ''}|${(p.cover || '').length}|${p.pinned}|${p.cloud_id || ''}|${p.cloud_role || ''}|${p.tracks.map((t) => t.key).join(',')}|${Object.keys(p.added || {}).length}` : '');
+
 async function refreshPlaylists({ silent = false } = {}) {
+  const before = shownSig(state.playlists.find((p) => p.id === state.selectedPlaylist));
   try { state.playlists = await call('list_playlists'); } catch (e) { toast(errMsg(e), 'error'); }
   renderLibrary();
+  warmHeroColors();
   if (silent) return;
   if (state.view === 'playlist' && state.selectedPlaylist && state.selectedPlaylist !== 'remote') {
-    if (!state.playlists.some((p) => p.id === state.selectedPlaylist)) { state.selectedPlaylist = null; showView('home'); return; }
+    const pl = state.playlists.find((p) => p.id === state.selectedPlaylist);
+    if (!pl) { state.selectedPlaylist = null; showView('home'); return; }
+    // Another playlist changed (a sync, a download…): leave this page alone.
+    if (shownSig(pl) === before) return;
     renderPlaylistDetail();
   }
 }
@@ -293,6 +301,20 @@ function editPlaylistDetails(pl) {
 
 /** Pick a header color from the cover (falls back to a neutral gray). */
 const heroColors = new Map();
+/** Work out header colors for Your Library's covers ahead of time, so a
+ * playlist opens in its color instead of grey-then-color. */
+let heroWarm = null;
+function warmHeroColors() {
+  clearTimeout(heroWarm);
+  heroWarm = setTimeout(async () => {
+    for (const p of state.playlists.slice(0, 60)) {
+      const thumb = p.cover || p.tracks.find((t) => t.thumbnail)?.thumbnail;
+      if (!thumb || heroColors.has(thumb)) continue;
+      try { const c = await call('cover_color', { url: imgUrl(thumb, 120) }); if (c) heroColors.set(thumb, c); } catch { /* later */ }
+    }
+  }, 1500);
+}
+
 async function heroColor(el, thumb, seqCheck) {
   // Known color: set it right away (re-renders must not flash gray).
   if (heroColors.has(thumb)) { el.style.setProperty('--hero', heroColors.get(thumb)); return; }
@@ -429,7 +451,7 @@ function renderCollection(container, o) {
  * when the end of a long playlist came into view).
  */
 const FIRST_ROWS = 40;
-const BATCH_ROWS = 16;
+const BATCH_ROWS = 8;
 function renderChunked(list, items, makeRow, root) {
   list._chunkIo?.disconnect();
   cancelAnimationFrame(list._chunkRaf || 0);
@@ -449,7 +471,7 @@ function renderChunked(list, items, makeRow, root) {
       const next = items.slice(n, n + BATCH_ROWS).map((it, k) => makeRow(it, n + k));
       n += next.length;
       frag.append(...next);
-    } while (n < items.length && performance.now() - t0 < 4);
+    } while (n < items.length && performance.now() - t0 < 3);
     sentinel.before(frag);
     markPlaying();
     if (n >= items.length) { io.disconnect(); sentinel.remove(); return; }

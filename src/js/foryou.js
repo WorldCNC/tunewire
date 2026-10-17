@@ -255,7 +255,7 @@ async function renderStats(range = statsUi.range) {
     h('div', { class: 'ps-bar' }, ...s.platforms.map((p) => h('i', { style: `width:${(p.minutes / total) * 100}%`, class: `ps-${p.label.toLowerCase().replace(/[^a-z]/g, '')}`, title: `${p.label}: ${Math.round((p.minutes / total) * 100)}%` }))),
     h('div', { class: 'ps-legend' }, ...s.platforms.map((p) => h('span', {}, h('i', { class: `ps-${p.label.toLowerCase().replace(/[^a-z]/g, '')}` }), `${p.label} ${Math.round((p.minutes / total) * 100)}%`)))) : null;
 
-  body.replaceChildren(head, cards,
+  body.replaceChildren(...[head, cards,
     h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Listening time'), chart),
     s.top_artists.length ? h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Top artists'), artists) : null,
     topTracks.length ? h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Top songs',
@@ -269,7 +269,7 @@ async function renderStats(range = statsUi.range) {
       h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Time of day', h('span', { class: 'meta ml-8' }, `most around ${peak}:00`)), hours),
       h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Day of week'), weekdays)),
     platforms ? h('div', { class: 'home-block' }, h('div', { class: 'section-title' }, 'Where it played from'), platforms) : null,
-    s.busiest_day ? h('p', { class: 'meta stats-foot' }, `Biggest day: ${s.busiest_day.label}, ${fmtMinutes(s.busiest_day.minutes)} minutes.${s.estimated ? ' Plays from before stats existed are estimated from your history.' : ''}`) : null);
+    s.busiest_day ? h('p', { class: 'meta stats-foot' }, `Biggest day: ${s.busiest_day.label}, ${fmtMinutes(s.busiest_day.minutes)} minutes.${s.estimated ? ' Plays from before stats existed are estimated from your history.' : ''}`) : null].filter(Boolean));
   markPlaying();
 }
 

@@ -168,6 +168,13 @@ async function openSpotifyImport() {
 }
 
 function pickSpotify(lib, body, footer, m, opts = {}) {
+  if (!lib.playlists.length && !lib.liked) {
+    body.replaceChildren(
+      h('p', {}, opts.heading ? 'No public playlists were found for this profile.' : h('span', {}, 'Logged in as ', h('b', {}, lib.user), ', but Spotify didn’t list any playlists or Liked Songs for this account.')),
+      h('p', { class: 'muted small' }, 'You can still bring playlists over one at a time: paste a Spotify playlist link into the search box, or use Import a link or file.'));
+    footer.replaceChildren(h('button', { class: 'btn primary', onclick: () => m.close() }, 'OK'));
+    return;
+  }
   const picked = new Set(lib.playlists.map((p) => p.id));
   let liked = lib.liked > 0;
   const likedCb = h('input', { type: 'checkbox', checked: liked, disabled: !lib.liked, onchange: (e) => { liked = e.target.checked; paint(); } });

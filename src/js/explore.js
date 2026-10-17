@@ -278,6 +278,11 @@ function lyricTexts() {
   return [];
 }
 
+/**
+ * Full-screen lyrics: the cover, song and controls on the left, big lyrics
+ * on the right (the current line lit, the rest dimmed), over a slow-moving
+ * wash of the cover's colors. Only the lyrics column scrolls.
+ */
 function renderFullLyrics() {
   const o = fullLyrics.el;
   if (!o) return;
@@ -285,14 +290,14 @@ function renderFullLyrics() {
   const track = p?.current?.track;
   const thumb = p?.version?.thumbnail || track?.thumbnail;
   if (fullLyrics.key !== track?.key) { fullLyrics.translation = null; fullLyrics.key = track?.key; }
-  o.style.setProperty('--np-art', thumb ? `url("${thumb.replace(/"/g, '%22')}")` : 'none');
   const tr = fullLyrics.translation;
   const texts = lyricTexts();
-  const lines = texts.map((t, i) => h('button', { class: 'lyric', dataset: { i }, onclick: () => lyrics.lines && seekTo(lyrics.lines[i].t) },
+  const synced = !!lyrics.lines;
+  const lines = texts.map((t, i) => h('button', { class: `lyric${t ? '' : ' gap'}`, dataset: { i }, tabindex: synced ? 0 : -1, onclick: () => synced && seekTo(lyrics.lines[i].t) },
     h('span', {}, t || '♪'), tr && tr.lines[i] && tr.lines[i] !== t ? h('small', { class: 'tr' }, tr.lines[i]) : null));
-  const translateBtn = h('button', { class: `btn small${tr ? ' on' : ''}`, html: `${icon('translate')}${tr ? 'Hide translation' : 'Translate'}`, disabled: !texts.length, onclick: async (e) => {
+  const translateBtn = h('button', { class: `lf-pill${tr ? ' on' : ''}`, html: `${icon('translate')}<span>${tr ? 'Original' : 'Translate'}</span>`, disabled: !texts.length, onclick: async (e) => {
     if (fullLyrics.translation) { fullLyrics.translation = null; renderFullLyrics(); return; }
-    e.target.disabled = true;
+    e.currentTarget.disabled = true;
     try {
       const lang = (navigator.language || 'en').split('-')[0];
       fullLyrics.translation = await call('translate_lyrics', { lines: texts, target: lang });
@@ -300,29 +305,72 @@ function renderFullLyrics() {
     } catch (err) { toast(errMsg(err), 'error'); }
     renderFullLyrics();
   } });
-  o.replaceChildren(
-    h('div', { class: 'lf-bg' }),
-    h('header', { class: 'lf-head' },
-      thumbEl(thumb, 'lf-cover'),
-      h('div', { class: 'lf-meta' }, h('div', { class: 'lf-title' }, track?.title || 'Nothing playing'), h('div', { class: 'lf-artist' }, track?.artist || '')),
-      h('div', { class: 'actions' }, translateBtn, h('button', { class: 'icon-btn', title: 'Close (Esc)', html: icon('x'), onclick: closeFullLyrics }))),
-    texts.length
-      ? h('div', { class: `lf-lines${lyrics.lines ? ' synced' : ''}` }, ...lines)
-      : h('div', { class: 'empty' }, h('p', {}, lyrics.key ? 'No lyrics for this song.' : 'Play a song to see its lyrics.')));
+
+  // Background: the cover's colors, pre-blurred by the backend (no live blur).
+  const bg = h('div', { class: 'lf-bg' }, h('div', { class: 'lf-wash a' }), h('div', { class: 'lf-wash b' }), h('div', { class: 'lf-scrim' }));
+  if (thumb) {
+    const set = (css) => bg.querySelectorAll('.lf-wash').forEach((w) => { w.style.backgroundImage = css; });
+    set(`url("${imgUrl(thumb, 120).replace(/"/g, '%22')}")`);
+    bg.classList.add('raw');
+    call('cover_wash', { url: imgUrl(thumb, 120) }).then((wash) => { if (wash && fullLyrics.el === o) { set(`url("${wash}")`); bg.classList.remove('raw'); } }).catch(() => {});
+  }
+
+  const ctl = (name, label, fn, cls = '') => h('button', { class: `lf-ctl ${cls}`, title: label, 'aria-label': label, html: icon(name), onclick: fn });
+  const side = h('aside', { class: 'lf-side' },
+    h('div', { class: 'lf-art' }, thumb ? h('img', { src: thumb, 'data-px': 600, alt: '', referrerpolicy: 'no-referrer' }) : h('span', { html: icon('music') })),
+    h('div', { class: 'lf-title' }, track?.title || 'Nothing playing'),
+    h('button', { class: 'lf-artist', disabled: !track?.artist, onclick: () => { closeFullLyrics(); if (track?.artist) openArtist(track.artist, track); } }, track?.artist || ''),
+    h('div', { class: 'lf-progress' },
+      h('div', { class: 'lf-bar', role: 'slider', tabindex: 0, 'aria-label': 'Seek', onclick: (e) => { const d = state.playback?.duration; if (!d) return; const r = e.currentTarget.getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * d); } }, h('i', { class: 'lf-fill' })),
+      h('div', { class: 'lf-times' }, h('span', { class: 'lf-pos' }, '0:00'), h('span', { class: 'lf-dur' }, fmtTime(p?.duration)))),
+    h('div', { class: 'lf-controls' },
+      ctl('prev', 'Previous', () => call('previous_track')),
+      ctl('play', 'Play / pause', () => call('toggle_pause'), 'lf-play'),
+      ctl('next', 'Next', () => call('next_track'))));
+
+  const body = texts.length
+    ? h('div', { class: `lf-lines${synced ? ' synced' : ''}` }, h('div', { class: 'lf-pad' }), ...lines, h('div', { class: 'lf-pad' }),
+      h('div', { class: 'lf-source' }, lyrics.source ? `Lyrics from ${lyrics.source}` : ''))
+    : h('div', { class: 'lf-empty' }, h('p', {}, lyrics.key ? (lyrics.instrumental ? 'Instrumental. Just enjoy it.' : 'No lyrics for this song yet.') : 'Play a song to see its lyrics.'));
+
+  o.replaceChildren(bg,
+    h('header', { class: 'lf-top' }, h('span', { class: 'lf-label' }, 'Lyrics'), h('div', { class: 'lf-actions' }, translateBtn,
+      h('button', { class: 'lf-pill icon', title: 'Close (Esc)', 'aria-label': 'Close lyrics', html: icon('x'), onclick: closeFullLyrics }))),
+    h('div', { class: 'lf-main' }, side, body));
   fullLyrics.active = -1;
+  fullLyrics.playIcon = null;
   syncFullLyrics(true);
 }
 
+/** Current line, progress and play button (every playback tick). */
 function syncFullLyrics(force = false) {
-  if (!fullLyrics.open || !lyrics.lines) return;
-  const pos = (state.playback?.position || 0) + 0.25;
+  const o = fullLyrics.el;
+  if (!fullLyrics.open || !o) return;
+  const p = state.playback;
+  const pos = p?.position || 0;
+  const dur = p?.duration || 0;
+  const fill = o.querySelector('.lf-fill');
+  if (fill) fill.style.transform = `scaleX(${dur ? Math.min(1, pos / dur) : 0})`;
+  const posEl = o.querySelector('.lf-pos');
+  if (posEl) posEl.textContent = fmtTime(pos);
+  const durEl = o.querySelector('.lf-dur');
+  if (durEl) durEl.textContent = fmtTime(dur);
+  const want = p?.status === 'playing' ? 'pause' : 'play';
+  if (fullLyrics.playIcon !== want) { const b = o.querySelector('.lf-play'); if (b) { b.innerHTML = icon(want); fullLyrics.playIcon = want; } }
+  if (!lyrics.lines) return;
   let i = -1;
-  for (let k = 0; k < lyrics.lines.length && lyrics.lines[k].t <= pos; k++) i = k;
+  for (let k = 0; k < lyrics.lines.length && lyrics.lines[k].t <= pos + 0.25; k++) i = k;
   if (i === fullLyrics.active && !force) return;
   fullLyrics.active = i;
-  const els = fullLyrics.el.querySelectorAll('.lyric');
-  els.forEach((el, k) => { el.classList.toggle('current', k === i); el.classList.toggle('past', k < i); });
-  if (i >= 0) els[i].scrollIntoView({ block: 'center', behavior: force ? 'auto' : 'smooth' });
+  const box = o.querySelector('.lf-lines');
+  const els = o.querySelectorAll('.lf-lines .lyric');
+  els.forEach((el, k) => { el.classList.toggle('current', k === i); el.classList.toggle('past', k < i); el.classList.toggle('near', Math.abs(k - i) === 1); });
+  // Scroll only the lyrics column (scrollIntoView moved the whole screen).
+  const cur = els[Math.max(0, i)];
+  if (box && cur) {
+    const top = cur.offsetTop - box.clientHeight * 0.4 + cur.offsetHeight / 2;
+    box.scrollTo({ top, behavior: force || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
 }
 
 $('#lyrics-full').addEventListener('click', async () => {
@@ -376,19 +424,32 @@ async function syncPlaylist(id, btn) {
 
 // Ambient background ------------------------------------------------------------
 
-const ambient = { cur: 0, css: undefined, imgPath: null, imgData: null, seq: 0 };
+const ambient = { cur: 0, css: undefined, imgPath: null, imgData: null, seq: 0, swap: 0 };
 
 /** Crossfade to a new background (any CSS background-image value, or none). */
+/**
+ * Background change: the new picture fades in ON TOP of the old one, and the
+ * old one is hidden only once it's covered. (Fading one out while the other
+ * fades in made the background dip darker halfway: the flicker.)
+ */
 function setAmbientLayer(css) {
   if (css === ambient.css) return;
   ambient.css = css;
   const layers = $$('#ambient .amb-layer');
-  const prev = layers[ambient.cur];
+  const token = ++ambient.swap;
   if (!css) { layers.forEach((l) => l.classList.remove('on')); return; }
+  const prev = layers[ambient.cur];
   const next = layers[ambient.cur ^ 1];
-  next.style.backgroundImage = css;
   ambient.cur ^= 1;
-  requestAnimationFrame(() => requestAnimationFrame(() => { next.classList.add('on'); prev.classList.remove('on'); }));
+  next.classList.remove('on');
+  next.style.zIndex = '2';
+  prev.style.zIndex = '1';
+  next.style.backgroundImage = css;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (token !== ambient.swap) return;
+    next.classList.add('on');
+    setTimeout(() => { if (token === ambient.swap) prev.classList.remove('on'); }, 1300);
+  }));
 }
 
 async function updateAmbient() {

@@ -282,11 +282,7 @@ let lastScroll = 0;
 document.addEventListener('scroll', () => {
   lastScroll = performance.now();
   clearTimeout(hoverTimer);
-  if (!document.documentElement.classList.contains('is-scrolling')) document.documentElement.classList.add('is-scrolling');
-  clearTimeout(scrollEndTimer);
-  scrollEndTimer = setTimeout(() => document.documentElement.classList.remove('is-scrolling'), 140);
 }, { capture: true, passive: true });
-let scrollEndTimer = null;
 document.addEventListener('mouseover', (e) => {
   const row = rowOf(e.target);
   if (!row || row.contains(e.relatedTarget)) return;

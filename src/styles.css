@@ -531,22 +531,71 @@ button.link:hover { text-decoration: underline; }
 .import-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Full-screen lyrics ---- */
-.lyrics-full { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
-.lf-bg { position: absolute; inset: -40px; background: var(--np-art) center / cover; filter: blur(60px) saturate(1.3) brightness(.35); opacity: .9; pointer-events: none; }
-:root[data-mode="light"] .lf-bg { filter: blur(60px) saturate(1.2) brightness(1.4); opacity: .5; }
-.lf-head { position: relative; display: flex; align-items: center; gap: 14px; padding: 22px 32px 10px; }
-.lf-cover { width: 56px; height: 56px; border-radius: 4px; }
-.lf-meta { flex: 1; min-width: 0; }
-.lf-title { font-size: 18px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf-artist { color: var(--text-dim); }
-.lf-lines { position: relative; flex: 1; overflow-y: auto; padding: 30vh max(32px, calc(50% - 380px)); display: flex; flex-direction: column; gap: 6px; scrollbar-width: none; }
-.lf-lines .lyric { font-size: 30px; line-height: 1.3; font-weight: 650; padding: 6px 10px; color: var(--text-faint); display: flex; flex-direction: column; gap: 2px; }
-.lf-lines:not(.synced) .lyric { color: var(--text-dim); cursor: default; }
-.lf-lines .lyric.past { color: var(--text-dim); }
-.lf-lines .lyric.current { color: var(--text); }
-.lf-lines .lyric .tr { font-size: 17px; font-weight: 500; color: var(--text-dim); }
-.lf-lines .lyric.current .tr { color: var(--accent); }
-.lyrics-full .empty { position: relative; margin: auto; }
+/* Full-screen lyrics ------------------------------------------------------ */
+.lyrics-full { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #0b0b10; color: #fff; overflow: hidden; }
+.lf-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.lf-wash { position: absolute; width: 140%; height: 140%; left: -20%; top: -20%; background: center / cover no-repeat; opacity: .9; will-change: transform; animation: lf-drift 38s ease-in-out infinite alternate; }
+.lf-wash.b { animation-duration: 52s; animation-direction: alternate-reverse; opacity: .55; transform: rotate(180deg); mix-blend-mode: screen; }
+.lf-bg.raw .lf-wash { filter: blur(70px) saturate(1.5); }
+.lf-scrim { position: absolute; inset: 0; background: radial-gradient(120% 90% at 30% 40%, rgba(0, 0, 0, .15), rgba(0, 0, 0, .55)), linear-gradient(rgba(0, 0, 0, .25), rgba(0, 0, 0, .45)); }
+@keyframes lf-drift { 0% { transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1.05); } 100% { transform: translate3d(4%, 3%, 0) rotate(14deg) scale(1.18); } }
+.lf-top { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 18px 28px 0; }
+.lf-label { font-size: 13px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .6); }
+.lf-actions { display: flex; gap: 8px; }
+.lf-pill { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 19px; font-weight: 700; font-size: 14px; color: #fff; background: rgba(255, 255, 255, .12); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, .14); transition: background .15s; }
+.lf-pill:hover { background: rgba(255, 255, 255, .2); }
+.lf-pill.on { background: #fff; color: #111; }
+.lf-pill.icon { width: 38px; padding: 0; justify-content: center; }
+.lf-pill svg.i { width: 18px; height: 18px; }
+.lf-main { position: relative; z-index: 1; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 400px) minmax(0, 1fr); gap: clamp(32px, 6vw, 96px); padding: 0 clamp(28px, 6vw, 96px); align-items: center; }
+.lf-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lf-art { width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .08); display: grid; place-items: center; margin-bottom: 18px; }
+.lf-art img { width: 100%; height: 100%; object-fit: cover; }
+.lf-art svg.i { width: 64px; height: 64px; opacity: .5; }
+.lf-title { font-size: 24px; font-weight: 850; letter-spacing: -.02em; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-artist { align-self: flex-start; max-width: 100%; font-size: 17px; color: rgba(255, 255, 255, .7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-artist:hover:not(:disabled) { color: #fff; text-decoration: underline; }
+.lf-progress { margin-top: 16px; }
+.lf-bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .22); cursor: pointer; overflow: hidden; position: relative; }
+.lf-bar:hover { height: 7px; margin: -1px 0; }
+.lf-fill { position: absolute; inset: 0; background: #fff; transform-origin: left; transform: scaleX(0); transition: transform .25s linear; border-radius: inherit; }
+.lf-times { display: flex; justify-content: space-between; margin-top: 7px; font-size: 12.5px; color: rgba(255, 255, 255, .6); font-variant-numeric: tabular-nums; }
+.lf-controls { display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 10px; }
+.lf-ctl { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: #fff; transition: transform .15s, background .15s; }
+.lf-ctl:hover { background: rgba(255, 255, 255, .12); }
+.lf-ctl svg.i { width: 26px; height: 26px; }
+.lf-ctl.lf-play { width: 64px; height: 64px; background: #fff; color: #111; }
+.lf-ctl.lf-play:hover { transform: scale(1.05); background: #fff; }
+.lf-ctl.lf-play svg.i { width: 28px; height: 28px; }
+/* The lyrics column: the only thing that scrolls; fades out at both ends. */
+.lf-lines { height: 100%; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 4px; -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 18%, #000 78%, transparent); }
+.lf-lines::-webkit-scrollbar { display: none; }
+.lf-pad { flex: none; height: 38vh; }
+.lf-lines .lyric {
+  text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; margin: 0 -14px; border-radius: 14px;
+  font-size: clamp(26px, 3.1vw, 46px); line-height: 1.18; font-weight: 850; letter-spacing: -.025em; color: #fff;
+  opacity: .32; transform: scale(.97); transform-origin: left center; transition: opacity .45s ease, transform .45s cubic-bezier(.2, .8, .2, 1), background .15s;
+}
+.lf-lines .lyric.gap span { font-size: .7em; }
+.lf-lines .lyric.past { opacity: .45; }
+.lf-lines .lyric.near { opacity: .5; }
+.lf-lines .lyric.current { opacity: 1; transform: none; text-shadow: 0 0 30px rgba(255, 255, 255, .35); }
+.lf-lines.synced .lyric:hover { opacity: .85; background: rgba(255, 255, 255, .07); }
+.lf-lines:not(.synced) .lyric { opacity: .9; transform: none; cursor: default; font-size: clamp(22px, 2.5vw, 34px); }
+.lf-lines .lyric .tr { font-size: .5em; font-weight: 600; letter-spacing: 0; opacity: .8; }
+.lf-source { padding: 0 0 30vh; font-size: 13px; color: rgba(255, 255, 255, .5); }
+.lf-empty { display: grid; place-items: center; height: 100%; font-size: 26px; font-weight: 800; color: rgba(255, 255, 255, .7); }
+.lyrics-full .lyric:focus-visible, .lf-ctl:focus-visible, .lf-pill:focus-visible, .lf-bar:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@media (max-width: 900px) {
+  .lf-main { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 12px; align-items: stretch; padding-top: 10px; }
+  .lf-side { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 14px; align-items: center; }
+  .lf-art { width: 64px; grid-row: span 2; margin: 0; border-radius: 8px; }
+  .lf-progress { display: none; }
+  .lf-controls { grid-row: span 2; grid-column: 3; margin: 0; gap: 6px; }
+  .lf-ctl { width: 40px; height: 40px; }
+  .lf-ctl.lf-play { width: 48px; height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) { .lf-wash { animation: none; } .lf-lines .lyric { transition: none; } }
 
 /* =====================================================================
    Ambient look: floating panels over a soft background (playing cover,
@@ -1314,13 +1363,12 @@ body.dragging-tracks .track:hover { background: transparent; }
 .queue-head { gap: 2px; }
 
 /* ---- Scrolling performance ----------------------------------------------
-   Off-screen song rows skip layout and paint; the background is its own
+   The background is its own
    compositor layer (never repainted while a list scrolls over it); rows
    ignore the pointer while a scroll is in motion, so hover styles don't
    repaint rows sliding under a still mouse. */
 #ambient { contain: strict; transform: translateZ(0); will-change: transform; }
-.track:not(.skeleton) { content-visibility: auto; contain-intrinsic-size: auto var(--row-h, 56px); }
-.is-scrolling .track, .is-scrolling .tile, .is-scrolling .mix-tile, .is-scrolling .album-card { pointer-events: none; }
+
 .chunk-sentinel { height: 1px; }
 
 /* ---- Utilities (instead of inline styles) ------------------------------- */
@@ -1511,3 +1559,31 @@ body.dragging-tracks .track:hover { background: transparent; }
 .manage-followers { margin-top: 18px; max-width: 520px; }
 .manage-followers summary { cursor: pointer; color: var(--text-dim); font-size: 13px; margin-bottom: 8px; }
 @media (max-width: 900px) { .profile-avatar { width: 112px; height: 112px; font-size: 44px; } .profile-id { margin-top: -56px; padding: 0 20px; } }
+
+/* Header colors fade to the cover's color instead of jumping from grey. */
+@property --hero { syntax: '<color>'; inherits: true; initial-value: #4a4a4a; }
+[style*="--hero"] { transition: --hero .5s ease; }
+@media (prefers-reduced-motion: reduce) { [style*="--hero"] { transition: none; } }
+
+/* The background's strength applies to the pictures together: each layer
+   is fully opaque, so a new one fully covers the old during a change. */
+.amb-pics { position: absolute; inset: 0; opacity: var(--amb-strength); }
+.amb-layer.on { opacity: 1 !important; }
+
+/* ---- Title bar in narrow windows ---------------------------------------
+   Buttons never shrink (they were getting squeezed out of shape); the
+   search box gives up room instead, then the brand name, then the brand. */
+.tb-nav, .tb-btn, .tb-home, .win-btn, .tb-logo, .tb-account { flex: none; }
+.tb-left, .tb-right { flex-wrap: nowrap; }
+.titlebar .search { min-width: 0; }
+.titlebar .search input { min-width: 0; text-overflow: ellipsis; }
+@media (max-width: 1150px) {
+  .titlebar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .tb-brand { margin-right: 4px; }
+  .tb-brand > span:last-child { display: none; }
+}
+@media (max-width: 860px) {
+  .tb-brand { display: flex; }
+  .tb-center { gap: 6px; }
+}
+.track:not(.skeleton) { contain: layout style paint; }

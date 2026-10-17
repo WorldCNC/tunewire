@@ -289,11 +289,11 @@ function paintSyncBadge(el, pl) {
   el.className = `sync-badge ${info.status}`;
   const meta = cloudMeta.get(pl.cloud_id) || {};
   const people = (meta.editors || []).slice(0, 4);
-  el.replaceChildren(
+  el.replaceChildren(...[
     h('span', { class: 'sync-dot', 'aria-hidden': 'true' }),
     h('span', {}, SYNC_TEXT[info.status] || 'Synced'),
     info.status === 'error' ? h('button', { class: 'link-btn', onclick: (e) => { e.stopPropagation(); retryFailed(); } }, 'Retry') : null,
-    people.length ? h('span', { class: 'avatar-stack', title: people.map((p) => p.name).join(', ') }, ...people.map((p) => avatarEl(p.avatar, p.name, 'avatar xs'))) : null);
+    people.length ? h('span', { class: 'avatar-stack', title: people.map((p) => p.name).join(', ') }, ...people.map((p) => avatarEl(p.avatar, p.name, 'avatar xs'))) : null].filter(Boolean));
 }
 function paintSyncBadges(localId) {
   const pl = state.playlists.find((p) => p.id === localId);
@@ -423,7 +423,10 @@ async function pullPlaylist(localId, row) {
     await callRemote('replace_playlist_tracks', { id: localId, tracks: remote, added });
   }
   // Renames and new covers reach followers and editors too.
-  if (pl.cloud_role !== 'owner' && (row.title !== pl.name || (row.description || '') !== (pl.description || '') || (row.cover || null) !== (pl.cover || null))) {
+  // Compared the way the library stores them (trimmed, capped), or a
+  // difference that can never be saved would re-sync forever.
+  const norm = (x, n) => String(x || '').trim().slice(0, n);
+  if (pl.cloud_role !== 'owner' && (norm(row.title, 120) !== norm(pl.name, 120) || norm(row.description, 600) !== norm(pl.description, 600) || (row.cover || '') !== (pl.cover || ''))) {
     await callRemote('update_playlist_meta', { id: localId, patch: { name: row.title, description: row.description || '', cover: row.cover || '' } }).catch(() => {});
   }
   pushedSig.set(localId, playlistSig({ ...pl, name: row.title, tracks: (row.tracks || []) }));

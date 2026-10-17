@@ -55,14 +55,23 @@ pub fn create_playlist(app: AppHandle, st: State<'_, AppState>, name: String, tr
     Ok(out)
 }
 
+/// Change one playlist. A change that changes nothing (e.g. a sync that
+/// finds the same songs) isn't saved or announced, so open pages don't
+/// redraw for nothing.
 fn with_playlist<T>(app: &AppHandle, st: &AppState, id: &str, f: impl FnOnce(&mut Playlist) -> AppResult<T>) -> AppResult<T> {
-    let r = st.store.update_library(|lib| {
+    let (r, changed) = st.store.update_library_if(|lib| {
         let pl = lib.playlists.iter_mut().find(|p| p.id == id).ok_or_else(|| AppError::NotFound("playlist".into()))?;
+        let before = serde_json::to_vec(&*pl).ok();
         let r = f(pl)?;
-        pl.updated = store::now_ms();
-        Ok(r)
+        let changed = before != serde_json::to_vec(&*pl).ok();
+        if changed {
+            pl.updated = store::now_ms();
+        }
+        Ok((r, changed))
     })?;
-    emit_library(app, "playlists");
+    if changed {
+        emit_library(app, "playlists");
+    }
     Ok(r)
 }
 

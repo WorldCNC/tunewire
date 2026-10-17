@@ -65,6 +65,8 @@ async function loadLyrics(force = false) {
   lyrics.key = track.key;
   lyrics.lines = null;
   lyrics.plain = null;
+  lyrics.source = null;
+  lyrics.instrumental = false;
   lyrics.active = -1;
   box.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Looking up lyrics…'));
   const album = p.version?.album || track.versions.find((v) => v.album)?.album || null;
@@ -77,6 +79,8 @@ async function loadLyrics(force = false) {
     return;
   }
   if (lyrics.key !== track.key) return;
+  lyrics.source = res?.source || null;
+  lyrics.instrumental = !!res?.instrumental;
   if (!res) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, state.settings?.lyrics === false ? 'Lyrics are turned off in Settings.' : 'No lyrics found for this song.')));
     renderFullLyrics();

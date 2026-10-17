@@ -12,7 +12,8 @@ function applyTheme(t) {
   appliedVars = Object.keys(t.vars || {});
   root.dataset.mode = t.dark === false ? 'light' : 'dark';
   $('#theme-css').textContent = t.css || '';
-  if (typeof updateAmbient === 'function' && state.settings) { ambient.css = undefined; updateAmbient(); }
+  // Same picture as before: nothing to fade (re-fading it made the background blink).
+  if (typeof updateAmbient === 'function' && state.settings) updateAmbient();
 }
 
 async function activateTheme(id) {

@@ -461,6 +461,15 @@ impl Store {
         Ok(r)
     }
 
+    /// Like `update_library`, but only writes when `f` says it changed something.
+    pub fn update_library_if<T>(&self, f: impl FnOnce(&mut Library) -> AppResult<(T, bool)>) -> AppResult<(T, bool)> {
+        let (r, changed) = f(&mut self.library.lock().unwrap())?;
+        if changed {
+            self.save_library()?;
+        }
+        Ok((r, changed))
+    }
+
     pub fn push_history(&self, track: &Track, platform: Option<Platform>) -> AppResult<()> {
         self.update_history(|history| {
             let mut t = track.clone();

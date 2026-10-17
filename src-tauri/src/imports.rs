@@ -52,24 +52,38 @@ fn token() -> AppResult<String> {
 
 fn api_blocking(token: &str, url: &str) -> AppResult<Value> {
     let url = if url.starts_with("http") { url.to_string() } else { format!("https://api.spotify.com/v1{url}") };
+    let path = url.split('?').next().unwrap_or("").trim_start_matches("https://api.spotify.com").to_string();
     for attempt in 0..4 {
-        let resp = crate::http::agent().get(&url).header("Authorization", &format!("Bearer {token}")).header("Accept", "application/json").call();
-        match resp {
-            Ok(mut r) => {
-                let text = r.body_mut().with_config().limit(32 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
-                return Ok(serde_json::from_str(&text)?);
+        // The shared agent hands back HTTP errors as responses (not Err), so
+        // the status must be checked here: before, an error reply was read as
+        // an empty page ("no playlists") instead of being reported.
+        let mut r = crate::http::agent().get(&url).header("Authorization", &format!("Bearer {token}")).header("Accept", "application/json").call().map_err(|e| AppError::Network(e.to_string()))?;
+        let status = r.status().as_u16();
+        let text = r.body_mut().with_config().limit(32 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
+        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let reason = v.pointer("/error/message").and_then(Value::as_str).unwrap_or("").to_string();
+        match status {
+            200..=299 => return Ok(v),
+            429 if attempt < 3 => {
+                std::thread::sleep(Duration::from_secs(2 << attempt));
+                continue;
             }
-            Err(ureq::Error::StatusCode(429)) if attempt < 3 => std::thread::sleep(Duration::from_secs(2 << attempt)),
-            Err(ureq::Error::StatusCode(401)) => {
+            429 => return Err(AppError::Network("Spotify is rate limiting; try again in a minute".into())),
+            401 => {
                 *TOKEN.lock().unwrap() = None;
                 return Err(AppError::Unavailable("the Spotify login expired; log in again".into()));
             }
+            403 => return Err(AppError::Extraction(format!("Spotify refused {path}{}", if reason.is_empty() { String::new() } else { format!(": {reason}") }))),
+            404 => return Err(AppError::NotFound(format!("Spotify has nothing at {path}"))),
+            c if c >= 500 && attempt < 3 => {
+                std::thread::sleep(Duration::from_secs(1 << attempt));
+                continue;
+            }
             // Not "network": these mean the API changed or refused us (worth a report).
-            Err(ureq::Error::StatusCode(c)) => return Err(AppError::Extraction(format!("Spotify API {} returned HTTP {c}", url.split('?').next().unwrap_or("").trim_start_matches("https://api.spotify.com")))),
-            Err(e) => return Err(AppError::Network(e.to_string())),
+            c => return Err(AppError::Extraction(format!("Spotify API {path} returned HTTP {c}{}", if reason.is_empty() { String::new() } else { format!(" ({reason})") }))),
         }
     }
-    Err(AppError::Network("Spotify is rate limiting; try again in a minute".into()))
+    Err(AppError::Network("Spotify isn't answering; try again in a minute".into()))
 }
 
 async fn api(url: String) -> AppResult<Value> {
@@ -134,7 +148,12 @@ pub async fn spotify_login() -> AppResult<SpotifyLibrary> {
     }
     let me = api("/me".into()).await?;
     let user = me.get("display_name").and_then(Value::as_str).or_else(|| me.get("id").and_then(Value::as_str)).unwrap_or("you").to_string();
-    let liked = api("/me/tracks?limit=1".into()).await?.get("total").and_then(Value::as_u64).unwrap_or(0) as usize;
+    // Liked Songs and playlists are listed separately: one refused doesn't hide the other.
+    let liked = match api("/me/tracks?limit=1".into()).await {
+        Ok(v) => v.get("total").and_then(Value::as_u64).unwrap_or(0) as usize,
+        Err(e @ AppError::Unavailable(_)) => return Err(e),
+        Err(_) => 0,
+    };
     let mut playlists = Vec::new();
     let mut next = Some("/me/playlists?limit=50".to_string());
     while let Some(url) = next.take() {

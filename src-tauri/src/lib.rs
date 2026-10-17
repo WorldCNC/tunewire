@@ -215,6 +215,12 @@ pub fn run() {
                 soundcloud::warm();
                 spotify::warm();
             });
+            // Open the connections a Spotify song's first match uses.
+            tauri::async_runtime::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let _ = spotify::isrc("4uLU6hMCjMI75M1A2tKUQC").await;
+                let _ = ytm::search_songs("GBARL9300135").await;
+            });
 
             // Pick up new/removed files in the local library.
             if !settings.local_folders.is_empty() {

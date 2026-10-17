@@ -30,7 +30,11 @@ pub async fn search_tracks(app: AppHandle, st: State<'_, AppState>, query: Strin
         });
     }
     let gen = st.search_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    let res = search::search(query, source, limit, settings.platform_order, st.cache.clone(), settings.include_youtube_in_all, spotify).await?;
+    let mut res = search::search(query, source, limit, settings.platform_order, st.cache.clone(), settings.include_youtube_in_all, spotify).await?;
+    // Spotify-only results: use known matches, and find the rest now so a click
+    // only needs the stream (the user is still reading the results).
+    res.tracks = crate::matcher::with_matches(res.tracks);
+    crate::matcher::prepare(&app, res.tracks.iter().take(12).cloned().collect());
 
     // YouTube Music entries with guessed artist/duration get completed in the
     // background; the frontend patches its rows when the event arrives.

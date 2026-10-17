@@ -128,3 +128,48 @@ fn bench_pages() {
     let seed = rt.block_on(crate::search::search("tame impala let it happen".into(), "ytmusic".into(), 3, vec![Platform::Ytmusic], cache.clone(), false, false)).unwrap().tracks.remove(0);
     time("radio (related)", &|| rt.block_on(crate::radio::related(&seed, &Default::default(), 30, &cache)).map(|v| format!("{} songs", v.len())).unwrap_or_else(|e| e.to_string()));
 }
+
+/// A Spotify song that hasn't been matched yet: find its recording, then its stream.
+#[test]
+#[ignore]
+fn bench_spotify_play() {
+    let rt = rt();
+    let _g = rt.enter();
+    rt.block_on(crate::ytdlp_worker::warm(crate::ytdlp::binary()));
+    rt.block_on(crate::ytdlp::warm_youtube());
+    crate::spotify::warm();
+    for q in ["arctic monkeys do i wanna know", "sza kill bill", "tyler the creator see you again"] {
+        let sp = rt.block_on(crate::spotify::search(q, 1)).unwrap().remove(0);
+        let t0 = Instant::now();
+        let m = rt.block_on(crate::matcher::match_spotify(&sp)).expect("match");
+        let t1 = t0.elapsed();
+        let info = rt.block_on(crate::ytdlp::stream_info(&m.url)).expect("stream");
+        let t2 = t0.elapsed();
+        let opened = crate::stream::open(&info).expect("open");
+        let mut d = crate::audio::prepare(opened, info.duration, 1).expect("decoder");
+        let _ = d.decoder.next();
+        println!("{:<40} match {} (isrc {}) | stream {} | playing at {}", sp.title, ms(t1), m.isrc_match, ms(t2 - t1), ms(t0.elapsed()));
+    }
+}
+
+#[test]
+#[ignore]
+fn bench_spotify_cold_parts() {
+    let rt = rt();
+    let _g = rt.enter();
+    let t = Instant::now();
+    crate::spotify::warm();
+    println!("token            {}", ms(t.elapsed()));
+    let t = Instant::now();
+    let isrc = rt.block_on(crate::spotify::isrc("4uLU6hMCjMI75M1A2tKUQC"));
+    println!("isrc (1st)       {} {:?}", ms(t.elapsed()), isrc.as_ref().ok());
+    let t = Instant::now();
+    let _ = rt.block_on(crate::spotify::isrc("7MXVkk9YMctZqd1Srtv4MB"));
+    println!("isrc (2nd)       {}", ms(t.elapsed()));
+    let t = Instant::now();
+    let _ = rt.block_on(crate::ytm::search_songs("GBARL9300135"));
+    println!("ytm search (1st) {}", ms(t.elapsed()));
+    let t = Instant::now();
+    let _ = rt.block_on(crate::ytm::search_songs("USUM71703861"));
+    println!("ytm search (2nd) {}", ms(t.elapsed()));
+}

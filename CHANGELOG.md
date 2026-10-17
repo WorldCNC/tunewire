@@ -3,9 +3,9 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
-## v2.0.0
+## v2.0.1
 
-A big one: a new social side, a safer online service, and a smoother, sturdier app.
+A big one: a new social side, a safer online service, a Mac version, and a smoother, sturdier app.
 
 **Friends**
 - Profiles with your Discord banner, colors and avatar decoration, badges, a bio and pronouns, what you're playing, your top artists and songs (if you share them), mutual friends and a taste match
@@ -31,11 +31,13 @@ A big one: a new social side, a safer online service, and a smoother, sturdier a
 - Undo after deleting a playlist, removing songs or clearing history
 - A new full-screen lyrics view with the cover and playback controls
 - New app icon and website
+- Tunewire for Mac (Apple Silicon and Intel)
 
 **Smoother**
 - No more flickering on Linux with NVIDIA graphics
 - Smoother scrolling in long playlists; no blinking covers, menus or backgrounds
-- Spotify sign-in no longer gets stuck waiting for the browser; the Spotify import says why if Spotify refuses
+- Spotify import works again: sign-in no longer gets stuck, and your playlists and Liked Songs are read without hitting Spotify's rate limits
+- Imported Spotify songs start sooner
 - Keyboard navigation in song lists, screen reader labels, and a compact player bar in narrow windows
 
 ## v1.0.4

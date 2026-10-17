@@ -96,7 +96,7 @@ Outside the app there's no Rust backend, so `dev/mock.js` stands in with sample 
 Tunewire updates itself with `tauri-plugin-updater`. Releases live on GitHub, and every update is verified against the public key built into the app before it's installed. Settings → Tools → Updates has "Check now" and the startup check toggle.
 
 - **Signing key:** `~/.tauri/tunewire.key`, with its password in `~/.tauri/tunewire.key.password`. Never commit these; `.gitignore` excludes them. If the key is lost, existing installs can no longer verify updates, so back it up.
-- **CI:** `.github/workflows/release.yml` builds Linux (AppImage, .deb, .rpm) and Windows (NSIS, MSI) on every `v*` tag, signs them, and publishes a release with `latest.json`.
+- **CI:** `.github/workflows/release.yml` builds Linux (AppImage, .deb, .rpm), Windows (NSIS) and macOS (universal .dmg/.app) on every `v*` tag, signs them, and publishes a release with `latest.json`.
 - **Repository secrets:** `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 - **Cutting a release:** `scripts/release.sh 0.2.0` bumps the version, commits, tags and pushes; GitHub Actions does the rest.
 - **What updates:** auto-update works for the AppImage, the Windows installer and the macOS app. `.deb`/`.rpm` installs update through the package manager.
@@ -310,4 +310,4 @@ Events: `playback` (about 4 Hz while playing), `queue-changed`, `track-started`,
 - **Spotify:** without Premium, playback is a matched upload, and a match can occasionally be wrong. With Premium (Settings → Spotify) Spotify's own audio plays through librespot, an unofficial client; Spotify's terms don't allow third-party clients, so use it knowing that. Search uses unofficial web endpoints that Spotify may change.
 - **YouTube Music search:** yt-dlp's flat results carry no artist or duration. They're borrowed from YouTube results when the same video appears there; otherwise the artist is inferred from your query words.
 - **Seeking ahead:** seeking past what has downloaded waits for the download to reach that point. Downloads usually finish within seconds.
-- **macOS:** there's no ready-made download yet (CI builds Windows and Linux); build it from source.
+- **macOS:** the app isn't signed or notarized by Apple, so the first launch needs right-click → Open.

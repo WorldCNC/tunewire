@@ -1,5 +1,5 @@
-# Every push and pull request: build and test on Windows and Linux (the
-# platforms releases ship for), lint the Rust code, check the frontend
+# Every push and pull request: build and test on Windows, Linux and macOS
+# (the platforms releases ship for), lint the Rust code, check the frontend
 # scripts parse, test the Edge Functions, and run the database migrations
 # plus their row level security tests on a real Postgres.
 name: Check
@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, ubuntu-22.04]
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4

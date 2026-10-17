@@ -3,27 +3,40 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
-## v1.0.5
+## v2.0.0
 
-- Listen Together, rebuilt: only the host controls playback, the host can hand over or remove people and approve suggested songs, guests can chat and vote to skip, a sync indicator shows how close you are, and you can keep your own room link
-- Friends need your approval to follow you; sharing what you play is off until you turn it on, and you choose whether friends can compare Wrapped
-- Profiles show your Discord banner, colors and avatar decoration, badges, a bio and pronouns, what you're listening to now, your top artists and songs (if you share them), mutual friends and how well your taste matches, with tabs for playlists, followers and following
-- Send a song to a friend with a note; they get it in their Inbox and can react
+A big one: a new social side, a safer online service, and a smoother, sturdier app.
+
+**Friends**
+- Profiles with your Discord banner, colors and avatar decoration, badges, a bio and pronouns, what you're playing, your top artists and songs (if you share them), mutual friends and a taste match
+- Send a song to a friend with a note; it lands in their Inbox, where they can react
 - Listen along with a friend: your player follows theirs, no session needed
-- Friends show who's online, what they're playing and how far into it
-- A weekly leaderboard of minutes listened among friends
-- Spotify sign-in no longer gets stuck waiting for the browser
-- Notifications for follow requests, accepted follows, changes to your shared playlists and friends starting a session
-- Shared playlists show whether they're synced, who's editing, and a Retry if something didn't sync; renames and new covers now reach everyone
-- Undo after deleting a playlist, removing songs or clearing history
-- Back up your whole library to one file and restore it; damaged library files repair themselves from a daily copy
-- Scrobble to Last.fm and ListenBrainz
-- Theme and plugin gallery
-- Links ask before joining a playlist or session or playing a song
+- See who's online, what they're playing and how far in, plus a weekly leaderboard
+- Notifications for follow requests, songs sent to you, changes to shared playlists and friends starting a session
+
+**Listening together**
+- Listen Together, rebuilt: only the host controls playback; the host can hand over, remove people and approve suggested songs; everyone can chat and vote to skip; you can keep your own room link
+- Shared playlists show whether they're synced and who's editing, with a Retry when something didn't sync; renames and covers reach everyone
+
+**Privacy and safety**
 - Accounts sign in with Discord (guest accounts are gone)
+- People need your approval to follow you; sharing what you play and your listening stats is off until you turn it on
+- Links ask before joining a playlist or session or playing a song
 - Error reports are off unless you turn them on
-- Smoother scrolling in long playlists, keyboard navigation in song lists, screen reader labels, a compact player bar in narrow windows
-- New app icon
+
+**New**
+- Scrobble to Last.fm and ListenBrainz
+- Back up your whole library to one file and restore it; a damaged library repairs itself from a daily copy
+- Theme and plugin gallery
+- Undo after deleting a playlist, removing songs or clearing history
+- A new full-screen lyrics view with the cover and playback controls
+- New app icon and website
+
+**Smoother**
+- No more flickering on Linux with NVIDIA graphics
+- Smoother scrolling in long playlists; no blinking covers, menus or backgrounds
+- Spotify sign-in no longer gets stuck waiting for the browser; the Spotify import says why if Spotify refuses
+- Keyboard navigation in song lists, screen reader labels, and a compact player bar in narrow windows
 
 ## v1.0.4
 

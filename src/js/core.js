@@ -141,7 +141,9 @@ function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   if (tag === 'img' && attrs?.src) {
     // Right-size covers; 'data-px' asks for a bigger one (headers, tiles).
-    attrs = { decoding: 'async', ...attrs, src: imgUrl(attrs.src, Number(attrs['data-px']) || 96) };
+    // Default decoding: an image the browser already has shows in the same
+    // frame (async decoding left rebuilt lists blank for a frame: a flicker).
+    attrs = { ...attrs, src: imgUrl(attrs.src, Number(attrs['data-px']) || 96) };
   }
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
@@ -227,6 +229,21 @@ function thumbEl(src, cls = 'thumb') {
   if (src) t.append(h('img', { src, loading: 'lazy', alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); t.innerHTML = icon('music'); } }));
   else t.innerHTML = icon('music');
   return t;
+}
+
+/**
+ * Cover art that survives re-renders: lists that are rebuilt (Your Library,
+ * the queue) get the same element back, already decoded, so covers don't
+ * blink each time. Keyed by what the art shows; the oldest are let go.
+ */
+const keptArt = new Map();
+function keepArt(key, make) {
+  let el = keptArt.get(key);
+  if (el) keptArt.delete(key);
+  else el = make();
+  keptArt.set(key, el);
+  if (keptArt.size > 800) keptArt.delete(keptArt.keys().next().value);
+  return el;
 }
 
 const EQ = '<span class="eq"><span></span><span></span><span></span></span>';

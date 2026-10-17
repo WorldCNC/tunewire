@@ -115,7 +115,7 @@ function renderLibrary() {
     };
     pls.sort((a, b) => (b.pinned - a.pinned) || sorters[state.libSort](a, b));
     const plItem = (pl) => libItem({
-      art: coverArt(pl.tracks, 'lib-art', pl.cover),
+      art: keepArt(`lib:${pl.id}|${(pl.cover || '').length}|${pl.tracks.slice(0, 60).map((t) => t.thumbnail || '').join(',')}`, () => coverArt(pl.tracks, 'lib-art', pl.cover)),
       name: pl.name,
       sub: [pl.pinned ? h('span', { class: 'pin', html: icon('pin') }) : null, `Playlist · ${pl.tracks.length} songs`].filter(Boolean),
       active: state.view === 'playlist' && state.selectedPlaylist === pl.id,

@@ -1587,3 +1587,13 @@ body.dragging-tracks .track:hover { background: transparent; }
   .tb-center { gap: 6px; }
 }
 .track:not(.skeleton) { contain: layout style paint; }
+
+/* ---- No flicker when things appear ---------------------------------------
+   In WebKitGTK an animated element is drawn on its own layer, and when the
+   animation ends the layer is dropped and its text and images redrawn: a
+   visible blink. So page content (redrawn often) appears without a fade, and
+   overlays keep their layer for as long as they're open. */
+.view.active, .track-list.stagger > .track, .album-grid > *, .tile, .mix-tile, .stat-card, .top-artist,
+.browse-tile, .shortcut, .match-status, .cover img, .thumb img, .album-art img, .artist-photo img { animation: none !important; }
+.modal, .modal-backdrop, .toast, .menu, .update-pill, .lyrics-full, .wrapped, .selection-bar, .reaction { will-change: opacity, transform; }
+.menu { animation: tw-fade .12s ease; }

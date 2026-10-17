@@ -38,7 +38,7 @@ function renderQueue() {
       ]);
     };
     if (isCur) {
-      const el = h('div', { class: 'q-now', dataset: { index: i, uid: item.uid } }, thumbEl(t.thumbnail),
+      const el = h('div', { class: 'q-now', dataset: { index: i, uid: item.uid } }, keepArt(`q:${item.uid}|${t.thumbnail || ''}`, () => thumbEl(t.thumbnail)),
         h('div', { class: 't-main' }, h('div', { class: 't-title', title: t.title }, t.title),
           h('div', { class: 't-sub' }, h('span', { html: EQ }), logo, h('span', { class: 'ellipsis' }, t.artist || ''))));
       el.addEventListener('contextmenu', menu);
@@ -46,7 +46,7 @@ function renderQueue() {
     }
     const el = h('div', { class: `q-item${current != null && i < current ? ' past' : ''}`, draggable: 'true', dataset: { index: i, uid: item.uid } },
       h('div', { class: 'q-handle', html: icon('grip'), title: 'Drag to reorder' }),
-      thumbEl(t.thumbnail),
+      keepArt(`q:${item.uid}|${t.thumbnail || ''}`, () => thumbEl(t.thumbnail)),
       h('div', { class: 't-main' },
         h('div', { class: 't-title', title: t.title }, t.title),
         h('div', { class: 't-sub' }, logo, h('span', { class: 'ellipsis' }, t.artist || ''))),

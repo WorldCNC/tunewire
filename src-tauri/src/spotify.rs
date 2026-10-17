@@ -402,6 +402,15 @@ fn isrc_blocking(id: &str) -> AppResult<Option<String>> {
     Err(AppError::Network("Spotify metadata unavailable".into()))
 }
 
+/// An ISRC learned elsewhere (the import reads it with the track's metadata),
+/// so matching that song needs no lookup of its own.
+pub fn remember_isrc(track_id: &str, isrc: &str) {
+    let isrc = isrc.trim().to_ascii_uppercase();
+    if isrc.len() == 12 && isrc.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ISRC_CACHE.lock().unwrap().get_or_insert_with(Default::default).insert(track_id.to_string(), Some(isrc));
+    }
+}
+
 /// ISRC of a Spotify track (cached; `None` when Spotify lists none).
 pub async fn isrc(track_id: &str) -> AppResult<Option<String>> {
     if let Some(hit) = ISRC_CACHE.lock().unwrap().as_ref().and_then(|m| m.get(track_id).cloned()) {

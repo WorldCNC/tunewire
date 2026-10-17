@@ -1587,6 +1587,9 @@ body.dragging-tracks .track:hover { background: transparent; }
   .tb-center { gap: 6px; }
 }
 .track:not(.skeleton) { contain: layout style paint; }
+/* Off-screen rows skip layout and painting (removed earlier while chasing a
+   flicker that turned out to be the NVIDIA driver, not this). */
+.track:not(.skeleton) { content-visibility: auto; contain-intrinsic-size: auto var(--row-h, 56px); }
 
 /* ---- No flicker when things appear ---------------------------------------
    In WebKitGTK an animated element is drawn on its own layer, and when the

@@ -17,7 +17,9 @@ use crate::models::{Platform, Track, TrackVersion};
 use crate::state::AppState;
 use crate::store::now_ms;
 
-const CONCURRENCY: usize = 8;
+/// Background matching runs this many at a time (gently: it shares YouTube
+/// Music with the songs you're actually playing).
+const CONCURRENCY: usize = 4;
 /// A song with no match is retried after this long (new uploads appear).
 const RETRY_MS: u64 = 3 * 86_400_000;
 
@@ -104,9 +106,30 @@ async fn ytm_songs(query: String) -> AppResult<Vec<TrackVersion>> {
 // Matching
 // ---------------------------------------------------------------------------
 
+/// Songs being matched because someone is waiting for them right now.
+/// Background matching holds back while there are any.
+static FOREGROUND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Match a song someone wants to play now: background matching pauses
+/// until it's done.
+pub async fn match_spotify(sp: &TrackVersion) -> Option<TrackVersion> {
+    FOREGROUND.fetch_add(1, Ordering::SeqCst);
+    let r = match_cached(sp).await;
+    FOREGROUND.fetch_sub(1, Ordering::SeqCst);
+    r
+}
+
+/// Background matching: waits while a song someone is waiting for is matched.
+async fn match_background(sp: &TrackVersion) -> Option<TrackVersion> {
+    while FOREGROUND.load(Ordering::SeqCst) > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    match_cached(sp).await
+}
+
 /// Find the YouTube Music recording of a Spotify track: by ISRC (the exact
 /// recording), else by artist + title + length. Saved either way.
-pub async fn match_spotify(sp: &TrackVersion) -> Option<TrackVersion> {
+async fn match_cached(sp: &TrackVersion) -> Option<TrackVersion> {
     if let Some(e) = entry(&sp.id) {
         if e.v.is_some() || e.at + RETRY_MS >= now_ms() {
             return e.v;
@@ -164,7 +187,7 @@ async fn match_all(versions: Vec<TrackVersion>, tick: impl Fn(usize, usize) + Se
             let (sem, done, matched, tick) = (sem.clone(), done.clone(), matched.clone(), tick.clone());
             tauri::async_runtime::spawn(async move {
                 let _permit = sem.acquire().await;
-                if match_spotify(&sp).await.is_some() {
+                if match_background(&sp).await.is_some() {
                     matched.fetch_add(1, Ordering::SeqCst);
                 }
                 let d = done.fetch_add(1, Ordering::SeqCst) + 1;

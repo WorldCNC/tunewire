@@ -149,6 +149,9 @@ pub async fn tracks(session: &Session, uris: Vec<SpotifyUri>, progress: impl Fn(
 fn to_track(t: &librespot_metadata::Track) -> Option<Track> {
     let SpotifyUri::Track { id } = &t.id else { return None };
     let id = id.to_base62().ok()?;
+    if let Some(isrc) = t.external_ids.iter().find(|x| x.external_type.eq_ignore_ascii_case("isrc")) {
+        crate::spotify::remember_isrc(&id, &isrc.id);
+    }
     let artist = t.artists.iter().map(|a| a.name.as_str()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join(", ");
     let thumbnail = t.album.covers.iter().max_by_key(|c| c.width).and_then(|c| c.id.to_base16().ok()).map(|h| format!("https://i.scdn.co/image/{h}"));
     Some(Track::from_version(TrackVersion {

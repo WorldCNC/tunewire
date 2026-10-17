@@ -228,7 +228,8 @@ function miniLogo(platform, { button = false, title } = {}) {
 
 function thumbEl(src, cls = 'thumb') {
   const t = h('div', { class: cls });
-  if (src) t.append(h('img', { src, loading: 'lazy', alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); t.innerHTML = icon('music'); } }));
+  // Decoded off the main thread: rows scrolling into view don't stall a frame.
+  if (src) t.append(h('img', { src, loading: 'lazy', decoding: 'async', alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); t.innerHTML = icon('music'); } }));
   else t.innerHTML = icon('music');
   return t;
 }

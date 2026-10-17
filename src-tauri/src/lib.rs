@@ -35,6 +35,7 @@ mod error;
 mod gallery;
 mod http;
 mod localfiles;
+mod loopback;
 mod lyrics;
 mod matcher;
 mod media;
@@ -341,6 +342,7 @@ pub fn run() {
             commands::cloud::cloud_session,
             commands::cloud::cloud_sign_in,
             commands::cloud::cloud_sign_out,
+            commands::cloud::cancel_sign_in,
             commands::extras::backup_file_name,
             commands::extras::export_backup,
             commands::extras::inspect_backup,

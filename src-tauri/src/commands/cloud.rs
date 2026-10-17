@@ -32,3 +32,9 @@ pub async fn cloud_sign_out() -> AppResult<()> {
     })
     .await
 }
+
+/// The user closed a sign-in dialog: stop waiting for the browser.
+#[tauri::command]
+pub fn cancel_sign_in() {
+    crate::loopback::cancel();
+}

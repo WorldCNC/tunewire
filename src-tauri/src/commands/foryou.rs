@@ -29,7 +29,7 @@ pub async fn refresh_for_you(st: State<'_, AppState>, force: Option<bool>) -> Ap
     foryou::refresh(&st.store.dir, stats::plays(), fav, pl, force.unwrap_or(false), &st.cache).await
 }
 
-/// `range`: "4w" | "6m" | "year" | "all".
+/// `range`: "wk" | "4w" | "6m" | "year" | "all".
 #[tauri::command]
 pub fn listening_stats(range: String, year: Option<i32>) -> Stats {
     stats::summarize(&range, year)

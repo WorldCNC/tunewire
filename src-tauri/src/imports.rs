@@ -133,18 +133,8 @@ fn spotify_track(t: &Value) -> Option<Track> {
 /// Opens Spotify's login page in the browser; then lists what can be imported.
 pub async fn spotify_login() -> AppResult<SpotifyLibrary> {
     if token().is_err() {
-        let client_id = librespot_core::SessionConfig::default().client_id;
-        let scopes = vec!["user-library-read", "playlist-read-private", "playlist-read-collaborative"];
-        let client = librespot_oauth::OAuthClientBuilder::new(&client_id, crate::spotify_play::REDIRECT, scopes)
-            .open_in_browser()
-            .with_custom_message(crate::spotify_play::LOGIN_PAGE)
-            .build()
-            .map_err(|e| AppError::Extraction(e.to_string()))?;
-        let tok = tokio::time::timeout(Duration::from_secs(300), client.get_access_token_async())
-            .await
-            .map_err(|_| AppError::Timeout("Spotify login timed out".into()))?
-            .map_err(|e| AppError::Unavailable(format!("Spotify login failed: {e}")))?;
-        *TOKEN.lock().unwrap() = Some((tok.access_token, std::time::Instant::now()));
+        let tok = crate::spotify_play::oauth(&["user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await?;
+        *TOKEN.lock().unwrap() = Some((tok, std::time::Instant::now()));
     }
     let me = api("/me".into()).await?;
     let user = me.get("display_name").and_then(Value::as_str).or_else(|| me.get("id").and_then(Value::as_str)).unwrap_or("you").to_string();

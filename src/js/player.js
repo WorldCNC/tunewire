@@ -82,6 +82,7 @@ function renderPlayback() {
   renderNowPlaying();
   publishActivity();
   onPlaybackForJam();
+  checkAlongTakeover();
   document.title = track && p.status === 'playing' ? `${track.title} — ${track.artist || 'Tunewire'}` : 'Tunewire';
   if (p.status === 'playing' || p.status === 'error') state.loadingKey = null;
   // Walking every row is only needed when the playing track or status changes.

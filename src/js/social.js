@@ -80,9 +80,10 @@ function askCloudPrivacy(force = false) {
   if (!signedIn() || (!force && state.settings?.cloud_privacy_asked)) return;
   const activity = h('input', { type: 'checkbox', checked: !!cloud.profile?.share_activity });
   const wrapped = h('input', { type: 'checkbox', checked: cloud.profile?.share_wrapped !== false });
+  const stats = h('input', { type: 'checkbox', checked: !!cloud.profile?.share_stats });
   const row = (label, help, input) => h('label', { class: 'setting' }, h('div', { class: 'label' }, label, h('small', {}, help)), h('span', { class: 'switch' }, input, h('span')));
   const save = async () => {
-    await saveCloudPrivacy({ share_activity: activity.checked, share_wrapped: wrapped.checked });
+    await saveCloudPrivacy({ share_activity: activity.checked, share_wrapped: wrapped.checked, share_stats: stats.checked });
     await updateSettings({ cloud_privacy_asked: true });
     m.close();
   };
@@ -91,6 +92,7 @@ function askCloudPrivacy(force = false) {
     subtitle: 'People need your approval to follow you. Choose what approved followers see; you can change this any time in Settings → Account.',
     body: h('div', { class: 'privacy-list' },
       row('Share what I’m playing', 'Approved followers see your current song in their Friends panel.', activity),
+      row('Share my listening', 'Your top artists and songs, recently played and minutes this week show on your profile for approved followers, and you join the friends’ leaderboard.', stats),
       row('Compare Wrapped with friends', 'Approved friends can compare their year in music with yours (only after you press “Compare”).', wrapped)),
     footer: [h('button', { class: 'btn primary', onclick: save }, 'Save')],
     onClose: () => { if (!state.settings.cloud_privacy_asked) updateSettings({ cloud_privacy_asked: true }); },
@@ -107,6 +109,8 @@ async function saveCloudPrivacy(patch) {
       else publishActivity(true);
     }
     if (patch.share_wrapped === false) db('DELETE', `wrapped?user_id=eq.${me()}`).catch(() => {});
+    if (patch.share_stats === false) db('DELETE', `profile_stats?user_id=eq.${me()}`).catch(() => {});
+    if (patch.share_stats) publishStats(true);
   } catch (e) { toast(errMsg(e), 'error'); }
 }
 
@@ -132,6 +136,7 @@ function accountSettingsRows() {
         } }, 'Change name'),
         h('button', { class: 'btn small', onclick: () => openProfile(s.user_id) }, 'Profile'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     toggle('Share what I’m listening to', 'Approved followers see the song you’re playing in their Friends panel.', 'share_activity'),
+    toggle('Share my listening', 'Top artists and songs, recently played and minutes this week on your profile (approved followers only), and the friends’ leaderboard.', 'share_stats'),
     toggle('Compare Wrapped with friends', 'Approved friends can compare their year with yours. Turning this off removes what you shared.', 'share_wrapped'),
     settingRow('Followers', 'Everyone who follows you needed your approval. See and remove followers on your profile.', h('button', { class: 'btn small', onclick: () => openProfile(s.user_id) }, 'Manage')),
   ];
@@ -1137,7 +1142,7 @@ function renderTogether() {
 }
 
 // Friends & follow requests ----------------------------------------------------------------
-const friends = { lastPublished: '' };
+const friends = { lastPublished: '', lastPos: null, lastPlaying: false, lastAt: 0, tab: 'friends' };
 
 async function follow(uid) {
   if (!(await requireAccount({ why: 'Sign in to follow people' }))) return false;
@@ -1160,32 +1165,47 @@ async function answerRequest(uid, accept) {
 async function renderFriends() {
   const box = $('#friends-panel');
   if (!box || box.hidden) return;
+  clearInterval(friends.liveTimer);
   if (!cloudOn()) { box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Not available in this build.'))); return; }
   if (!signedIn()) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'See what your friends are listening to'), h('p', { class: 'small' }, 'Follow friends (they approve it) and their current song shows up here.'),
       h('button', { class: 'btn primary mt-12', onclick: () => requireAccount({ why: 'Sign in to see friends' }) }, 'Sign in with Discord')));
     return;
   }
+  const unread = notif.list.filter((n) => n.kind === 'song_shared' && !n.read).length;
+  const tab = (id, label) => h('button', { role: 'tab', 'aria-selected': String(friends.tab === id), class: friends.tab === id ? 'active' : '', onclick: () => { friends.tab = id; renderFriends(); } }, label);
+  const tabs = h('div', { class: 'friends-tabs', role: 'tablist' }, tab('friends', 'Friends'), tab('inbox', unread ? `Inbox · ${unread}` : 'Inbox'), tab('board', 'This week'));
+  const content = h('div', { class: 'friends-content' });
+  box.replaceChildren(tabs, content);
+  if (friends.tab === 'inbox') {
+    renderInbox(content);
+    // Song notes count as seen once the inbox is open.
+    const ids = notif.list.filter((n) => n.kind === 'song_shared' && !n.read);
+    if (ids.length) { db('PATCH', `notifications?user_id=eq.${me()}&kind=eq.song_shared&read=eq.false`, { read: true }).catch(() => {}); ids.forEach((n) => { n.read = true; }); notif.unread = notif.list.filter((n) => !n.read).length; paintAccountButton(); }
+    return;
+  }
+  if (friends.tab === 'board') { renderLeaderboard(content); return; }
+
   const search = h('input', { class: 'input', placeholder: 'Find people by name', spellcheck: 'false', 'aria-label': 'Find people by name' });
   const results = h('div', { class: 'people-results' });
   search.addEventListener('input', debounce(async () => {
     const q = search.value.trim();
     if (q.length < 2) { results.replaceChildren(); return; }
     try {
-      const rows = await db('GET', `profiles?name=ilike.*${encodeURIComponent(q.replace(/[*,()]/g, ''))}*&select=id,name,avatar&limit=8`);
+      const rows = await db('GET', `profiles?name=ilike.*${encodeURIComponent(q.replace(/[*,()]/g, ''))}*&select=id,name,avatar,decoration&limit=8`);
       results.replaceChildren(...rows.filter((r) => r.id !== me()).map((r) => personRow(r)));
     } catch { /* offline */ }
   }, 300));
   const requests = h('div', { class: 'friend-requests' });
   const list = h('div', { class: 'friends-list' }, ...skeletonFriends(3));
-  box.replaceChildren(h('div', { class: 'friends-tools' }, search, h('button', { class: 'icon-btn', title: 'Copy link to your profile', 'aria-label': 'Copy link to your profile', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(me())); toast('Profile link copied', 'ok', 1500); } })), results, requests, list);
+  content.replaceChildren(h('div', { class: 'friends-tools' }, search, h('button', { class: 'icon-btn', title: 'Copy link to your profile', 'aria-label': 'Copy link to your profile', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(me())); toast('Profile link copied', 'ok', 1500); } })), results, requests, list);
   try {
     const [incoming, follows] = await Promise.all([
-      db('GET', `follows?followee=eq.${me()}&status=eq.pending&select=follower,profiles!follows_follower_fkey(id,name,avatar)`),
-      db('GET', `follows?follower=eq.${me()}&select=followee,status,profiles!follows_followee_fkey(id,name,avatar)`),
+      db('GET', `follows?followee=eq.${me()}&status=eq.pending&select=follower,profiles!follows_follower_fkey(id,name,avatar,decoration)`),
+      db('GET', `follows?follower=eq.${me()}&select=followee,status,profiles!follows_followee_fkey(id,name,avatar,decoration)`),
     ]);
     if (incoming.length) {
-      requests.replaceChildren(h('div', { class: 'section-mini' }, `Follow requests (${incoming.length})`), ...incoming.map((r) => h('div', { class: 'friend' }, avatarEl(r.profiles?.avatar, r.profiles?.name),
+      requests.replaceChildren(h('div', { class: 'section-mini' }, `Follow requests (${incoming.length})`), ...incoming.map((r) => h('div', { class: 'friend' }, decoratedAvatar(r.profiles?.avatar, r.profiles?.name, r.profiles?.decoration),
         h('button', { class: 'friend-name', onclick: () => openProfile(r.follower) }, r.profiles?.name || 'Someone'),
         h('button', { class: 'btn small primary', onclick: () => answerRequest(r.follower, true) }, 'Accept'),
         h('button', { class: 'btn small', onclick: () => answerRequest(r.follower, false) }, 'Decline'))));
@@ -1193,17 +1213,27 @@ async function renderFriends() {
     const accepted = follows.filter((f) => f.status === 'accepted');
     const asked = follows.filter((f) => f.status === 'pending');
     const ids = accepted.map((f) => f.followee);
-    const playing = ids.length ? await db('GET', `now_playing?user_id=in.(${ids.join(',')})&select=user_id,track,playing,updated_at`) : [];
+    const playing = ids.length ? await db('GET', `now_playing?user_id=in.(${ids.join(',')})&select=*`) : [];
     const byUser = new Map(playing.map((p) => [p.user_id, p]));
+    const order = { listening: 0, online: 1, offline: 2 };
     const rows = accepted.map((f) => ({ ...f.profiles, np: byUser.get(f.followee) }))
-      .sort((a, b) => (b.np?.updated_at || '').localeCompare(a.np?.updated_at || ''));
+      .sort((a, b) => (order[presenceOf(a.np)] - order[presenceOf(b.np)]) || (b.np?.updated_at || '').localeCompare(a.np?.updated_at || ''));
     const out = [];
     if (!rows.length && !asked.length) out.push(h('p', { class: 'meta pad-12' }, 'You don’t follow anyone yet. Search above, or send friends your profile link.'));
     out.push(...rows.map((r) => friendRow(r)));
-    if (asked.length) out.push(h('div', { class: 'section-mini' }, 'Waiting for approval'), ...asked.map((f) => h('div', { class: 'friend' }, avatarEl(f.profiles?.avatar, f.profiles?.name),
+    if (asked.length) out.push(h('div', { class: 'section-mini' }, 'Waiting for approval'), ...asked.map((f) => h('div', { class: 'friend' }, decoratedAvatar(f.profiles?.avatar, f.profiles?.name, f.profiles?.decoration),
       h('button', { class: 'friend-name', onclick: () => openProfile(f.followee) }, f.profiles?.name || 'Someone'),
       h('button', { class: 'btn small', onclick: async () => { if (await unfollow(f.followee)) renderFriends(); } }, 'Cancel'))));
     list.replaceChildren(...out);
+    // Live progress bars move on their own between updates.
+    friends.liveTimer = setInterval(() => {
+      if (box.hidden || !list.isConnected) { clearInterval(friends.liveTimer); return; }
+      for (const bar of list.querySelectorAll('.friend-progress[data-uid]')) {
+        const np = byUser.get(bar.dataset.uid);
+        const pos = livePosition(np);
+        if (pos != null && np.duration) bar.firstChild.style.transform = `scaleX(${Math.min(1, pos / np.duration)})`;
+      }
+    }, 1000);
   } catch (e) { list.replaceChildren(h('p', { class: 'meta' }, errMsg(e))); }
 }
 
@@ -1216,29 +1246,51 @@ function personRow(r) {
   btn.addEventListener('click', async () => {
     if (await follow(r.id)) { btn.textContent = 'Requested'; btn.disabled = true; renderFriends(); }
   });
-  return h('div', { class: 'friend' }, avatarEl(r.avatar, r.name), h('button', { class: 'friend-name', onclick: () => openProfile(r.id) }, r.name), btn);
+  return h('div', { class: 'friend' }, decoratedAvatar(r.avatar, r.name, r.decoration), h('button', { class: 'friend-name', onclick: () => openProfile(r.id) }, r.name), btn);
 }
 
+const PRESENCE_TEXT = { listening: 'Listening now', online: 'Online', offline: 'Offline' };
 function friendRow(r) {
   const np = r.np;
-  const fresh = np && Date.now() - Date.parse(np.updated_at) < 15 * 60 * 1000;
+  const pres = presenceOf(np);
   const t = np?.track;
-  return h('div', { class: 'friend' }, avatarEl(r.avatar, r.name),
+  const live = pres === 'listening' && t;
+  const pos = livePosition(np);
+  const av = h('span', { class: `presence ${pres}`, title: PRESENCE_TEXT[pres] }, decoratedAvatar(r.avatar, r.name, r.decoration), h('i', { class: 'p-dot', 'aria-label': PRESENCE_TEXT[pres] }));
+  const tools = h('div', { class: 'friend-tools' },
+    live ? h('button', { class: 'icon-btn small', title: `Listen along with ${r.name}`, html: icon('headphones'), onclick: () => listenAlong(r.id, r.name) }) : null,
+    t ? h('button', { class: 'icon-btn small', title: 'Play this song', html: icon('play'), onclick: () => playTrack(fromCloudTrack(t)) }) : null);
+  return h('div', { class: `friend${along.uid === r.id ? ' along' : ''}` }, av,
     h('div', { class: 'friend-main' },
       h('button', { class: 'friend-name', onclick: () => openProfile(r.id) }, r.name),
-      t ? h('button', { class: 'friend-track', title: 'Play', onclick: () => playTrack(fromCloudTrack(t)) }, `${fresh && np.playing ? '▶ ' : ''}${t.title} · ${t.artist}`) : h('span', { class: 'meta' }, 'Nothing played yet')),
-    np ? h('span', { class: 'meta friend-when' }, fresh && np.playing ? 'now' : timeAgo(Date.parse(np.updated_at))) : null);
+      t ? h('div', { class: 'friend-track', title: `${t.title} · ${t.artist}` }, `${t.title} · ${t.artist}`) : h('span', { class: 'meta' }, pres === 'offline' ? 'Nothing played lately' : 'Online, not playing'),
+      live && np.duration ? h('div', { class: 'friend-progress', dataset: { uid: r.id } }, h('i', { style: `transform:scaleX(${Math.min(1, (pos || 0) / np.duration)})` })) : null),
+    np && !live ? h('span', { class: 'meta friend-when' }, pres === 'online' ? 'online' : timeAgo(Date.parse(np.updated_at))) : null,
+    tools);
 }
 
-/** Tell approved followers what's playing (only if sharing is on). */
+/** Tell approved followers what's playing, where in the song, and that the
+ * app is open (only if sharing is on). Real changes go out right away,
+ * seeks too; `force` (the minute heartbeat) refreshes position and presence. */
 function publishActivity(force = false) {
   if (!signedIn() || !state.settings?.share_activity || !cloud.profile?.share_activity) return;
   const p = state.playback;
   const t = p?.current?.track;
-  const sig = `${t?.key}|${p?.status === 'playing'}`;
-  if (!t || (!force && sig === friends.lastPublished) || p.status === 'loading') return;
+  if (p?.status === 'loading') return;
+  const playing = p?.status === 'playing';
+  const pos = p?.position || 0;
+  // Where followers think we are, from the last update.
+  const expected = friends.lastPos == null ? null : friends.lastPos + (friends.lastPlaying ? (Date.now() - friends.lastAt) / 1000 : 0);
+  const seeked = expected != null && Math.abs(pos - expected) > 4;
+  const sig = `${t?.key}|${playing}`;
+  if (!force && sig === friends.lastPublished && !seeked) return;
   friends.lastPublished = sig;
-  return db('POST', 'now_playing?on_conflict=user_id', { user_id: me(), track: slimTrack(t), playing: p.status === 'playing', updated_at: new Date().toISOString() }, { prefer: 'resolution=merge-duplicates' })
+  Object.assign(friends, { lastPos: pos, lastPlaying: playing, lastAt: Date.now() });
+  const now = new Date().toISOString();
+  return db('POST', 'now_playing?on_conflict=user_id', {
+    user_id: me(), track: t ? slimTrack(t) : null, playing, position: t ? Math.round(pos * 10) / 10 : null,
+    duration: t ? p.duration || t.duration || null : null, updated_at: now, online_at: now,
+  }, { prefer: 'resolution=merge-duplicates' })
     .catch(() => { friends.lastPublished = ''; }); // try again on the next update
 }
 
@@ -1286,6 +1338,7 @@ function notifText(n) {
     case 'follow_accepted': return `${who} accepted your follow request`;
     case 'playlist_activity': return `${who} changed “${n.data?.title || 'a playlist'}”`;
     case 'jam_started': return `${who} started a listening session`;
+    case 'song_shared': return `${who} sent you “${n.data?.title || 'a song'}”`;
     default: return 'Something happened';
   }
 }
@@ -1294,6 +1347,7 @@ function notifAction(n) {
   if (n.kind === 'jam_started' && LINK_CODES.j.test(n.data?.code || '')) return { label: 'Join', onClick: () => confirmJoinJam(n.data.code) };
   if (n.kind === 'playlist_activity' && n.data?.playlist) return { label: 'Open', onClick: () => openSharedPlaylist(n.data.playlist) };
   if (n.kind === 'follow_accepted') return { label: 'View', onClick: () => openProfile(n.actor) };
+  if (n.kind === 'song_shared') return { label: 'Open', onClick: () => { friends.tab = 'inbox'; setPanelOpen(true); showPanel('friends'); renderFriends(); } };
   return null;
 }
 
@@ -1339,20 +1393,32 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
   const body = $('#profile-body');
   body.replaceChildren(loadingBox('Loading profile', h('div', { class: 'profile-head' }, h('div', { class: 'profile-banner sk' }), h('div', { class: 'profile-id' }, h('div', { class: 'profile-avatar sk' }), h('div', { class: 'grow' }, h('div', { class: 'sk sk-title w-40' }), h('div', { class: 'sk w-20' }))))));
   try {
-    const [[p], lists, followers, following, mine] = await Promise.all([
+    const signed = signedIn();
+    const [[p], lists, followers, following, mine, stats, nps, badges, followsMe] = await Promise.all([
       db('GET', `profiles?id=eq.${userId}&select=*`),
       db('GET', `playlists?owner=eq.${userId}&visibility=eq.public&select=id,title,cover,tracks->0->thumbnail&order=updated_at.desc`),
-      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(id,name,avatar)&order=created_at.desc`),
-      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(id,name,avatar)&order=created_at.desc`),
-      signedIn() ? db('GET', `follows?follower=eq.${me()}&select=followee,status`) : Promise.resolve([]),
+      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(id,name,avatar,decoration)&order=created_at.desc`),
+      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(id,name,avatar,decoration)&order=created_at.desc`),
+      signed ? db('GET', `follows?follower=eq.${me()}&select=followee,status`) : Promise.resolve([]),
+      signed ? db('GET', `profile_stats?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),
+      signed ? db('GET', `now_playing?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),
+      badgesOf(userId),
+      signed && userId !== me() ? db('GET', `follows?follower=eq.${userId}&followee=eq.${me()}&status=eq.accepted&select=follower`).catch(() => []) : Promise.resolve([]),
     ]);
     if (seq !== profileSeq) return;
     if (!p) { body.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'This profile doesn’t exist.'))); return; }
-    const isMe = signedIn() && p.id === me();
+    const isMe = signed && p.id === me();
     const accepted = followers.filter((f) => f.status === 'accepted');
     const myStatus = new Map(mine.map((f) => [f.followee, f.status]));
+    const st = stats[0] || null;
+    const np = nps[0] || null;
+    // People you follow who also follow them.
+    const mutuals = accepted.filter((f) => myStatus.get(f.follower) === 'accepted').map((f) => f.profiles).filter(Boolean);
+    let match = null;
+    const matchEl = h('span', { class: 'match-chip', hidden: true });
+    if (!isMe && st?.top_artists?.length) tasteMatch(st.top_artists).then((m) => { if (m != null) { match = m; matchEl.textContent = `${m}% taste match`; matchEl.hidden = false; } });
 
-    // Header: banner, avatar, name, counts.
+    // Header: banner, decorated avatar, name, pronouns, badges, bio, counts.
     const banner = h('div', { class: 'profile-banner' });
     const accent = p.accent_color != null ? hexColor(p.accent_color) : null;
     if (typeof p.banner === 'string' && DISCORD_BANNER.test(p.banner)) banner.style.backgroundImage = `url("${p.banner}")`;
@@ -1361,14 +1427,16 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
     const avatar = h('div', { class: 'profile-avatar' });
     if (p.avatar && /^https:\/\//.test(p.avatar)) avatar.append(h('img', { src: p.avatar, 'data-px': 300, alt: '', referrerpolicy: 'no-referrer' }));
     else { avatar.textContent = (p.name || '?')[0].toUpperCase(); if (accent) avatar.style.background = accent; }
+    const avatarBox = h('div', { class: 'profile-avatar-box' }, avatar);
+    if (typeof p.decoration === 'string' && DECORATION_RE.test(p.decoration)) avatarBox.append(h('img', { class: 'profile-deco', src: p.decoration, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
 
     const followBtn = (uid, name) => {
       if (!signedIn() || uid === me()) return null;
-      const st = myStatus.get(uid);
-      const b = h('button', { class: `btn small${st ? '' : ' primary'}` }, !st ? 'Follow' : st === 'accepted' ? 'Following' : 'Requested');
+      const stt = myStatus.get(uid);
+      const b = h('button', { class: `btn small${stt ? '' : ' primary'}` }, !stt ? (uid === p.id && followsMe.length ? 'Follow back' : 'Follow') : stt === 'accepted' ? 'Following' : 'Requested');
       b.addEventListener('click', async () => {
         b.disabled = true;
-        if (st) { if (await unfollow(uid)) myStatus.delete(uid); }
+        if (stt) { if (await unfollow(uid)) myStatus.delete(uid); }
         else if (await follow(uid)) { myStatus.set(uid, 'pending'); toast(`Request sent to ${name}`, 'ok', 2000); }
         render();
       });
@@ -1376,34 +1444,76 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
     };
     const tabBtn = (id, label) => h('button', { role: 'tab', 'aria-selected': String(tab === id), class: tab === id ? 'active' : '', onclick: () => { tab = id; render(); } }, label);
     const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-
     const personList = (rows, empty) => (rows.length
       ? h('div', { class: 'people-grid' }, ...rows.map((r) => h('div', { class: 'person-card' },
-        h('button', { class: 'person-open', onclick: () => openProfile(r.id) }, avatarEl(r.avatar, r.name, 'avatar lg'), h('b', {}, r.name || 'Someone'), r.id === me() ? h('span', { class: 'meta' }, 'You') : null),
+        h('button', { class: 'person-open', onclick: () => openProfile(r.id) }, decoratedAvatar(r.avatar, r.name, r.decoration, 'avatar lg'), h('b', {}, r.name || 'Someone'), r.id === me() ? h('span', { class: 'meta' }, 'You') : null),
         followBtn(r.id, r.name))))
       : h('p', { class: 'meta' }, empty));
 
+    // Listening now (approved followers, when they share what they play).
+    const nowCard = () => {
+      if (!np?.track || presenceOf(np) !== 'listening') return null;
+      const t = fromCloudTrack(np.track);
+      const pos = livePosition(np);
+      return h('div', { class: 'now-card' },
+        thumbEl(t.thumbnail, 'thumb big'),
+        h('div', { class: 'grow min-w-0' },
+          h('div', { class: 'now-kicker' }, h('span', { class: 'sync-dot' }), 'Listening now'),
+          h('b', { class: 'ellipsis' }, t.title), h('div', { class: 'meta ellipsis' }, t.artist || ''),
+          np.duration ? h('div', { class: 'friend-progress' }, h('i', { style: `transform:scaleX(${Math.min(1, (pos || 0) / np.duration)})` })) : null),
+        isMe ? null : h('button', { class: 'btn small primary', html: `${icon('headphones')}Listen along`, onclick: () => listenAlong(p.id, p.name) }));
+    };
+
+    const listening = () => {
+      if (!st) return h('p', { class: 'meta' }, isMe ? 'Turn on “Share my listening” in Settings → Account to show your top artists and songs here.' : `${p.name} doesn’t share their listening${signedIn() ? ' with you' : ''}.`);
+      const artistTiles = (st.top_artists || []).map((a, i) => h('button', { class: 'top-artist', style: `--i:${i}`, onclick: () => openArtist(a.name) },
+        h('div', { class: 'ta-img' }, a.thumbnail ? h('img', { src: a.thumbnail, 'data-px': 200, alt: '', referrerpolicy: 'no-referrer' }) : h('span', { html: icon('user') })), h('b', {}, a.name)));
+      const songList = (arr, label) => (arr?.length ? h('div', {}, h('div', { class: 'section-title' }, label),
+        h('div', { class: 'track-list', role: 'listbox', 'aria-label': label }, ...arr.map((t, i) => trackRow(fromCloudTrack(t), i, { onPlay: () => playList(arr.map(fromCloudTrack), i) })))) : null);
+      return h('div', {},
+        h('div', { class: 'stat-strip' },
+          h('div', { class: 'stat-pill' }, h('b', {}, (st.week_minutes || 0).toLocaleString()), ' min this week'),
+          h('div', { class: 'stat-pill' }, h('b', {}, (st.month_minutes || 0).toLocaleString()), ' min in 4 weeks'),
+          st.streak ? h('div', { class: 'stat-pill' }, h('b', {}, `🔥 ${st.streak}`), ' day streak') : null),
+        artistTiles.length ? h('div', {}, h('div', { class: 'section-title' }, 'Top artists · last 4 weeks'), h('div', { class: 'top-artists' }, ...artistTiles)) : null,
+        songList(st.top_tracks, 'Top songs · last 4 weeks'),
+        songList(st.recent, 'Recently played'));
+    };
+
     const render = () => {
+      const facts = [
+        followsMe.length ? h('span', { class: 'follows-you' }, 'Follows you') : null,
+        matchEl,
+      ];
       const head = h('div', { class: 'profile-head' }, banner,
-        h('div', { class: 'profile-id' }, avatar,
+        h('div', { class: 'profile-id' }, avatarBox,
           h('div', { class: 'grow min-w-0' },
-            h('div', { class: 'hero-kicker' }, 'Profile'),
-            h('h1', { class: 'profile-name' }, p.name),
+            h('div', { class: 'hero-kicker' }, 'Profile', ...facts.filter(Boolean)),
+            h('h1', { class: 'profile-name', title: p.name }, p.name, p.pronouns ? h('span', { class: 'pronouns' }, p.pronouns) : null),
             h('div', { class: 'profile-counts' },
               h('button', { onclick: () => { tab = 'followers'; render(); } }, h('b', {}, String(accepted.length)), accepted.length === 1 ? ' follower' : ' followers'),
               h('button', { onclick: () => { tab = 'following'; render(); } }, h('b', {}, String(following.length)), ' following'),
               h('span', {}, count(lists.length, 'public playlist', 'public playlists')))),
           h('div', { class: 'profile-actions' },
-            isMe ? h('button', { class: 'btn small', onclick: () => askCloudPrivacy(true) }, 'Privacy') : followBtn(p.id, p.name),
-            h('button', { class: 'ab-icon', title: 'Copy profile link', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(p.id)); toast('Profile link copied', 'ok', 1500); } }))));
+            isMe ? h('button', { class: 'btn small', onclick: () => editProfile(p, () => openProfile(userId, { push: false, tab })) }, 'Edit profile') : followBtn(p.id, p.name),
+            !isMe && signedIn() ? h('button', { class: 'ab-icon', title: 'Send a song: use ⋯ → Send to a friend on any song', html: icon('send'), onclick: () => { const t = state.playback?.current?.track; if (t) sendSongToFriend(t); else toast('Play a song, then send it with ⋯ → Send to a friend', 'info', 3000); } }) : null,
+            isMe ? h('button', { class: 'btn small', onclick: () => askCloudPrivacy(true) }, 'Privacy') : null,
+            h('button', { class: 'ab-icon', title: 'Copy profile link', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(p.id)); toast('Profile link copied', 'ok', 1500); } }))),
+        (() => { const b = badgeRow(badges); if (b) b.classList.add('profile-badges'); return b; })(),
+        p.bio ? h('p', { class: 'profile-bio' }, p.bio) : null,
+        mutuals.length ? h('div', { class: 'mutuals' }, h('span', { class: 'avatar-stack' }, ...mutuals.slice(0, 3).map((m) => avatarEl(m.avatar, m.name, 'avatar xs'))),
+          h('span', {}, `Followed by ${mutuals.slice(0, 2).map((m) => m.name).join(', ')}${mutuals.length > 2 ? ` and ${mutuals.length - 2} other${mutuals.length - 2 === 1 ? '' : 's'} you follow` : ''}`)) : null,
+        nowCard());
       const tabs = h('div', { class: 'profile-tabs chips', role: 'tablist' },
-        tabBtn('playlists', `Playlists · ${lists.length}`), tabBtn('followers', `Followers · ${accepted.length}`), tabBtn('following', `Following · ${following.length}`));
+        tabBtn('playlists', `Playlists · ${lists.length}`), tabBtn('listening', 'Listening'), tabBtn('followers', `Followers · ${accepted.length}`), tabBtn('following', `Following · ${following.length}`));
 
       let content;
       if (tab === 'playlists') {
         content = lists.length
           ? h('div', { class: 'card-row' }, ...lists.map((l, i) => cardTile({ kind: 'playlist', title: l.title, subtitle: `Playlist · ${p.name}`, thumbnail: l.cover || l.thumbnail, browse_id: null, track: null, _cloud: l.id }, i)))
           : h('p', { class: 'meta' }, isMe ? 'Make a playlist public (⋯ → Share link → Public) to show it here.' : 'No public playlists yet.');
+      } else if (tab === 'listening') {
+        content = listening();
       } else if (tab === 'followers') {
         const rows = accepted.map((f) => ({ ...f.profiles, id: f.follower }));
         content = h('div', {}, personList(rows, isMe ? 'Nobody follows you yet. Send friends your profile link.' : 'No followers yet.'),
@@ -1420,6 +1530,7 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
       if (tab === 'playlists') {
         $$('#profile-body .tile').forEach((tile, i) => { tile.onclick = (e) => { e.stopPropagation(); openSharedPlaylist(lists[i].id); }; const pb = tile.querySelector('.tile-play'); if (pb) pb.onclick = async (e) => { e.stopPropagation(); const [row] = await db('GET', `playlists?id=eq.${lists[i].id}&select=tracks`); playList(row.tracks.map(fromCloudTrack), 0); }; });
       }
+      markPlaying();
     };
     render();
     heroColor(body, p.avatar);

@@ -146,7 +146,9 @@ function csvRows(text) {
 async function openSpotifyImport() {
   const body = h('div', { class: 'import-box' });
   const footer = h('div', { class: 'actions' });
-  const m = openModal({ title: 'Import your Spotify library', wide: true, body, footer: [footer] });
+  let waiting = false;
+  // Closing the dialog while the browser sign-in is open stops the wait.
+  const m = openModal({ title: 'Import your Spotify library', wide: true, body, footer: [footer], onClose: () => { if (waiting) call('cancel_sign_in').catch(() => {}); } });
   const loginBtn = h('button', { class: 'btn primary' }, 'Log in with Spotify');
   body.replaceChildren(
     h('p', {}, 'Your Liked Songs and playlists come over to Tunewire. Spotify’s login page opens in your browser; Tunewire only asks to read your library.'),
@@ -154,9 +156,15 @@ async function openSpotifyImport() {
   footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), loginBtn);
   loginBtn.addEventListener('click', async () => {
     loginBtn.disabled = true;
-    body.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Waiting for you to log in in your browser…'));
+    body.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Waiting for you to log in in your browser…'),
+      h('p', { class: 'muted small' }, 'Didn’t open? Check your browser for a new tab. After you approve, come back here.'));
+    footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
+    waiting = true;
     let lib;
-    try { lib = await call('spotify_library_login'); } catch (e) {
+    try { lib = await call('spotify_library_login'); waiting = false; } catch (e) {
+      waiting = false;
+      if (e?.kind === 'cancelled') return;
+      footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Close'), loginBtn);
       body.replaceChildren(h('p', { class: 'muted' }, errMsg(e)));
       loginBtn.disabled = false;
       loginBtn.textContent = 'Try again';

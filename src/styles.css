@@ -1600,3 +1600,86 @@ body.dragging-tracks .track:hover { background: transparent; }
    what made them blink once in WebKitGTK. */
 .modal, .modal-backdrop, .toast, .lyrics-full, .wrapped, .reaction { will-change: opacity, transform; }
 .menu, .suggest, .selection-bar, .update-pill { animation: none !important; will-change: auto; }
+
+/* ---- Social: badges, decorations, presence, inbox, leaderboard ---------- */
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 7px; border-radius: 13px; font-size: 12.5px; font-weight: 700; background: color-mix(in srgb, var(--text) 9%, transparent); border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); cursor: default; }
+.badge .b-ico { font-size: 14px; line-height: 1; }
+.badges.small { gap: 3px; margin: 0; }
+.badges.small .badge { height: 20px; width: 20px; padding: 0; justify-content: center; border-radius: 50%; }
+
+.av-wrap { position: relative; display: inline-grid; place-items: center; flex: none; }
+.av-wrap .av-deco { position: absolute; width: 122%; height: 122%; left: -11%; top: -11%; pointer-events: none; }
+.av-wrap.lg { width: 96px; height: 96px; }
+.profile-avatar-box { position: relative; flex: none; }
+.profile-deco { position: absolute; width: 124%; height: 124%; left: -12%; top: -12%; pointer-events: none; }
+.pronouns { margin-left: 12px; font-size: .38em; font-weight: 600; letter-spacing: 0; color: var(--text-dim); vertical-align: middle; }
+.hero-kicker .follows-you, .hero-kicker .match-chip { margin-left: 8px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 800; text-transform: none; letter-spacing: 0; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.profile-bio { margin: 16px 28px 0; max-width: 720px; white-space: pre-wrap; color: var(--text-dim); font-size: 15px; line-height: 1.5; }
+.mutuals { display: flex; align-items: center; gap: 10px; margin: 12px 28px 0; font-size: 13px; color: var(--text-dim); }
+.now-card { display: flex; align-items: center; gap: 14px; margin: 16px 28px 0; padding: 12px 14px; max-width: 620px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev-2)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+.now-card b { display: block; }
+.now-kicker { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.now-kicker .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: tw-pulse 1.6s ease-in-out infinite; }
+.stat-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.stat-pill { padding: 8px 14px; border-radius: 18px; background: color-mix(in srgb, var(--text) 6%, transparent); font-size: 13.5px; color: var(--text-dim); }
+.stat-pill b { color: var(--text); font-size: 15px; }
+
+.presence { position: relative; display: inline-grid; flex: none; }
+.presence .p-dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--panel-solid, var(--bg-elev)); background: #6b6b6b; }
+.presence.online .p-dot { background: #3ba55d; }
+.presence.listening .p-dot { background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: tw-ping 2s ease-out infinite; }
+@keyframes tw-ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+.presence.offline .avatar { opacity: .7; }
+.friend.along { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 8px; }
+.friend-progress { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text) 14%, transparent); margin-top: 5px; overflow: hidden; }
+.friend-progress i { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform 1s linear; }
+.friend-tools { display: flex; gap: 2px; flex: none; }
+.friend-track { color: var(--text-dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friends-tabs { display: flex; gap: 4px; margin-bottom: 4px; }
+.friends-tabs button { height: 28px; padding: 0 12px; border-radius: 14px; font-size: 13px; font-weight: 650; color: var(--text-dim); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.friends-tabs button.active { background: var(--text); color: var(--bg); }
+.friends-content { display: flex; flex-direction: column; gap: 10px; }
+@media (prefers-reduced-motion: reduce) { .presence.listening .p-dot, .now-kicker .sync-dot { animation: none; } }
+
+.inbox-item { padding: 10px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4%, transparent); display: flex; flex-direction: column; gap: 8px; }
+.inbox-item.unread { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.inbox-from { display: flex; align-items: center; gap: 8px; }
+.inbox-from .meta { margin-left: auto; font-size: 12px; }
+.inbox-note { margin: 0; font-size: 14px; }
+.inbox-song { display: flex; align-items: center; gap: 10px; }
+.inbox-react { display: flex; gap: 4px; }
+.inbox-react button { padding: 2px 7px; border-radius: 12px; font-size: 14px; opacity: .55; }
+.inbox-react button:hover, .inbox-react button.on { opacity: 1; background: color-mix(in srgb, var(--text) 10%, transparent); }
+
+.lb-intro { margin: 0 0 4px; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.lb-row.me { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.lb-rank { width: 26px; text-align: center; font-weight: 800; color: var(--text-dim); font-size: 14px; flex: none; }
+.lb-bar { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text) 10%, transparent); margin-top: 5px; overflow: hidden; }
+.lb-bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.lb-min { font-size: 12.5px; font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }
+.lb-streak { font-size: 12px; flex: none; }
+
+.send-box { display: flex; flex-direction: column; gap: 10px; }
+.send-song { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 10px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.send-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
+.send-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-align: left; }
+.send-row:hover { background: var(--surface-hover); }
+.send-row .send-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; color: transparent; }
+.send-row.on .send-check { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.send-row .send-check svg.i { width: 14px; height: 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim); }
+.field .meta { align-self: flex-end; }
+
+.along-pill { display: flex; align-items: center; gap: 8px; padding: 4px 12px; margin: 0 8px; border-radius: 14px; font-size: 12.5px; font-weight: 650; background: color-mix(in srgb, var(--accent) 18%, transparent); white-space: nowrap; }
+.along-pill .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+.profile-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: clamp(28px, 3.6vw, 46px); }
+.profile-badges { margin: 14px 28px 0; }
+/* Friend rows: avatar, then the text, then any number of buttons on one line. */
+.friend { display: flex; grid-template-columns: none; }
+.friend > :first-child { flex: none; }
+.friend > .friend-main, .friend > .friend-name, .friend > .grow { flex: 1; min-width: 0; }
+.friend > .btn, .friend > .friend-tools, .friend > .friend-when { flex: none; }
+.friend .av-wrap .avatar, .friend .presence .avatar { width: 36px; height: 36px; }

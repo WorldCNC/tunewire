@@ -228,7 +228,7 @@ fn start_of_day(d: NaiveDate) -> u64 {
 
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/// `range`: "4w", "6m", "year" (with `year`, default this one) or "all".
+/// `range`: "wk" (since Monday), "4w", "6m", "year" (with `year`, default this one) or "all".
 /// Cached until a new play is logged (or the day changes).
 pub fn summarize(range: &str, year: Option<i32>) -> Stats {
     let all = plays();
@@ -248,6 +248,8 @@ fn summarize_plays(all: &[Play], range: &str, year: Option<i32>) -> Stats {
     let today = now.date_naive();
     let (from, to) = match range {
         "4w" => (start_of_day(today - chrono::Duration::days(27)), u64::MAX),
+        // This week, from Monday (the friends' leaderboard).
+        "wk" => (start_of_day(today - chrono::Duration::days(today.weekday().num_days_from_monday() as i64)), u64::MAX),
         "6m" => (start_of_day(today - chrono::Duration::days(182)), u64::MAX),
         "year" => {
             let y = year.unwrap_or(now.year());

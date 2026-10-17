@@ -25,7 +25,6 @@ use crate::stream::{self, OpenedStream};
 /// Spotify's Ogg files start with a 167-byte custom header page.
 const OGG_HEADER_END: u64 = 0xa7;
 pub(crate) const REDIRECT: &str = "http://127.0.0.1:5588/login";
-pub(crate) const LOGIN_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>Logged in to Spotify. You can close this tab and return to Tunewire.</p>";
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 static SESSION: Mutex<Option<Session>> = Mutex::const_new(None);
@@ -88,19 +87,52 @@ async fn connect(creds: Credentials) -> AppResult<Session> {
     Ok(session)
 }
 
+/// Spotify's sign-in in the browser (PKCE, Spotify's own client id, no
+/// secret): returns an access token with `scopes`. Our own loopback wait
+/// (see loopback.rs) replaces librespot's, which could hang forever.
+pub async fn oauth(scopes: &'static [&'static str]) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || oauth_blocking(scopes)).await.map_err(|e| AppError::Network(e.to_string()))?
+}
+
+fn oauth_blocking(scopes: &[&str]) -> AppResult<String> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 5588))
+        .map_err(|e| AppError::Unavailable(format!("Spotify sign-in needs port 5588, which is busy ({e}). Close whatever uses it (or an older Tunewire window) and try again")))?;
+    let client_id = SessionConfig::default().client_id;
+    let (verifier, challenge) = crate::loopback::pkce();
+    let state = crate::loopback::random_b64(16);
+    let enc = crate::search::percent_encode;
+    let url = format!(
+        "https://accounts.spotify.com/authorize?response_type=code&client_id={client_id}&redirect_uri={}&scope={}&code_challenge_method=S256&code_challenge={challenge}&state={state}",
+        enc(REDIRECT),
+        enc(&scopes.join(" "))
+    );
+    open::that_detached(&url).map_err(|e| AppError::Unavailable(format!("couldn't open the browser: {e}")))?;
+    let code = crate::loopback::wait_for_code(listener, "/login", Some(&state), "Spotify", std::time::Instant::now() + Duration::from_secs(300))?;
+    let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", REDIRECT), ("client_id", client_id.as_str()), ("code_verifier", verifier.as_str())]
+        .iter()
+        .map(|(k, v)| format!("{k}={}", enc(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut r = crate::http::agent()
+        .post("https://accounts.spotify.com/api/token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .send(form)
+        .map_err(|e| AppError::Network(e.to_string()))?;
+    let status = r.status().as_u16();
+    let v: serde_json::Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap_or_default()).unwrap_or_default();
+    match v.get("access_token").and_then(|t| t.as_str()) {
+        Some(t) if status == 200 => Ok(t.to_string()),
+        _ => Err(AppError::Unavailable(format!(
+            "Spotify sign-in failed: {}",
+            v.get("error_description").or_else(|| v.get("error")).and_then(|e| e.as_str()).unwrap_or("no token")
+        ))),
+    }
+}
+
 /// Open the browser for Spotify's login page and connect. Returns the username.
 pub async fn login() -> AppResult<String> {
-    let client_id = SessionConfig::default().client_id;
-    let client = librespot_oauth::OAuthClientBuilder::new(&client_id, REDIRECT, vec!["streaming"])
-        .open_in_browser()
-        .with_custom_message(LOGIN_PAGE)
-        .build()
-        .map_err(|e| AppError::Extraction(e.to_string()))?;
-    let token = tokio::time::timeout(Duration::from_secs(300), client.get_access_token_async())
-        .await
-        .map_err(|_| AppError::Timeout("Spotify login timed out".into()))?
-        .map_err(|e| AppError::Unavailable(format!("Spotify login failed: {e}")))?;
-    let session = connect(Credentials::with_access_token(token.access_token)).await?;
+    let token = oauth(&["streaming"]).await?;
+    let session = connect(Credentials::with_access_token(token)).await?;
     let user = session.username();
     *SESSION.lock().await = Some(session);
     Ok(user)

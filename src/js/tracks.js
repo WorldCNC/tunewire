@@ -200,6 +200,7 @@ function rowMenuItems(row) {
       ? { label: 'Remove download', icon: 'trash', onClick: () => deleteDownload(track.key) }
       : (versions.every((v) => v.platform === 'local') ? null : { label: 'Download', icon: 'download', onClick: () => downloadTracks([track]) }),
     versions[0]?.platform !== 'local' ? { label: 'Share song', icon: 'share', onClick: () => shareSong(track) } : null,
+    versions[0]?.platform !== 'local' && cloudOn() ? { label: 'Send to a friend…', icon: 'send', onClick: () => sendSongToFriend(track) } : null,
     jam.code && !jam.host ? { label: 'Suggest for the session', icon: 'friends', onClick: () => jamAdd(track) } : null,
     ...(row._opts?.extraMenu || []),
   ].filter(Boolean);

@@ -11,15 +11,13 @@
 //! the protecting). They're baked in at build time (TUNEWIRE_SUPABASE_URL,
 //! TUNEWIRE_SUPABASE_ANON_KEY) or set in settings for development.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::Digest;
 
 use crate::error::{AppError, AppResult};
 use crate::store::now_ms;
@@ -56,6 +54,19 @@ pub struct CloudSession {
     pub banner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accent_color: Option<u32>,
+    /// Discord avatar decoration (the frame around the avatar), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoration: Option<String>,
+}
+
+/// The avatar decoration's image (animated PNG) from a Discord user object.
+fn discord_decoration(me: &Value) -> Option<String> {
+    let asset = me.pointer("/avatar_decoration_data/asset").and_then(Value::as_str)?;
+    asset
+        .trim_start_matches("a_")
+        .chars()
+        .all(|c| c.is_ascii_hexdigit())
+        .then(|| format!("https://cdn.discordapp.com/avatar-decoration-presets/{asset}.png?size=160&passthrough=true"))
 }
 
 /// Banner image URL (Discord CDN) and accent color from a Discord user object.
@@ -70,12 +81,20 @@ fn discord_look(me: &Value) -> (Option<String>, Option<u32>) {
     (banner, accent)
 }
 
-/// The signed-in Discord account's banner, via the sign-in's Discord token.
-fn discord_profile(provider_token: &str) -> (Option<String>, Option<u32>) {
+/// The signed-in Discord account's banner, accent color and avatar
+/// decoration, via the sign-in's Discord token.
+fn discord_profile(provider_token: &str) -> (Option<String>, Option<u32>, Option<String>) {
     let res = crate::http::agent().get("https://discord.com/api/v10/users/@me").header("Authorization", &format!("Bearer {provider_token}")).call();
-    match res {
-        Ok(mut r) if r.status().as_u16() == 200 => r.body_mut().read_to_string().ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).map(|v| discord_look(&v)).unwrap_or((None, None)),
-        _ => (None, None),
+    let me = match res {
+        Ok(mut r) if r.status().as_u16() == 200 => r.body_mut().read_to_string().ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()),
+        _ => None,
+    };
+    match me {
+        Some(v) => {
+            let (b, c) = discord_look(&v);
+            (b, c, discord_decoration(&v))
+        }
+        None => (None, None, None),
     }
 }
 
@@ -212,10 +231,11 @@ fn adopt(v: &Value) -> AppResult<CloudSession> {
     }
     let meta = user.get("user_metadata").cloned().unwrap_or(Value::Null);
     let s = |k: &str| meta.get(k).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_string);
-    let (banner, accent_color) = v.get("provider_token").and_then(Value::as_str).filter(|t| !t.is_empty()).map(discord_profile).unwrap_or((None, None));
+    let (banner, accent_color, decoration) = v.get("provider_token").and_then(Value::as_str).filter(|t| !t.is_empty()).map(discord_profile).unwrap_or((None, None, None));
     let session = CloudSession {
         banner,
         accent_color,
+        decoration,
         access_token: access,
         user_id: user.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
         name: s("full_name").or_else(|| s("name")).or_else(|| s("user_name")).unwrap_or_else(|| "Listener".into()),
@@ -229,87 +249,6 @@ fn adopt(v: &Value) -> AppResult<CloudSession> {
     Ok(session)
 }
 
-fn random_b64(n: usize) -> String {
-    let mut buf = vec![0u8; n];
-    getrandom::getrandom(&mut buf).expect("system randomness");
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
-}
-
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-/// The callback query → the auth code, or why there is none.
-fn parse_callback(query: &str) -> Result<String, Option<String>> {
-    let param = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{k}="))).map(|v| percent_decode(&v.replace('+', " ")));
-    if let Some(c) = param("code").filter(|c| !c.is_empty()) {
-        return Ok(c);
-    }
-    // The provider/auth server explains failures in error_description.
-    match param("error_description").or_else(|| param("error")) {
-        Some(r) if r != "access_denied" => Err(Some(r)),
-        _ => Err(None),
-    }
-}
-
-/// Wait for the browser to come back to http://127.0.0.1:<port>/callback?code=…
-fn catch_code(listener: TcpListener, deadline: Instant) -> AppResult<String> {
-    listener.set_nonblocking(true)?;
-    loop {
-        if Instant::now() > deadline {
-            return Err(AppError::Timeout("sign-in timed out".into()));
-        }
-        match listener.accept() {
-            Ok((mut sock, _)) => {
-                sock.set_nonblocking(false)?;
-                sock.set_read_timeout(Some(Duration::from_secs(5)))?;
-                let mut buf = [0u8; 8192];
-                let n = sock.read(&mut buf).unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]);
-                let line = req.lines().next().unwrap_or("");
-                let path = line.split_whitespace().nth(1).unwrap_or("");
-                if !path.starts_with("/callback") {
-                    let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                    continue;
-                }
-                let result = parse_callback(path.split_once('?').map(|(_, q)| q).unwrap_or(""));
-                let text = match &result {
-                    Ok(_) => "You're signed in to Tunewire. You can close this tab.".to_string(),
-                    Err(Some(r)) => format!("Sign-in failed: {}. You can close this tab.", html_escape(r)),
-                    Err(None) => "Sign-in was cancelled. You can close this tab.".to_string(),
-                };
-                let page = format!("<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>{text}</p>");
-                let _ = sock.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len()).as_bytes());
-                return match result {
-                    Ok(c) => Ok(c),
-                    Err(Some(r)) => Err(AppError::Unavailable(format!("sign-in failed: {r}"))),
-                    Err(None) => Err(AppError::Cancelled),
-                };
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => return Err(e.into()),
-        }
-    }
-}
-
 /// Sign in with Discord in the browser (the only sign-in method).
 pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
     let c = cfg()?;
@@ -320,8 +259,7 @@ pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
         .iter()
         .find_map(|&p| TcpListener::bind(("127.0.0.1", p)).ok().map(|l| (l, p)))
         .ok_or_else(|| AppError::Unavailable(format!("sign-in ports {}–{} are all busy; close the program using them and try again", REDIRECT_PORTS[0], REDIRECT_PORTS[REDIRECT_PORTS.len() - 1])))?;
-    let verifier = random_b64(48);
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+    let (verifier, challenge) = crate::loopback::pkce();
     let redirect = format!("http://127.0.0.1:{port}/callback");
     let url = format!(
         "{}/auth/v1/authorize?provider=discord&redirect_to={}&code_challenge={challenge}&code_challenge_method=s256",
@@ -329,7 +267,7 @@ pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
         crate::search::percent_encode(&redirect)
     );
     open::that_detached(&url).map_err(|e| AppError::Unavailable(format!("couldn't open the browser: {e}")))?;
-    let code = catch_code(listener, Instant::now() + Duration::from_secs(300))?;
+    let code = crate::loopback::wait_for_code(listener, "/callback", None, "Tunewire", Instant::now() + Duration::from_secs(300))?;
     let v = post("/auth/v1/token?grant_type=pkce", serde_json::json!({ "auth_code": code, "code_verifier": verifier }), None)?;
     adopt(&v)
 }
@@ -393,16 +331,6 @@ mod tests {
     }
 
     #[test]
-    fn callback_errors_are_explained() {
-        assert_eq!(parse_callback("code=abc-123&state=x"), Ok("abc-123".into()));
-        assert_eq!(parse_callback("error=server_error&error_description=Unable+to+exchange%20code"), Err(Some("Unable to exchange code".into())));
-        assert_eq!(parse_callback("error=access_denied&error_description=denied"), Err(Some("denied".into())));
-        assert_eq!(parse_callback("error=access_denied"), Err(None));
-        assert_eq!(parse_callback(""), Err(None));
-        assert_eq!(percent_decode("a%2Fb%zz%"), "a/b%zz%");
-    }
-
-    #[test]
     fn discord_banners_become_cdn_urls() {
         let (b, c) = discord_look(&serde_json::json!({ "id": "80351110224678912", "banner": "a_06c16474723fe537c283b8efa61a30c8", "accent_color": 5793266 }));
         assert_eq!(b.as_deref(), Some("https://cdn.discordapp.com/banners/80351110224678912/a_06c16474723fe537c283b8efa61a30c8.gif?size=1024"));
@@ -412,6 +340,13 @@ mod tests {
         // No banner, or something that isn't a banner hash: none.
         assert_eq!(discord_look(&serde_json::json!({ "id": "1", "banner": null })).0, None);
         assert_eq!(discord_look(&serde_json::json!({ "id": "1", "banner": "../../x" })).0, None);
+        // Avatar decorations.
+        assert_eq!(
+            discord_decoration(&serde_json::json!({ "avatar_decoration_data": { "asset": "a_fed43ab12698df65902ba06727e20c0e", "sku_id": "1" } })).as_deref(),
+            Some("https://cdn.discordapp.com/avatar-decoration-presets/a_fed43ab12698df65902ba06727e20c0e.png?size=160&passthrough=true")
+        );
+        assert_eq!(discord_decoration(&serde_json::json!({ "avatar_decoration_data": null })), None);
+        assert_eq!(discord_decoration(&serde_json::json!({ "avatar_decoration_data": { "asset": "x/../y" } })), None);
     }
 
     #[test]

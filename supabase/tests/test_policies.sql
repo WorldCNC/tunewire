@@ -269,3 +269,60 @@ select tests.act(:B);
 update profiles set banner = null where id = '00000000-0000-0000-0000-00000000000a';
 select tests.check((select banner from profiles where id = '00000000-0000-0000-0000-00000000000a') is not null, 'others cannot change your banner');
 reset role;
+
+-- Social v3 -------------------------------------------------------------------------------
+reset role;
+delete from follows;
+insert into follows (follower, followee, status) values (:B, :A, 'accepted');
+select tests.act(:A);
+update profiles set bio = 'Night drives and synths', pronouns = 'she/her',
+  decoration = 'https://cdn.discordapp.com/avatar-decoration-presets/a_0123456789abcdef0123456789abcdef.png?size=160&passthrough=true' where id = auth.uid();
+select tests.fails($$update profiles set decoration = 'https://evil.test/x.png' where id = auth.uid()$$, 'profiles_decoration_check');
+select tests.fails($$update profiles set bio = repeat('x', 301) where id = auth.uid()$$, 'profiles_bio_check');
+insert into profile_stats (top_artists, week_start, week_minutes, streak, time_of_day, artists_count)
+  values ('[{"name":"Velvet Static"}]', date_trunc('week', now())::date, 321, 8, 'night', 150);
+
+-- Stats are private until shared, then only for approved followers.
+select tests.act(:B);
+select tests.check(tests.count('select 1 from profile_stats') = 0, 'stats hidden until shared');
+select tests.act(:A);
+update profiles set share_stats = true where id = auth.uid();
+select tests.act(:B);
+select tests.check(tests.count('select 1 from profile_stats') = 1, 'approved followers see shared stats');
+select tests.check((select week_minutes from friend_leaderboard() where name = 'Alex') = 321, 'leaderboard shows this week');
+select tests.act(:C);
+select tests.check(tests.count('select 1 from profile_stats') = 0, 'strangers do not');
+select tests.check(tests.count('select * from friend_leaderboard()') = 0, 'strangers get no leaderboard rows');
+
+-- Badges come from the server.
+select tests.check('streak7' = any(profile_badges(:A)), 'streak badge');
+select tests.check('night_owl' = any(profile_badges(:A)), 'night owl badge');
+select tests.check('explorer' = any(profile_badges(:A)), 'explorer badge');
+select tests.check('early' = any(profile_badges(:A)), 'early adopter badge');
+select tests.check(not ('developer' = any(profile_badges(:A))), 'no developer badge by default');
+select tests.fails($$insert into profile_counters (user_id, sessions_hosted) values (auth.uid(), 99)$$, 'permission denied');
+
+-- Sending songs: only between approved friends, rate-limited, one notification.
+select tests.act(:B);
+insert into song_shares (to_user, track, note) values (:A, '{"title":"Neon Harbor","artist":"Velvet Static"}', '  for your drive  ');
+select tests.act(:C);
+select tests.fails($$insert into song_shares (to_user, track) values ('00000000-0000-0000-0000-00000000000a', '{}')$$, 'row-level security');
+select tests.check(tests.count('select 1 from song_shares') = 0, 'others cannot read the inbox');
+select tests.act(:A);
+select tests.check((select note from song_shares) = 'for your drive', 'note trimmed');
+update song_shares set reaction = '🔥', read = true;
+select tests.check((select reaction from song_shares) = '🔥', 'recipient reacts');
+select tests.fails($$update song_shares set track = '{}'$$, 'permission denied');
+select tests.check(tests.count($$select 1 from notifications where kind = 'song_shared'$$) = 1, 'recipient notified');
+select tests.act(:B);
+update song_shares set reaction = '😂';
+select tests.check((select reaction from song_shares) = '🔥', 'sender cannot change the reaction');
+
+-- Presence: position and online time ride on now_playing (same privacy).
+select tests.act(:A);
+update profiles set share_activity = true where id = auth.uid();
+insert into now_playing (track, playing, position, duration, online_at) values ('{"title":"x"}', true, 42, 200, now())
+  on conflict (user_id) do update set position = 42, duration = 200, online_at = now();
+select tests.act(:B);
+select tests.check(tests.count('select 1 from now_playing where position = 42') = 1, 'followers see live position when sharing');
+reset role;

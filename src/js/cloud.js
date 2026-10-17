@@ -30,8 +30,8 @@ async function loadProfileName() {
 
 /** The Discord banner and accent color (read at sign-in) onto the profile. */
 async function saveDiscordLook(s) {
-  if (!s || (!s.banner && s.accent_color == null)) return;
-  try { await db('PATCH', `profiles?id=eq.${s.user_id}`, { banner: s.banner || null, accent_color: s.accent_color ?? null }); } catch { /* older database: no banner columns yet */ }
+  if (!s || (!s.banner && s.accent_color == null && !s.decoration)) return;
+  try { await db('PATCH', `profiles?id=eq.${s.user_id}`, { banner: s.banner || null, accent_color: s.accent_color ?? null, decoration: s.decoration || null }); } catch { /* older database: no such columns yet */ }
 }
 
 function cloudOn() { return !!cloud.cfg; }
@@ -101,7 +101,7 @@ async function requireAccount({ why = 'Sign in to use this' } = {}) {
       title: why,
       subtitle: 'Your playlists and listening stay on this computer. An account is only used for sharing, collaborative playlists, Listen Together and friends.',
       body: h('div', { class: 'import-box' }, btn, status),
-      onClose: () => { if (!done) resolve(false); },
+      onClose: () => { if (!done) { call('cancel_sign_in').catch(() => {}); resolve(false); } },
     });
   });
 }

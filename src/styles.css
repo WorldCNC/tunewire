@@ -1595,5 +1595,8 @@ body.dragging-tracks .track:hover { background: transparent; }
    overlays keep their layer for as long as they're open. */
 .view.active, .track-list.stagger > .track, .album-grid > *, .tile, .mix-tile, .stat-card, .top-artist,
 .browse-tile, .shortcut, .match-status, .cover img, .thumb img, .album-art img, .artist-photo img { animation: none !important; }
-.modal, .modal-backdrop, .toast, .menu, .update-pill, .lyrics-full, .wrapped, .selection-bar, .reaction { will-change: opacity, transform; }
-.menu { animation: tw-fade .12s ease; }
+/* Drop-downs (menus, search suggestions, selects) appear instantly with no
+   layer of their own: promoting a small element to a layer as it appears is
+   what made them blink once in WebKitGTK. */
+.modal, .modal-backdrop, .toast, .lyrics-full, .wrapped, .reaction { will-change: opacity, transform; }
+.menu, .suggest, .selection-bar, .update-pill { animation: none !important; will-change: auto; }

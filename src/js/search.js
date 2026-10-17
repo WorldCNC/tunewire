@@ -58,6 +58,8 @@ function setSearchTab(tab) {
 }
 
 async function doSearch(q, { push = true } = {}) {
+  // Tunewire share links open the shared thing instead of searching.
+  if (handleShareLink(q)) { $('#search-input').value = ''; syncSearchClear(); return; }
   showView('search', { push, reopen: () => { $('#search-input').value = q; syncSearchClear(); doSearch(q, { push: false }); } });
   showSearchBody(true);
   state.sort = null;

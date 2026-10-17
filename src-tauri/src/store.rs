@@ -18,6 +18,9 @@ use crate::models::{Platform, Track};
 
 pub const HISTORY_MAX: usize = 5000;
 
+/// Tunewire's Discord application (Rich Presence shows its name and icon).
+pub const DISCORD_APP_ID: &str = "1560825729984503888";
+
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -121,7 +124,7 @@ impl Default for Settings {
             ytdlp_source: "system".into(),
             auto_update: true,
             discord_rpc: false,
-            discord_client_id: "1428914566795890738".into(),
+            discord_client_id: DISCORD_APP_ID.into(),
             discord_buttons: true,
             repeat: "off".into(),
             example_plugin_installed: false,

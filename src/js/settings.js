@@ -103,11 +103,10 @@ function renderSettings() {
           } catch (err) { toast(errMsg(err), 'error'); }
           renderSettings();
         } }, 'Log in with Spotify'));
-  const clientId = h('input', { type: 'text', value: s.discord_client_id || '', placeholder: 'Application ID', style: 'width:190px', spellcheck: 'false' });
-  clientId.addEventListener('change', () => updateSettings({ discord_client_id: clientId.value.trim() }));
   const recheck = (fn) => h('button', { class: 'btn small', onclick: async () => { await fn(); renderSettings(); } }, 'Check again');
 
   body.replaceChildren(
+    group('Account', null, ...accountSettingsRows()),
     group('Playback', null,
       settingRow('Source priority', 'When a song exists on several platforms, the first available one plays. If it fails, the next one is tried.', order),
       settingRow('Results per source', null, limit),
@@ -141,8 +140,7 @@ function renderSettings() {
     group('Discord', 'discord',
       discordStatusRow(),
       settingToggle('Rich Presence', 'Shows the current song, artist, cover and progress on your Discord profile while the desktop client is running.', 'discord_rpc'),
-      settingToggle('Link button', 'Adds an “Open on YouTube Music” (or SoundCloud, …) button to the status.', 'discord_buttons'),
-      settingRow('Application ID', 'Discord shows this application’s name as the activity. To show “Tunewire”, create an application with that name at <code>discord.com/developers</code> and paste its ID.', clientId)),
+      settingToggle('Link button', 'Adds an “Open on YouTube Music” (or SoundCloud, …) button to the status.', 'discord_buttons')),
     group('Privacy', null,
       settingToggle('Send error reports', 'When something breaks, Tunewire sends the developer a short report (app version, operating system and the error) so it can be fixed. Your folder paths and stream links are removed first; nothing about your library is sent.', 'error_reports')),
     group('Tools', null,

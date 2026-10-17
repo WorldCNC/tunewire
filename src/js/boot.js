@@ -101,6 +101,12 @@ async function boot() {
   renderPlayback();
   await Promise.all([refreshHistory().catch(() => {}), refreshPlaylists(), refreshFavorites(), refreshDownloads(), refreshLocalCount(), refreshFollowed()]);
   renderHome();
+  cloudInit().then(() => {
+    $$('.cloud-only').forEach((el) => { el.hidden = !cloudOn(); });
+    paintJamButton();
+    // A tunewire:// link that started the app.
+    invoke('plugin:deep-link|get_current').then((urls) => (urls || []).forEach(handleShareLink)).catch(() => {});
+  });
   try { showPanel(localStorage.getItem('tw-panel') || 'queue'); } catch { showPanel('queue'); }
   document.body.classList.toggle('show-sources', !!state.settings.show_sources);
 

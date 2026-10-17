@@ -28,7 +28,7 @@ $('#nav-account')?.addEventListener('click', (e) => {
   if (!signedIn()) return requireAccount({ why: 'Sign in to Tunewire' });
   openMenu(anchor, [
     { label: cloud.session.anonymous ? 'Guest' : cloud.session.name, heading: true },
-    cloud.session.anonymous ? { label: 'Sign in with an account', icon: 'user', onClick: () => signOut().then(() => requireAccount({ why: 'Sign in to Tunewire' })) } : { label: 'Your profile', icon: 'user', onClick: () => openProfile(cloud.session.user_id) },
+    { label: 'Your profile', icon: 'user', onClick: () => openProfile(cloud.session.user_id) },
     { label: 'Friends', icon: 'friends', onClick: () => { setPanelOpen(true); showPanel('friends'); } },
     { label: 'Listen together', icon: 'friends', onClick: () => startJam() },
     'sep',
@@ -59,7 +59,13 @@ function accountSettingsRows() {
   });
   return [
     settingRow(h('span', { style: 'display:flex;align-items:center;gap:10px' }, avatarEl(s.avatar, s.name), s.anonymous ? 'Guest account' : s.name), s.anonymous ? 'A guest account works for joining sessions. Sign in to keep shared playlists and friends.' : 'Signed in.',
-      h('div', { class: 'actions' }, s.anonymous ? null : h('button', { class: 'btn small', onclick: () => openProfile(s.user_id) }, 'Profile'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn small', onclick: async () => {
+          const name = await promptModal({ title: 'Your name', label: 'Friends see this name.', value: s.name === 'Guest' ? '' : s.name, okLabel: 'Save' });
+          if (!name) return;
+          try { await db('PATCH', `profiles?id=eq.${s.user_id}`, { name: name.slice(0, 40) }); cloud.session.name = name.slice(0, 40); cloudChanged(); toast('Name saved', 'ok', 1500); } catch (e) { toast(errMsg(e), 'error'); }
+        } }, 'Change name'),
+        h('button', { class: 'btn small', onclick: () => openProfile(s.user_id) }, 'Profile'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
     h('div', { class: 'setting' }, h('div', { class: 'label' }, 'Share what I’m listening to', h('small', {}, 'People who follow you see the song you’re playing in their Friends panel.')), h('label', { class: 'switch' }, share, h('span'))),
   ];
 }
@@ -77,18 +83,26 @@ const PROFILE_LINK = (id) => `${SHARE_BASE}#u=${id}`;
 
 /** Publish (or update) a local playlist online and return its id. */
 async function publishPlaylist(pl, { visibility, collaborative } = {}) {
+  pl = state.playlists.find((p) => p.id === pl.id) || pl; // latest copy
   if (!(await requireAccount({ why: 'Sign in to share playlists' }))) return null;
-  if (cloud.session.anonymous) { toast('Sign in with Discord or Google to share playlists', 'warn'); return null; }
   const meta = { title: pl.name, description: pl.description || '', cover: pl.cover || null };
   if (visibility) meta.visibility = visibility;
   if (collaborative !== undefined) meta.collaborative = collaborative;
   if (pl.cloud_id && pl.cloud_role === 'owner') {
-    await db('PATCH', `playlists?id=eq.${pl.cloud_id}`, meta);
-    await rpc('playlist_op', { pid: pl.cloud_id, op: { replace: pl.tracks.map(slimTrack) } });
+    const [row] = await db('PATCH', `playlists?id=eq.${pl.cloud_id}`, meta, { prefer: 'return=representation' });
+    if (row) cloudMeta.set(row.id, { owner: row.owner, collaborative: row.collaborative, visibility: row.visibility });
+    if (!row?.collaborative) await rpc('playlist_op', { pid: pl.cloud_id, op: { replace: pl.tracks.map(slimTrack) } });
     pushedSig.set(pl.id, playlistSig(pl));
     return pl.cloud_id;
   }
   const [row] = await db('POST', 'playlists', { ...meta, visibility: visibility || 'unlisted', collaborative: !!collaborative, tracks: pl.tracks.map(slimTrack) }, { prefer: 'return=representation' });
+  cloudMeta.set(row.id, { owner: row.owner, collaborative: row.collaborative, visibility: row.visibility });
+  // Known right away (the library refresh comes a moment later): a quick
+  // second click must update this row, not create another one.
+  pl.cloud_id = row.id;
+  pl.cloud_role = 'owner';
+  const live = state.playlists.find((p) => p.id === pl.id);
+  if (live) Object.assign(live, { cloud_id: row.id, cloud_role: 'owner' });
   await call('set_playlist_cloud', { id: pl.id, cloudId: row.id, role: 'owner' });
   pushedSig.set(pl.id, playlistSig(pl));
   return row.id;
@@ -257,7 +271,7 @@ async function openSharedPlaylist(id) {
   if (local) return openPlaylist(local.id);
   if (!cloudOn()) return toast('Online features aren’t available in this build', 'warn');
   try {
-    const rows = await db('GET', `playlists?id=eq.${id}&select=id,title,description,cover,tracks,owner,collaborative,visibility,profiles(name,avatar)`);
+    const rows = await db('GET', `playlists?id=eq.${id}&select=id,title,description,cover,tracks,owner,collaborative,visibility,profiles!playlists_owner_fkey(name,avatar)`);
     const row = rows[0];
     if (!row) return toast('This playlist isn’t shared anymore, or it’s private', 'warn');
     cloudMeta.set(row.id, { owner: row.owner, collaborative: row.collaborative, visibility: row.visibility, ownerName: row.profiles?.name });
@@ -449,7 +463,7 @@ function renderTogether() {
     return;
   }
   const st = jam.remote;
-  box.replaceChildren(
+  box.replaceChildren(...[
     h('div', { class: 'jam-head' },
       h('b', {}, jam.host ? 'You’re hosting' : 'Listening together'),
       h('span', { class: 'meta' }, `${jam.people.length} ${jam.people.length === 1 ? 'person' : 'people'}`)),
@@ -460,7 +474,7 @@ function renderTogether() {
     !jam.host && st?.track ? h('div', { class: 'npv-card' }, h('h4', {}, 'Now playing'), h('div', { class: 'npv-source' }, `${st.track.title} — ${st.track.artist}`)) : null,
     !jam.host && st?.upcoming?.length ? h('div', { class: 'npv-card' }, h('h4', {}, 'Up next'), h('div', { class: 'npv-source' }, ...st.upcoming.map((u) => h('div', {}, `${u.title} — ${u.artist}`)))) : null,
     h('div', { class: 'jam-hint meta' }, jam.host ? 'Guests follow what you play. Their added songs go into your queue.' : 'Add songs with ⋯ → Add to session. The host controls playback.'),
-    h('div', { class: 'reactions-bar' }, ...['🔥', '❤️', '😂', '🕺', '👏', '😮'].map((e) => h('button', { onclick: () => sendReaction(e) }, e))));
+    h('div', { class: 'reactions-bar' }, ...['🔥', '❤️', '😂', '🕺', '👏', '😮'].map((e) => h('button', { onclick: () => sendReaction(e) }, e)))].filter(Boolean));
 }
 
 // Friends -----------------------------------------------------------------------------------
@@ -470,7 +484,7 @@ async function renderFriends() {
   const box = $('#friends-panel');
   if (!box || box.hidden) return;
   if (!cloudOn()) { box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'Not available in this build.'))); return; }
-  if (!signedIn() || cloud.session.anonymous) {
+  if (!signedIn()) {
     box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'See what your friends are listening to'), h('p', { class: 'small' }, 'Follow friends and their current song shows up here.'),
       h('button', { class: 'btn primary', style: 'margin-top:12px', onclick: () => requireAccount({ why: 'Sign in to see friends' }) }, 'Sign in')));
     return;
@@ -519,14 +533,15 @@ function friendRow(r) {
 }
 
 /** Tell followers what's playing (throttled, only real changes). */
-function publishActivity() {
-  if (!signedIn() || cloud.session.anonymous || state.settings?.share_activity === false) return;
+function publishActivity(force = false) {
+  if (!signedIn() || state.settings?.share_activity === false) return;
   const p = state.playback;
   const t = p?.current?.track;
   const sig = `${t?.key}|${p?.status === 'playing'}`;
-  if (!t || sig === friends.lastPublished || p.status === 'loading') return;
+  if (!t || (!force && sig === friends.lastPublished) || p.status === 'loading') return;
   friends.lastPublished = sig;
-  db('POST', 'now_playing', { user_id: cloud.session.user_id, track: slimTrack(t), playing: p.status === 'playing', updated_at: new Date().toISOString() }, { prefer: 'resolution=merge-duplicates' }).catch(() => {});
+  return db('POST', 'now_playing?on_conflict=user_id', { user_id: cloud.session.user_id, track: slimTrack(t), playing: p.status === 'playing', updated_at: new Date().toISOString() }, { prefer: 'resolution=merge-duplicates' })
+    .catch(() => { friends.lastPublished = ''; }); // try again on the next update
 }
 
 // Profiles ------------------------------------------------------------------------------------

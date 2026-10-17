@@ -129,10 +129,17 @@ async function showWhatsNew() {
   });
 }
 
-/** Startup check plus one every 6 hours (for apps left open for days). */
+/** Startup check, then hourly, and when you come back to the window after a while. */
+let lastUpdateCheck = 0;
 function scheduleUpdateChecks() {
-  setTimeout(() => checkForUpdate(false), 8000);
-  setInterval(() => { if (state.settings?.auto_update !== false) checkForUpdate(false); }, 6 * 3600 * 1000);
+  const maybe = (minGap) => {
+    if (state.settings?.auto_update === false || Date.now() - lastUpdateCheck < minGap) return;
+    lastUpdateCheck = Date.now();
+    checkForUpdate(false);
+  };
+  setTimeout(() => maybe(0), 8000);
+  setInterval(() => maybe(55 * 60 * 1000), 60 * 60 * 1000);
+  window.addEventListener('focus', () => maybe(60 * 60 * 1000));
 }
 
 function updateSettingsRow() {

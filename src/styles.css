@@ -1274,3 +1274,36 @@ body.dragging-tracks .track:hover { background: transparent; }
 .tile:hover .tile-play { transform: none; }
 .mix-play { transform: none; }
 .selection-bar { animation: tw-fade .15s ease; }
+
+/* ---- Social ---- */
+.panel-tabs { overflow-x: auto; scrollbar-width: none; }
+.panel-tabs::-webkit-scrollbar { display: none; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 40%, var(--bg-elev-2)); color: var(--text); display: inline-grid; place-items: center; font-weight: 800; font-size: 13px; overflow: hidden; flex: none; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.tb-account { padding: 0; overflow: hidden; }
+.tb-avatar { width: 28px; height: 28px; font-size: 12px; }
+.side-panel { flex: 1; overflow-y: auto; padding: 8px 14px 24px; display: flex; flex-direction: column; gap: 12px; }
+.side-panel > * { flex: none; }
+.friends-tools { display: flex; gap: 6px; align-items: center; }
+.friends-tools .input { flex: 1; height: 34px; border-radius: 17px; padding: 0 14px; }
+.friends-list, .people-results { display: flex; flex-direction: column; gap: 2px; }
+.friend { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px; }
+.friend:hover { background: var(--surface-hover); }
+.friend .avatar { width: 36px; height: 36px; }
+.friend-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.friend-name { font-weight: 700; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-name:hover { text-decoration: underline; }
+.friend-track { font-size: 12.5px; color: var(--text-dim); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-track:hover { color: var(--text); }
+.friend-when { font-size: 11.5px; white-space: nowrap; }
+.jam-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 16px; }
+.jam-people { display: flex; flex-direction: column; gap: 6px; }
+.jam-person { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.jam-person em { font-style: normal; font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 0 6px; }
+.jam-hint { font-size: 12.5px; line-height: 1.5; }
+.reactions-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.reactions-bar button { width: 40px; height: 40px; border-radius: 50%; background: var(--bg-elev-2); font-size: 20px; }
+.reactions-bar button:hover { background: var(--selected); }
+.reaction { position: fixed; bottom: calc(var(--player-h) + 20px); z-index: 90; font-size: 40px; display: flex; flex-direction: column; align-items: center; pointer-events: none; animation: tw-float 2.6s ease-out forwards; }
+.reaction small { font-size: 11px; font-weight: 700; background: var(--bg-elev-2); padding: 1px 6px; border-radius: 6px; }
+@keyframes tw-float { 0% { opacity: 0; transform: translateY(20px); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-220px); } }

@@ -86,6 +86,8 @@ const ICONS = {
   sort: '<path d="M4 7h16M7 12h10M10 17h4"/>',
   folderPlus: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><path d="M12 11v6M9 14h6"/>',
   importIcon: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  friends: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.8"/><path d="M15.5 14.2A5 5 0 0 1 21.5 19"/>',
+  share: '<path d="M12 3v13M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
   verified: '<path d="M12 2.5 14.6 5l3.5-.3.8 3.4 3 1.9-1.4 3.2 1.4 3.2-3 1.9-.8 3.4-3.5-.3L12 21.5 9.4 19l-3.5.3-.8-3.4-3-1.9L3.5 12 2.1 8.8l3-1.9.8-3.4 3.5.3z" fill="currentColor" stroke="none"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
 };
 

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tunewire</title>
+<meta name="description" content="A free music player for YouTube Music, SoundCloud, YouTube and Spotify.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0d0d0f; --card: #17171b; --text: #f2f2f2; --dim: #a7a7ad; --accent: #4d8dff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(80% 60% at 30% 0%, #1d2a4a 0%, var(--bg) 60%); color: var(--text); font: 15px/1.5 Figtree, system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 40px 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 22px; margin-bottom: 28px; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; background: conic-gradient(from 210deg, var(--accent), #b9d2ff, var(--accent)); }
+  .card { width: min(560px, 100%); background: var(--card); border-radius: 16px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+  .head { display: flex; gap: 18px; align-items: center; }
+  .cover { width: 120px; height: 120px; border-radius: 10px; background: #26262c center/cover; flex: none; }
+  .cover.round { border-radius: 50%; }
+  .kicker { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  h1 { margin: 4px 0; font-size: clamp(24px, 6vw, 36px); line-height: 1.1; font-weight: 900; letter-spacing: -.02em; overflow-wrap: anywhere; }
+  .sub { color: var(--dim); }
+  .songs { margin: 18px 0 0; padding: 0; list-style: none; max-height: 300px; overflow: auto; }
+  .songs li { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid #222228; }
+  .songs img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: #26262c; }
+  .songs b { display: block; font-weight: 600; }
+  .songs span { color: var(--dim); font-size: 13px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 22px; border-radius: 23px; font-weight: 800; text-decoration: none; color: var(--text); border: 1px solid #3a3a42; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #06122b; }
+  .note { color: var(--dim); font-size: 13px; margin-top: 14px; }
+  .dl { margin-top: 26px; width: min(560px, 100%); color: var(--dim); font-size: 13px; text-align: center; }
+  .dl a { color: var(--text); }
+</style>
+</head>
+<body>
+  <div class="brand"><span class="logo"></span>Tunewire</div>
+  <div class="card" id="card"><div class="sub">Loading…</div></div>
+  <div class="dl">Tunewire is a free music player for YouTube Music, SoundCloud, YouTube and Spotify.<br>
+    <a id="dl-win" href="https://github.com/WorldCNC/tunewire/releases/latest">Download for Windows</a> ·
+    <a href="https://github.com/WorldCNC/tunewire/releases/latest">Linux</a></div>
+<script src="config.js"></script>
+<script>
+// Share links: #p=<playlist id> · #c=<invite code> · #s=<song> · #j=<session> · #u=<profile>
+const card = document.getElementById('card');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const [kind, code] = (location.hash.slice(1).match(/^([pcsju])=(.+)$/) || []).slice(1);
+const appLink = kind ? `tunewire://${kind}/${code}` : 'tunewire://';
+const latest = 'https://github.com/WorldCNC/tunewire/releases/latest';
+
+function render({ kicker, title, sub, cover, round, songs }) {
+  card.innerHTML = `
+    <div class="head">${cover !== undefined ? `<div class="cover${round ? ' round' : ''}" style="background-image:url('${esc(cover || '')}')"></div>` : ''}
+      <div><div class="kicker">${esc(kicker)}</div><h1>${esc(title)}</h1><div class="sub">${esc(sub || '')}</div></div></div>
+    ${songs?.length ? `<ul class="songs">${songs.slice(0, 50).map((t) => `<li><img src="${esc(t.thumbnail || '')}" alt="" loading="lazy" referrerpolicy="no-referrer"><div><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div></li>`).join('')}</ul>` : ''}
+    <div class="actions"><a class="btn primary" href="${esc(appLink)}">Open in Tunewire</a><a class="btn" href="${latest}">Get Tunewire</a></div>
+    <div class="note">Nothing happened? Install Tunewire, then click “Open in Tunewire” again.</div>`;
+}
+
+async function db(path) {
+  const r = await fetch(`${TW.url}/rest/v1/${path}`, { headers: { apikey: TW.anon, Authorization: `Bearer ${TW.anon}` } });
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+(async () => {
+  if (!kind) {
+    card.innerHTML = `<h1>Your music, from everywhere.</h1><div class="sub">Search YouTube Music, SoundCloud, YouTube and Spotify at once, import your Spotify library, listen together with friends.</div><div class="actions"><a class="btn primary" href="${latest}">Download Tunewire</a></div>`;
+    return;
+  }
+  // Try the app right away; the page stays as a fallback.
+  setTimeout(() => { location.href = appLink; }, 300);
+  try {
+    if (kind === 's') {
+      const o = JSON.parse(decodeURIComponent(escape(atob(code.replace(/-/g, '+').replace(/_/g, '/')))));
+      render({ kicker: 'Song', title: o.t, sub: o.a, cover: o.i || '' });
+    } else if (kind === 'p') {
+      const [pl] = await db(`playlists?id=eq.${encodeURIComponent(code)}&select=title,description,cover,tracks,profiles!playlists_owner_fkey(name)`);
+      if (!pl) return render({ kicker: 'Playlist', title: 'This playlist isn’t shared anymore', sub: 'Or it’s private.' });
+      render({ kicker: `Playlist · ${pl.tracks.length} songs`, title: pl.title, sub: `by ${pl.profiles?.name || 'someone'}${pl.description ? ' · ' + pl.description : ''}`, cover: pl.cover || pl.tracks[0]?.thumbnail || '', songs: pl.tracks });
+    } else if (kind === 'c') {
+      render({ kicker: 'Collaborative playlist', title: 'You’re invited', sub: 'Open it in Tunewire to add songs together.' });
+    } else if (kind === 'j') {
+      render({ kicker: 'Listen together', title: 'Join the session', sub: 'Open Tunewire to hear the same music at the same time.' });
+    } else if (kind === 'u') {
+      const [p] = await db(`profiles?id=eq.${encodeURIComponent(code)}&select=name,avatar`);
+      const lists = await db(`playlists?owner=eq.${encodeURIComponent(code)}&visibility=eq.public&select=title`);
+      render({ kicker: 'Profile', title: p?.name || 'Tunewire user', sub: `${lists.length} public playlists`, cover: p?.avatar || '', round: true });
+    }
+  } catch (e) {
+    render({ kicker: 'Tunewire', title: 'Open this in Tunewire', sub: '' });
+  }
+})();
+</script>
+</body>
+</html>

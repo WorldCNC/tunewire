@@ -203,6 +203,19 @@
       emit('library-changed', 'playlists');
       return { playlists: pls.length, songs: pls.length * 2, liked: liked ? 3 : 0, missing: 0, first_id: first };
     },
+    // Online: a test harness can point these at a local Supabase (window.__SB).
+    cloud_config: () => (window.__SB ? { url: window.__SB.url, anon_key: window.__SB.anon } : null),
+    cloud_session: () => window.__SBsession || null,
+    cloud_sign_in_guest: async () => {
+      const r = await fetch(`${window.__SB.url}/auth/v1/signup`, { method: 'POST', headers: { apikey: window.__SB.anon, 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await r.json();
+      window.__SBsession = { access_token: j.access_token, user_id: j.user.id, name: 'Guest', avatar: null, anonymous: true, expires_at: Date.now() + 3600e3 };
+      return window.__SBsession;
+    },
+    cloud_sign_in: () => { throw { kind: 'unavailable', message: 'not in the preview' }; },
+    cloud_sign_out: () => { window.__SBsession = null; },
+    set_playlist_cloud: ({ id, cloudId, role }) => { const p = playlists.find((x) => x.id === id); p.cloud_id = cloudId; p.cloud_role = role; emit('library-changed', 'playlists'); },
+    replace_playlist_tracks: ({ id, tracks: ts }) => { playlists.find((x) => x.id === id).tracks = ts; emit('library-changed', 'playlists'); },
     spotify_profile_playlists: () => ({ name: 'Friend', playlists: [{ id: 'fp1', name: 'Friend mix', owner: 'Friend', total: 2, thumbnail: null }] }),
     report_error: () => null, reports_available: () => false, cover_wash: () => 'data:image/png;base64,iVBORw0KGgo=',
     import_apple_music: () => { const p = { id: `pam${Date.now()}`, name: 'Apple Mix', tracks: tracks.slice(1, 4), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return { playlist: p, missing: 1 }; },

@@ -166,7 +166,8 @@ function trackRow(track, index, opts = {}) {
       state.downloadKeys.has(track.key)
         ? { label: 'Remove download', icon: 'trash', onClick: () => deleteDownload(track.key) }
         : (versions.every((v) => v.platform === 'local') ? null : { label: 'Download', icon: 'download', onClick: () => downloadTracks([track]) }),
-      versions[0]?.platform !== 'local' ? { label: 'Copy link', icon: 'link', onClick: () => copyText(versions[0]?.url) } : null,
+      versions[0]?.platform !== 'local' ? { label: 'Share song', icon: 'share', onClick: () => shareSong(track) } : null,
+      jam.channel && !jam.host ? { label: 'Add to session', icon: 'friends', onClick: () => jamAdd(track) } : null,
       ...(opts.extraMenu || []),
     ].filter(Boolean);
     return items;

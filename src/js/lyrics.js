@@ -25,6 +25,10 @@ function showPanel(name) {
   $('#lyrics-panel').hidden = name !== 'lyrics';
   $('#lyrics-actions').hidden = name !== 'lyrics';
   $('#np-panel').hidden = name !== 'now';
+  $('#friends-panel').hidden = name !== 'friends';
+  $('#together-panel').hidden = name !== 'together';
+  if (name === 'friends') renderFriends();
+  if (name === 'together') renderTogether();
   if (name === 'lyrics') loadLyrics();
   if (name === 'now') renderNowPlaying(true);
   syncPanelButtons();

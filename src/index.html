@@ -35,6 +35,7 @@
         <div class="health-bad" id="health-bad" hidden></div>
         <button class="tb-btn" id="nav-releases" title="New releases"><i data-icon="bell"></i><em class="nav-count new" id="rel-count"></em></button>
         <button class="tb-btn" id="nav-menu" title="Settings and more"><i data-icon="gear"></i></button>
+        <button class="tb-btn tb-account" id="nav-account" title="Sign in" hidden><i data-icon="user"></i></button>
         <div class="win-controls" id="win-controls">
           <button class="win-btn" id="win-min" title="Minimize"><i data-icon="winMin"></i></button>
           <button class="win-btn" id="win-max" title="Maximize"><i data-icon="winMax"></i></button>
@@ -80,6 +81,7 @@
         <section class="view" id="view-playlist"><div id="playlist-detail"></div></section>
         <section class="view" id="view-favorites"><div id="fav-body"></div></section>
         <section class="view" id="view-mood"><div id="mood-body"></div></section>
+        <section class="view" id="view-profile"><div id="profile-body"></div></section>
         <section class="view" id="view-search">
           <div id="search-home"></div>
           <div id="search-body" hidden>
@@ -193,9 +195,11 @@
     <aside class="queue" id="queue">
       <div class="queue-head">
         <div class="panel-tabs" role="tablist">
-          <button data-panel="now" role="tab">Now playing</button>
+          <button data-panel="now" role="tab">Playing</button>
           <button class="active" data-panel="queue" role="tab">Queue <span class="meta" id="queue-count"></span></button>
           <button data-panel="lyrics" role="tab">Lyrics</button>
+          <button data-panel="friends" role="tab" class="cloud-only" hidden>Friends</button>
+          <button data-panel="together" role="tab" class="cloud-only" hidden>Together</button>
         </div>
         <div class="actions" id="lyrics-actions" hidden>
           <button class="icon-btn" id="lyrics-full" title="Full screen lyrics"><i data-icon="expand"></i></button>
@@ -209,6 +213,8 @@
       <div class="np-panel" id="np-panel" hidden></div>
       <div class="queue-list" id="queue-list"></div>
       <div class="lyrics" id="lyrics-panel" hidden></div>
+      <div class="side-panel" id="friends-panel" hidden></div>
+      <div class="side-panel" id="together-panel" hidden></div>
     </aside>
 
     <footer class="player-bar" id="player-bar">
@@ -246,6 +252,7 @@
         <button class="icon-btn" id="btn-np" title="Now playing view"><i data-icon="npView"></i></button>
         <button class="icon-btn" id="btn-lyrics" title="Lyrics"><i data-icon="mic"></i></button>
         <button class="icon-btn" id="toggle-queue" title="Queue (Q)"><i data-icon="queue"></i></button>
+        <button class="icon-btn" id="btn-jam" title="Listen together" hidden><i data-icon="friends"></i></button>
         <button class="icon-btn" id="btn-device" title="Output device"><i data-icon="speaker"></i></button>
         <button class="icon-btn" id="btn-sleep" title="Sleep timer"><i data-icon="moon"></i></button>
         <button class="icon-btn" id="btn-mute" title="Mute (M)"><i data-icon="volume"></i></button>
@@ -274,6 +281,8 @@
   <script src="js/foryou.js"></script>
   <script src="js/shell.js"></script>
   <script src="js/imports.js"></script>
+  <script src="js/cloud.js"></script>
+  <script src="js/social.js"></script>
   <script src="js/update.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/shortcuts.js"></script>

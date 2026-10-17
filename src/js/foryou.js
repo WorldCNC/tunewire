@@ -338,6 +338,7 @@ async function openWrapped(year) {
   slides.at(-1).el = h('div', { class: 'w-slide w-share' }, card,
     h('div', { class: 'actions', style: 'justify-content:center' },
       h('button', { class: 'btn primary', html: `${icon('download')}Save image`, onclick: (e) => { e.stopPropagation(); saveWrappedImage(s, year, p, soFar); } }),
+      cloudOn() ? h('button', { class: 'btn', html: `${icon('friends')}Compare with friends`, onclick: (e) => { e.stopPropagation(); compareWrapped(s, year); } }) : null,
       h('button', { class: 'btn', html: `${icon('save')}Save top songs as playlist`, onclick: async (e) => {
         e.stopPropagation();
         try { await call('create_playlist', { name: `My top songs ${year}`, tracks: s.top_tracks.slice(0, 50).map((t) => t.track), sourceUrl: null }); toast(`Saved “My top songs ${year}”`, 'ok'); } catch (err) { toast(errMsg(err), 'error'); }

@@ -26,7 +26,8 @@ pub fn apply_settings(st: &AppState, s: &Settings) {
     st.audio.set_eq(s.eq_enabled, &s.eq_gains);
     st.audio.set_device(&s.output_device);
     st.audio.configure(s.crossfade, s.normalize);
-    st.discord.configure(s.discord_rpc, &s.discord_client_id, s.discord_buttons);
+    // Always Tunewire's own Discord app (not user-editable).
+    st.discord.configure(s.discord_rpc, crate::store::DISCORD_APP_ID, s.discord_buttons);
     spotdl::set_client_id(&s.spotify_client_id);
     let bundled = ytdlp::bundled_path(&st.data_dir.join("bin"));
     if s.ytdlp_source == "bundled" && bundled.exists() {

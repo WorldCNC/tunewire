@@ -196,6 +196,8 @@ function playlistMenuItems(pl) {
     'sep',
     pl.source_url ? { label: 'Sync with source', icon: 'refresh', onClick: () => syncPlaylist(pl.id) } : null,
     { label: 'Download', icon: 'download', onClick: () => downloadTracks(pl.tracks) },
+    ...shareMenuItems(pl),
+    'sep',
     { label: 'Delete', icon: 'trash', onClick: () => deletePlaylist(pl) },
   ].filter(Boolean);
 }
@@ -463,6 +465,17 @@ function renderPlaylistDetail() {
     } });
     if (tracks.length > 2) actions.push(smartBtn);
     actions.push(downloadRing(tracks));
+  } else if (pl.cloud) {
+    // A playlist someone shared: follow it (keeps updating) or take a copy.
+    actions.push(h('button', { class: 'ab-follow', onclick: () => followShared(pl) }, 'Follow'),
+      h('button', { class: 'ab-icon', title: 'Save a copy to Your Library', html: icon('plus'), onclick: async () => {
+        try {
+          const created = await call('create_playlist', { name: pl.title, tracks, sourceUrl: null });
+          toast(`Saved a copy of “${pl.title}”`, 'ok');
+          await refreshPlaylists({ silent: true });
+          openPlaylist(created.id, { push: false });
+        } catch (e) { toast(errMsg(e), 'error'); }
+      } }));
   } else {
     actions.push(h('button', { class: 'ab-follow', onclick: async () => {
       try {
@@ -475,15 +488,18 @@ function renderPlaylistDetail() {
     } }, 'Save to Your Library'));
   }
 
-  const kind = remote ? (pl.platform ? `${PLATFORMS[pl.platform]?.label || ''} playlist` : 'Playlist') : 'Playlist';
+  const cm = !remote && pl.cloud_id ? cloudMeta.get(pl.cloud_id) : null;
+  const kind = remote ? (pl.cloud ? 'Shared playlist' : pl.platform ? `${PLATFORMS[pl.platform]?.label || ''} playlist` : 'Playlist')
+    : cm?.collaborative || pl.cloud_role === 'editor' ? 'Collaborative playlist' : pl.cloud_role === 'follower' ? 'Followed playlist' : pl.cloud_id ? 'Shared playlist' : 'Playlist';
+  if (!remote && cloudOn() && pl.cloud_role !== 'follower') actions.push(h('button', { class: 'ab-icon', title: pl.cloud_id ? 'Copy link' : 'Share', html: icon('share'), onclick: () => sharePlaylist(pl) }));
   renderCollection(box, {
     id,
     kind,
     title: remote ? pl.title : pl.name,
     tracks,
-    cover: remote ? null : pl.cover,
-    description: remote ? '' : pl.description,
-    line: [h('b', {}, remote ? 'Opened link' : 'You')],
+    cover: remote ? pl.cloud?.cover || null : pl.cover,
+    description: remote ? pl.cloud?.description || '' : pl.description,
+    line: [remote && pl.cloud ? h('button', { onclick: () => openProfile(pl.cloud.owner) }, pl.cloud.ownerName || 'Someone') : h('b', {}, remote ? 'Opened link' : pl.cloud_role === 'follower' || pl.cloud_role === 'editor' ? (cm?.ownerName || 'Shared with you') : 'You')],
     added: remote ? null : pl.added || {},
     created: pl.created,
     editable: remote ? null : () => editPlaylistDetails(pl),

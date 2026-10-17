@@ -12,9 +12,19 @@ async function cloudInit() {
   try { cloud.cfg = await call('cloud_config'); } catch { cloud.cfg = null; }
   if (cloud.cfg) {
     try { cloud.session = await call('cloud_session'); } catch { cloud.session = null; }
+    await loadProfileName();
   }
   cloud.ready = true;
   cloudChanged();
+}
+
+/** The name/picture friends see (the profile row, which the user can edit). */
+async function loadProfileName() {
+  if (!cloud.session) return;
+  try {
+    const [p] = await db('GET', `profiles?id=eq.${cloud.session.user_id}&select=name,avatar`);
+    if (p) { cloud.session.name = p.name; cloud.session.avatar = p.avatar || cloud.session.avatar; }
+  } catch { /* offline */ }
 }
 
 function cloudOn() { return !!cloud.cfg; }
@@ -31,15 +41,30 @@ async function cloudToken() {
   return cloud.session?.access_token || null;
 }
 
+/** Which sign-in providers the project has switched on. */
+async function cloudProviders() {
+  if (cloud.providers) return cloud.providers;
+  try {
+    const r = await fetch(`${cloud.cfg.url}/auth/v1/settings`, { headers: { apikey: cloud.cfg.anon_key } });
+    const ext = (await r.json()).external || {};
+    cloud.providers = { discord: !!ext.discord, google: !!ext.google, guest: !!ext.anonymous_users };
+  } catch { cloud.providers = { discord: false, google: false, guest: true }; }
+  return cloud.providers;
+}
+
 /** Signed in, or offer to sign in (guest allowed when `guestOk`). */
 async function requireAccount({ guestOk = false, why = 'Sign in to use this' } = {}) {
   if (!cloudOn()) { toast('Online features aren’t available in this build', 'warn'); return false; }
   if (signedIn()) return true;
+  const prov = await cloudProviders();
+  // Without Discord/Google set up, a guest account is the way in.
+  if (!prov.discord && !prov.google) guestOk = true;
   return new Promise((resolve) => {
     let done = false;
     const go = async (fn) => {
       try {
         cloud.session = await fn();
+        await loadProfileName();
         cloudChanged();
         done = true;
         m.close();
@@ -51,9 +76,9 @@ async function requireAccount({ guestOk = false, why = 'Sign in to use this' } =
       title: why,
       subtitle: 'Your playlists and listening stay on this computer; an account is only used for sharing and listening together.',
       body: h('div', { class: 'import-box' },
-        h('button', { class: 'import-option', onclick: () => { status.textContent = 'Continue in your browser…'; go(() => call('cloud_sign_in', { provider: 'discord' })); } }, h('span', { class: 'src-ico', html: icon('discord') || icon('user') }), h('div', {}, h('b', {}, 'Continue with Discord')), h('span', { html: icon('chevRight') })),
-        h('button', { class: 'import-option', onclick: () => { status.textContent = 'Continue in your browser…'; go(() => call('cloud_sign_in', { provider: 'google' })); } }, h('span', { class: 'src-ico', html: icon('user') }), h('div', {}, h('b', {}, 'Continue with Google')), h('span', { html: icon('chevRight') })),
-        guestOk ? h('button', { class: 'import-option', onclick: () => go(() => call('cloud_sign_in_guest')) }, h('span', { class: 'src-ico', html: icon('user') }), h('div', {}, h('b', {}, 'Continue as a guest'), h('span', {}, 'No account. Good for joining a friend’s session.')), h('span', { html: icon('chevRight') })) : null,
+        prov.discord ? h('button', { class: 'import-option', onclick: () => { status.textContent = 'Continue in your browser…'; go(() => call('cloud_sign_in', { provider: 'discord' })); } }, h('span', { class: 'src-ico', html: icon('friends') }), h('div', {}, h('b', {}, 'Continue with Discord')), h('span', { html: icon('chevRight') })) : null,
+        prov.google ? h('button', { class: 'import-option', onclick: () => { status.textContent = 'Continue in your browser…'; go(() => call('cloud_sign_in', { provider: 'google' })); } }, h('span', { class: 'src-ico', html: icon('user') }), h('div', {}, h('b', {}, 'Continue with Google')), h('span', { html: icon('chevRight') })) : null,
+        guestOk && prov.guest ? h('button', { class: 'import-option', onclick: () => go(() => call('cloud_sign_in_guest')) }, h('span', { class: 'src-ico', html: icon('user') }), h('div', {}, h('b', {}, 'Continue as a guest'), h('span', {}, 'No account. Good for joining a friend’s session.')), h('span', { html: icon('chevRight') })) : null,
         status),
       onClose: () => { if (!done) resolve(false); },
     });
@@ -155,7 +180,11 @@ class Channel {
       if (this.myPresence) this.track(this.myPresence);
       return;
     }
-    if (msg.event === 'phx_reply' && msg.payload?.status === 'error') this.emit('status', 'error');
+    if (msg.event === 'phx_reply' && msg.payload?.status === 'error' && !this.joined) {
+      // The server can refuse while it warms up: reconnect and join again.
+      this.emit('status', 'error');
+      setTimeout(() => this.ws?.close(), 1000);
+    }
     if (msg.event === 'broadcast') this.emit(`b:${msg.payload.event}`, msg.payload.payload);
     if (msg.event === 'postgres_changes') this.emit('change', msg.payload.data);
     if (msg.event === 'presence_state') { this.presence = msg.payload; this.emit('presence', this.presence); }
@@ -175,5 +204,5 @@ class Channel {
 
 /** People in a presence map → [{key, name, avatar, ...}]. */
 function presenceList(p) {
-  return Object.entries(p).map(([key, metas]) => ({ key, ...(metas[0] || {}) }));
+  return Object.entries(p).map(([key, v]) => ({ key, ...((v?.metas || v || [])[0] || {}) }));
 }

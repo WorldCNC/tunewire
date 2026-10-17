@@ -24,4 +24,9 @@ grant usage on sequence realtime.messages_id_seq to authenticated;
 create function realtime.topic() returns text language sql stable as $$ select current_setting('realtime.topic', true) $$;
 
 create publication supabase_realtime;
-create extension if not exists pgcrypto;
+-- As on Supabase: extensions live in their own schema, which is on the
+-- search path for SQL but not inside functions that pin search_path.
+create schema extensions;
+grant usage on schema extensions to anon, authenticated, service_role;
+create extension if not exists pgcrypto with schema extensions;
+alter database postgres set search_path = "$user", public, extensions;

@@ -11,6 +11,7 @@ for _ in $(seq 60); do docker exec "$name" pg_isready -U postgres -q 2>/dev/null
 sleep 1
 run() { docker exec -i "$name" psql -U postgres -v ON_ERROR_STOP=1 -q -o /dev/null "$@"; }
 run < supabase/tests/stubs.sql
+# New sessions pick up the search_path set by the stubs.
 for f in supabase/migrations/*.sql; do echo "apply $f"; run < "$f"; done
 for f in supabase/tests/test_*.sql; do echo "test  $f"; run < "$f"; done
 echo "database tests passed"

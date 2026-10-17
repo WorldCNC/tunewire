@@ -32,7 +32,7 @@ language sql stable as $$ select extract(epoch from clock_timestamp()) * 1000 $$
 -- Invite codes ------------------------------------------------------------------
 create table public.playlist_invites (
   playlist_id uuid primary key references public.playlists on delete cascade,
-  code text not null unique default encode(gen_random_bytes(16), 'hex'),
+  code text not null unique default encode(extensions.gen_random_bytes(16), 'hex'),
   created_at timestamptz not null default now()
 );
 -- Every existing collaborative playlist gets a new code (old links stop working).
@@ -64,7 +64,7 @@ begin
     raise exception 'not allowed';
   end if;
   insert into playlist_invites (playlist_id) values (pid)
-    on conflict (playlist_id) do update set code = encode(gen_random_bytes(16), 'hex'), created_at = now();
+    on conflict (playlist_id) do update set code = encode(extensions.gen_random_bytes(16), 'hex'), created_at = now();
   select code into c from playlist_invites where playlist_id = pid;
   return c;
 end $$;
@@ -559,5 +559,10 @@ revoke execute on function public.report_allow(text, integer, integer) from publ
 grant execute on function public.report_allow(text, integer, integer) to service_role;
 
 -- Realtime: small change rows instead of whole playlists -----------------------------------------
-alter publication supabase_realtime drop table public.playlists;
+do $$
+begin
+  if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'playlists') then
+    alter publication supabase_realtime drop table public.playlists;
+  end if;
+end $$;
 alter publication supabase_realtime add table public.playlist_changes, public.notifications, public.jams, public.jam_events, public.jam_members;

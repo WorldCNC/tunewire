@@ -120,7 +120,7 @@ function renderNowPlaying(force = false) {
   const thumb = p.version?.thumbnail || track.thumbnail;
   const big = thumb ? thumb.replace(/=w\d+-h\d+/, '=w800-h800').replace('/mqdefault.jpg', '/maxresdefault.jpg').replace('-t500x500.', '-t500x500.') : null;
   const cover = h('div', { class: 'npv-cover' });
-  if (big) cover.append(h('img', { src: big, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { if (thumb && e.target.src !== thumb) e.target.src = thumb; else e.target.remove(); } }));
+  if (big) cover.append(h('img', { src: big, 'data-px': 640, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { if (thumb && e.target.src !== thumb) e.target.src = thumb; else e.target.remove(); } }));
   else cover.innerHTML = icon('music');
   const liked = state.favKeys.has(track.key);
   const head = h('div', { class: 'npv-head' },
@@ -154,12 +154,13 @@ async function fillArtistCard(el, track) {
   if (!info) {
     try {
       info = await call('ytm_artist', { name, browseId: artistBrowseId(track) });
+      if (npv.artistCache.size > 30) npv.artistCache.delete(npv.artistCache.keys().next().value);
       npv.artistCache.set(name, info);
     } catch { el.remove(); return; }
   }
   if (seq !== npv.seq || !el.isConnected) return;
   const banner = h('div', { class: 'npv-banner' });
-  if (info.banner || info.thumbnail) banner.style.backgroundImage = `url("${(info.banner || info.thumbnail).replace(/"/g, '%22')}")`;
+  if (info.banner || info.thumbnail) banner.style.backgroundImage = `url("${bannerUrl(info.banner || info.thumbnail, 640).replace(/"/g, '%22')}")`;
   el.replaceChildren(banner, h('div', { class: 'npv-about-body' },
     h('div', { class: 'npv-about-name' }, info.name),
     h('div', { class: 'npv-about-row' }, h('span', {}, info.audience || info.subscribers || ''), followButton(info.name, `https://www.youtube.com/channel/${info.browse_id}`, info.thumbnail)),
@@ -263,7 +264,7 @@ function paintFullscreen() {
   const cover = $('.fs-cover', el);
   if (cover.dataset.src !== (big || '')) {
     cover.dataset.src = big || '';
-    cover.replaceChildren(...(big ? [h('img', { src: big, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { if (thumb) e.target.src = thumb; } })] : []));
+    cover.replaceChildren(...(big ? [h('img', { src: big, 'data-px': 1000, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { if (thumb) e.target.src = thumb; } })] : []));
     el.style.setProperty('--fs-art', big ? `url("${big.replace(/"/g, '%22')}")` : 'none');
   }
   $('.fs-title', el).textContent = t?.title || 'Nothing playing';

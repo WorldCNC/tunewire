@@ -173,3 +173,28 @@ fn bench_spotify_cold_parts() {
     let _ = rt.block_on(crate::ytm::search_songs("USUM71703861"));
     println!("ytm search (2nd) {}", ms(t.elapsed()));
 }
+
+/// Dump ~1000 real songs (real cover URLs) for the memory test page.
+#[test]
+#[ignore]
+fn dump_big_library() {
+    let rt = rt();
+    let _g = rt.enter();
+    let mut all = Vec::new();
+    for q in ["top hits 2024", "rock classics", "hip hop hits", "chill indie", "edm hits", "rnb classics", "pop 2010s", "lofi beats"] {
+        if let Ok(x) = rt.block_on(crate::ytm::search_extras(q)) {
+            for p in x.playlists.iter().take(2) {
+                if let Some(b) = &p.browse_id {
+                    if let Ok(c) = rt.block_on(crate::ytm::collection(b)) {
+                        all.extend(c.tracks);
+                    }
+                }
+            }
+        }
+        if all.len() > 1100 { break; }
+    }
+    all.truncate(1000);
+    let path = std::env::var("BIG_OUT").unwrap();
+    std::fs::write(&path, format!("window.__BIG = {};", serde_json::to_string(&all).unwrap())).unwrap();
+    println!("wrote {} tracks, {} distinct covers", all.len(), all.iter().filter_map(|t| t.thumbnail.clone()).collect::<std::collections::HashSet<_>>().len());
+}

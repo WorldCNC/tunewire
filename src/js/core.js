@@ -107,9 +107,39 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/**
+ * The same picture at about `px` pixels. Covers are shown small almost
+ * everywhere; loading (and keeping decoded) 500–1200 px versions for a
+ * 48 px row was most of the app's memory.
+ */
+function imgUrl(url, px = 96) {
+  if (!url || typeof url !== 'string' || url.startsWith('data:')) return url;
+  if (/googleusercontent\.com|ggpht\.com/.test(url)) {
+    if (/=w\d+-h\d+/.test(url)) return url.replace(/=w\d+-h\d+[^/?#]*/, `=w${px}-h${px}-l90-rj`);
+    if (/=s\d+/.test(url)) return url.replace(/=s\d+[^/?#]*/, `=s${px}`);
+    return url;
+  }
+  if (/i\.ytimg\.com\/vi\//.test(url)) return url.replace(/\/(maxresdefault|sddefault|hqdefault|mqdefault|default)\.jpg/, px <= 320 ? '/mqdefault.jpg' : '/hqdefault.jpg');
+  if (/sndcdn\.com/.test(url)) return url.replace(/-(t\d+x\d+|large|original|crop|t500x500)\./, px <= 100 ? '-large.' : px <= 300 ? '-t300x300.' : '-t500x500.');
+  if (/i\.scdn\.co\/image\/ab67616d0000(b273|1e02|4851)/.test(url)) return url.replace(/ab67616d0000(b273|1e02|4851)/, px <= 80 ? 'ab67616d00004851' : px <= 300 ? 'ab67616d00001e02' : 'ab67616d0000b273');
+  return url;
+}
+
+/** A wide banner at about `w` pixels wide (keeps its shape). */
+function bannerUrl(url, w) {
+  const m = url && url.match(/=w(\d+)-h(\d+)/);
+  if (!m) return url;
+  const h2 = Math.round((Number(m[2]) / Number(m[1])) * w);
+  return url.replace(/=w\d+-h\d+/, `=w${w}-h${h2}`);
+}
+
 /** Tiny element builder: h('div', {class: 'x', onclick}, child, 'text'). */
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
+  if (tag === 'img' && attrs?.src) {
+    // Right-size covers; 'data-px' asks for a bigger one (headers, tiles).
+    attrs = { decoding: 'async', ...attrs, src: imgUrl(attrs.src, Number(attrs['data-px']) || 96) };
+  }
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
@@ -444,8 +474,19 @@ document.addEventListener('mouseup', (e) => {
 });
 
 // Surface unexpected frontend errors instead of failing silently.
-window.addEventListener('error', (e) => toast(`Something went wrong: ${e.message}`, 'error'));
-window.addEventListener('unhandledrejection', (e) => toast(`Something went wrong: ${errMsg(e.reason)}`, 'error'));
+// …and report them (Settings → Privacy can turn this off; the backend scrubs and rate-limits).
+const QUIET_KINDS = new Set(['network', 'timeout', 'cancelled', 'unavailable', 'region_locked', 'drm', 'empty_results', 'not_found', 'invalid', 'yt_dlp_missing']);
+function reportError(kind, message, details = '') {
+  try { invoke('report_error', { kind, message: String(message).slice(0, 2000), details: `${details}\nview: ${state.view}`.slice(0, 3000) }).catch(() => {}); } catch { /* never throw from here */ }
+}
+window.addEventListener('error', (e) => {
+  toast(`Something went wrong: ${e.message}`, 'error');
+  reportError('frontend', e.message, `${e.filename?.split('/').pop() || ''}:${e.lineno}:${e.colno}\n${e.error?.stack || ''}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  toast(`Something went wrong: ${errMsg(e.reason)}`, 'error');
+  if (!QUIET_KINDS.has(e.reason?.kind)) reportError('frontend', errMsg(e.reason), e.reason?.stack || JSON.stringify(e.reason || '').slice(0, 1500));
+});
 
 function panelOpen() {
   const app = $('#app');

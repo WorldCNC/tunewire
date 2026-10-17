@@ -60,8 +60,12 @@ fn api_blocking(token: &str, url: &str) -> AppResult<Value> {
                 return Ok(serde_json::from_str(&text)?);
             }
             Err(ureq::Error::StatusCode(429)) if attempt < 3 => std::thread::sleep(Duration::from_secs(2 << attempt)),
-            Err(ureq::Error::StatusCode(401)) => return Err(AppError::Unavailable("the Spotify login expired; log in again".into())),
-            Err(ureq::Error::StatusCode(c)) => return Err(AppError::Network(format!("Spotify returned HTTP {c}"))),
+            Err(ureq::Error::StatusCode(401)) => {
+                *TOKEN.lock().unwrap() = None;
+                return Err(AppError::Unavailable("the Spotify login expired; log in again".into()));
+            }
+            // Not "network": these mean the API changed or refused us (worth a report).
+            Err(ureq::Error::StatusCode(c)) => return Err(AppError::Extraction(format!("Spotify API {} returned HTTP {c}", url.split('?').next().unwrap_or("").trim_start_matches("https://api.spotify.com")))),
             Err(e) => return Err(AppError::Network(e.to_string())),
         }
     }
@@ -159,31 +163,97 @@ pub async fn spotify_liked() -> AppResult<Vec<Track>> {
     let mut next = Some("/me/tracks?limit=50".to_string());
     while let Some(url) = next.take() {
         let page = api(url).await?;
-        out.extend(page.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(|i| i.get("track")).filter_map(spotify_track));
+        out.extend(page.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(|i| i.get("item").filter(|v| v.is_object()).or_else(|| i.get("track"))).filter_map(spotify_track));
         next = page.get("next").and_then(Value::as_str).map(str::to_string);
     }
     Ok(out)
 }
 
-/// One playlist's songs (private ones too).
-pub async fn spotify_playlist(id: &str) -> AppResult<Vec<Track>> {
+/// All pages of a playlist listing at `first` (items carry "track" or "item").
+async fn playlist_pages(first: String) -> AppResult<Vec<Track>> {
     let mut out = Vec::new();
-    let mut next = Some(format!("/playlists/{id}/tracks?limit=100"));
+    let mut next = Some(first);
     while let Some(url) = next.take() {
-        let page = match api(url).await {
-            Ok(p) => p,
-            // Spotify's own editorial playlists are blocked for apps:
-            // fall back to the web player's anonymous listing.
-            Err(e) if out.is_empty() => {
-                let id = id.to_string();
-                return tauri::async_runtime::spawn_blocking(move || crate::spotify::fetch_playlist_full(&id).map(|(_, t)| t)).await.map_err(|_| e)?;
-            }
-            Err(e) => return Err(e),
-        };
-        out.extend(page.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(|i| i.get("track").or_else(|| i.get("item"))).filter_map(spotify_track));
+        let page = api(url).await?;
+        out.extend(page.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(|i| i.get("item").filter(|v| v.is_object()).or_else(|| i.get("track"))).filter_map(spotify_track));
         next = page.get("next").and_then(Value::as_str).map(str::to_string);
     }
     Ok(out)
+}
+
+/// One playlist's songs (private ones too). Spotify renamed the endpoint
+/// (/tracks → /items), so both are tried; then the web player's listing
+/// (public playlists, also covers Spotify's own editorial ones).
+pub async fn spotify_playlist(id: &str) -> AppResult<Vec<Track>> {
+    let mut last = None;
+    for path in [format!("/playlists/{id}/items?limit=100"), format!("/playlists/{id}/tracks?limit=100")] {
+        match playlist_pages(path).await {
+            Ok(t) if !t.is_empty() => return Ok(t),
+            Ok(_) => {}
+            Err(e @ AppError::Unavailable(_)) => return Err(e), // login expired
+            Err(e) => last = Some(e),
+        }
+    }
+    let pid = id.to_string();
+    match tauri::async_runtime::spawn_blocking(move || crate::spotify::fetch_playlist_full(&pid).map(|(_, t)| t)).await {
+        Ok(Ok(t)) => Ok(t),
+        _ => Err(last.unwrap_or(AppError::EmptyResults)),
+    }
+}
+
+/// Someone's public playlists (a profile link), with the user's login.
+pub async fn spotify_profile(user: &str) -> AppResult<(String, Vec<SpotifyPlaylistInfo>)> {
+    let profile = api(format!("/users/{user}")).await.ok();
+    let name = profile.as_ref().and_then(|p| p.get("display_name").and_then(Value::as_str)).unwrap_or(user).to_string();
+    let mut out = Vec::new();
+    let mut next = Some(format!("/users/{user}/playlists?limit=50"));
+    let mut failed = None;
+    while let Some(url) = next.take() {
+        match api(url).await {
+            Ok(page) => {
+                for p in page.get("items").and_then(Value::as_array).into_iter().flatten() {
+                    let Some(id) = p.get("id").and_then(Value::as_str) else { continue };
+                    out.push(SpotifyPlaylistInfo {
+                        id: id.to_string(),
+                        name: p.get("name").and_then(Value::as_str).unwrap_or("Playlist").to_string(),
+                        owner: p.pointer("/owner/display_name").and_then(Value::as_str).unwrap_or("").to_string(),
+                        total: p.pointer("/tracks/total").or_else(|| p.pointer("/items/total")).and_then(Value::as_u64).unwrap_or(0) as usize,
+                        thumbnail: image(p),
+                    });
+                }
+                next = page.get("next").and_then(Value::as_str).map(str::to_string);
+            }
+            Err(e) => failed = Some(e),
+        }
+    }
+    if out.is_empty() {
+        // The web player's profile view (works with a user login).
+        let t = token()?;
+        let u = user.to_string();
+        let v = tauri::async_runtime::spawn_blocking(move || -> AppResult<Value> {
+            let url = format!("https://spclient.wg.spotify.com/user-profile-view/v3/profile/{u}/playlists?offset=0&limit=200&market=from_token");
+            let mut r = crate::http::agent().get(&url).header("Authorization", &format!("Bearer {t}")).header("Accept", "application/json").header("App-Platform", "WebPlayer").call().map_err(|e| AppError::Extraction(format!("Spotify profile view: {e}")))?;
+            Ok(serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?)
+        })
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?;
+        match v {
+            Ok(v) => {
+                for p in v.get("public_playlists").and_then(Value::as_array).into_iter().flatten() {
+                    let Some(id) = p.get("uri").and_then(Value::as_str).and_then(|u| u.rsplit(':').next()) else { continue };
+                    out.push(SpotifyPlaylistInfo {
+                        id: id.to_string(),
+                        name: p.get("name").and_then(Value::as_str).unwrap_or("Playlist").to_string(),
+                        owner: p.get("owner_name").and_then(Value::as_str).unwrap_or("").to_string(),
+                        total: p.get("total_tracks").and_then(Value::as_u64).unwrap_or(0) as usize,
+                        thumbnail: p.get("image_url").and_then(Value::as_str).map(str::to_string),
+                    });
+                }
+            }
+            Err(e) => return Err(failed.unwrap_or(e)),
+        }
+    }
+    Ok((name, out))
 }
 
 // ---------------------------------------------------------------------------

@@ -62,9 +62,11 @@ function renderQueue() {
     frag.append(h('div', { class: 'q-section' }, 'Now playing'), row(items[current], current));
   }
   const upcoming = items.map((it, i) => [it, i]).filter(([, i]) => current == null || i > current);
-  if (upcoming.length) frag.append(h('div', { class: 'q-section' }, 'Next up'), ...upcoming.map(([it, i]) => row(it, i)));
+  // Long queues (a whole library) only show what's near: the next 100.
+  if (upcoming.length) frag.append(h('div', { class: 'q-section' }, 'Next up'), ...upcoming.slice(0, 100).map(([it, i]) => row(it, i)));
+  if (upcoming.length > 100) frag.append(h('div', { class: 'q-section' }, `and ${upcoming.length - 100} more`));
   const past = current != null ? items.slice(0, current).map((it, i) => [it, i]) : [];
-  if (past.length) frag.append(h('div', { class: 'q-section' }, 'Played'), ...past.map(([it, i]) => row(it, i)));
+  if (past.length) frag.append(h('div', { class: 'q-section' }, 'Played'), ...past.slice(-30).map(([it, i]) => row(it, i)));
   list.replaceChildren(frag);
   updateQueueIndicators();
   renderNowPlaying();

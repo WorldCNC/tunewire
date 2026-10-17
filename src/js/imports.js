@@ -167,7 +167,7 @@ async function openSpotifyImport() {
   });
 }
 
-function pickSpotify(lib, body, footer, m) {
+function pickSpotify(lib, body, footer, m, opts = {}) {
   const picked = new Set(lib.playlists.map((p) => p.id));
   let liked = lib.liked > 0;
   const likedCb = h('input', { type: 'checkbox', checked: liked, disabled: !lib.liked, onchange: (e) => { liked = e.target.checked; paint(); } });
@@ -175,8 +175,8 @@ function pickSpotify(lib, body, footer, m) {
   const go = h('button', { class: 'btn primary' });
   const paint = () => { go.textContent = `Import ${picked.size + (liked ? 1 : 0)}`; go.disabled = !picked.size && !liked; };
   body.replaceChildren(...[
-    h('p', {}, `Logged in as `, h('b', {}, lib.user), '. Choose what to bring over:'),
-    h('label', { class: 'import-row' }, likedCb, h('div', { class: 'lib-art liked', style: 'width:36px;height:36px', html: icon('heartFill') }), h('span', { class: 'name' }, 'Liked Songs'), h('span', { class: 'meta' }, `${lib.liked} songs → your Liked Songs`)),
+    opts.heading ? h('p', {}, opts.heading) : h('p', {}, `Logged in as `, h('b', {}, lib.user), '. Choose what to bring over:'),
+    lib.liked ? h('label', { class: 'import-row' }, likedCb, h('div', { class: 'lib-art liked', style: 'width:36px;height:36px', html: icon('heartFill') }), h('span', { class: 'name' }, 'Liked Songs'), h('span', { class: 'meta' }, `${lib.liked} songs → your Liked Songs`)) : null,
     lib.playlists.length ? h('label', { class: 'import-row', style: 'border-bottom:1px solid var(--panel-border)' }, all, h('span', { class: 'name', style: 'font-weight:700' }, `All playlists (${lib.playlists.length})`)) : null,
     h('div', { class: 'import-list' }, ...lib.playlists.map((p) => h('label', { class: 'import-row' },
       h('input', { type: 'checkbox', class: 'sp-pl', checked: true, onchange: (e) => { e.target.checked ? picked.add(p.id) : picked.delete(p.id); paint(); } }),
@@ -200,7 +200,7 @@ function pickSpotify(lib, body, footer, m) {
       const parts = [];
       if (r.liked) parts.push(`${r.liked} liked songs`);
       if (r.playlists) parts.push(`${r.playlists} playlist${r.playlists === 1 ? '' : 's'}`);
-      toast(`Imported ${parts.join(' and ') || 'nothing new'}. Songs are being matched for instant playback in the background.`, 'ok', 6000);
+      toast(`Imported ${parts.join(' and ') || 'nothing new'}.${r.missing ? ` ${r.missing} playlist${r.missing === 1 ? '' : 's'} couldn’t be read (Spotify refused it).` : ''} Songs are being matched for instant playback in the background.`, r.missing ? 'warn' : 'ok', 7000);
       await refreshPlaylists({ silent: true });
       if (r.first_id) openPlaylist(r.first_id);
       else if (r.liked) showView('favorites');

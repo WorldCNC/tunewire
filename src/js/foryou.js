@@ -26,8 +26,9 @@ function mixArt(covers, cls = 'mix-art') {
   const list = (covers || []).filter(Boolean);
   const box = h('div', { class: `${cls}${list.length < 4 ? ' single' : ' grid4'}` });
   if (!list.length) { box.innerHTML = icon('music'); return box; }
+  const px = cls.includes('hero-art') ? 500 : cls.includes('shortcut') ? 120 : 300;
   for (const url of list.length < 4 ? list.slice(0, 1) : list.slice(0, 4)) {
-    box.append(h('img', { src: url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
+    box.append(h('img', { src: url, 'data-px': list.length < 4 ? px : Math.round(px / 2), alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
   }
   return box;
 }
@@ -306,12 +307,12 @@ async function openWrapped(year) {
     { bg: palette[1], el: h('div', { class: 'w-slide' }, h('p', {}, 'This year you listened for'), big(fmtMinutes(s.minutes), 'count'), h('p', {}, 'minutes'),
       h('p', { class: 'w-sub' }, `That's ${(s.minutes / 1440).toFixed(1)} days of music, across ${s.days_active} days you pressed play.${peakMonth.minutes ? ` ${peakMonth.label} was your biggest month.` : ''}`)) },
     topA ? { bg: palette[2], img: topA.thumbnail, el: h('div', { class: 'w-slide' }, h('p', {}, 'Your top artist'),
-      topA.thumbnail ? h('img', { class: 'w-photo round', src: topA.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }) : null,
+      topA.thumbnail ? h('img', { class: 'w-photo round', 'data-px': 500, src: topA.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }) : null,
       big(topA.name), h('p', { class: 'w-sub' }, `${topA.plays} plays · ${fmtMinutes(topA.minutes)} minutes together`)) } : null,
     s.top_artists.length > 1 ? { bg: palette[3], el: h('div', { class: 'w-slide w-list' }, h('p', {}, 'Your top artists'),
       h('ol', {}, ...s.top_artists.slice(0, 5).map((a) => h('li', {}, a.thumbnail ? h('img', { src: a.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }) : h('span', { class: 'w-noimg' }), h('b', {}, a.name), h('em', {}, `${fmtMinutes(a.minutes)} min`))))) } : null,
     topT ? { bg: palette[4], img: topT.track.thumbnail, el: h('div', { class: 'w-slide' }, h('p', {}, 'Your song of the year'),
-      topT.track.thumbnail ? h('img', { class: 'w-photo', src: topT.track.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }) : null,
+      topT.track.thumbnail ? h('img', { class: 'w-photo', 'data-px': 500, src: topT.track.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }) : null,
       big(topT.track.title), h('p', {}, topT.track.artist), h('p', { class: 'w-sub' }, `You played it ${topT.plays} times.`),
       h('button', { class: 'btn primary w-play', html: `${icon('play')}Play it`, onclick: (e) => { e.stopPropagation(); playTrack(topT.track); } })) } : null,
     s.top_tracks.length > 1 ? { bg: palette[5], el: h('div', { class: 'w-slide w-list' }, h('p', {}, 'Your top songs'),

@@ -37,6 +37,7 @@ mod media;
 mod models;
 mod plugins;
 mod radio;
+mod report;
 mod search;
 mod secrets;
 mod soundcloud;
@@ -66,6 +67,11 @@ use tauri::{AppHandle, Manager, WindowEvent};
 
 use audio::AudioHandle;
 use commands::*;
+
+// Returns freed memory to the OS more readily than the system allocator with
+// our many short-lived threads (lower resident memory over long sessions).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use plugins::PluginStore;
 use search::SearchCache;
 use state::{AppState, NowPlaying, Phase, QueueState};
@@ -118,6 +124,7 @@ pub(crate) fn show_main(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    report::install_panic_hook();
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -261,6 +268,8 @@ pub fn run() {
             system::spotify_logout,
             system::spotify_account,
             system::list_output_devices,
+            system::report_error,
+            system::reports_available,
             system::ytdlp_install,
             discover::search_tracks,
             discover::load_playlist,
@@ -285,6 +294,7 @@ pub fn run() {
             commands::browse::artist_soundcloud,
             commands::browse::spotify_library_login,
             commands::browse::spotify_library_import,
+            commands::browse::spotify_profile_playlists,
             commands::browse::import_apple_music,
             commands::browse::import_rows,
             discover::apply_matches,
@@ -308,6 +318,7 @@ pub fn run() {
             commands::explore::mark_releases_seen,
             commands::explore::translate_lyrics,
             commands::explore::cover_color,
+            commands::explore::cover_wash,
             commands::explore::spotify_user_playlists,
             commands::explore::sync_playlist,
             commands::explore::background_image_data,

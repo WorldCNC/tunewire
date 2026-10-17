@@ -191,6 +191,11 @@ pub async fn cover_color(url: String) -> AppResult<Option<String>> {
     explore::cover_color(url).await
 }
 
+#[tauri::command]
+pub async fn cover_wash(url: String) -> AppResult<Option<String>> {
+    explore::cover_wash(url).await
+}
+
 // ---------------------------------------------------------------------------
 // Spotify profile import + playlist sync
 // ---------------------------------------------------------------------------

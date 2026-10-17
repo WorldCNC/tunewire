@@ -283,6 +283,53 @@ pub fn dominant_color(bytes: &[u8]) -> Option<String> {
     Some(format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
 }
 
+/// The ambient background: the cover shrunk to a soft, muted 24 px picture.
+/// Scaled up by the page it looks like a heavy blur, but costs no live
+/// blur filter (that was the GPU's biggest memory use).
+pub fn wash(bytes: &[u8]) -> Option<String> {
+    use base64::Engine;
+    let img = image::load_from_memory(bytes).ok()?;
+    let small = image::imageops::resize(&img.to_rgb8(), 24, 24, image::imageops::FilterType::Triangle);
+    let mut soft = image::imageops::blur(&small, 2.2);
+    for p in soft.pixels_mut() {
+        // Desaturate a little: a hint of the cover, not a poster.
+        let [r, g, b] = p.0.map(|c| c as f32);
+        let l = 0.3 * r + 0.59 * g + 0.11 * b;
+        p.0 = [r, g, b].map(|c| (l + (c - l) * 0.6).clamp(0.0, 255.0) as u8);
+    }
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgb8(soft).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+}
+
+static WASH_CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
+
+pub async fn cover_wash(url: String) -> AppResult<Option<String>> {
+    if !url.starts_with("https://") {
+        return Ok(None);
+    }
+    if let Some(hit) = WASH_CACHE.lock().unwrap().as_ref().and_then(|m| m.get(&url).cloned()) {
+        return Ok(hit);
+    }
+    let u = url.clone();
+    let out = blocking(move || {
+        let mut r = agent().get(&u).header("User-Agent", USER_AGENT).call().map_err(|e| AppError::Network(e.to_string()))?;
+        if !r.status().is_success() {
+            return Ok(None);
+        }
+        let bytes = r.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec().map_err(|e| AppError::Network(e.to_string()))?;
+        Ok(wash(&bytes))
+    })
+    .await?;
+    let mut cache = WASH_CACHE.lock().unwrap();
+    let m = cache.get_or_insert_with(Default::default);
+    if m.len() > 60 {
+        m.clear();
+    }
+    m.insert(url, out.clone());
+    Ok(out)
+}
+
 pub async fn cover_color(url: String) -> AppResult<Option<String>> {
     if !url.starts_with("https://") {
         return Ok(None);

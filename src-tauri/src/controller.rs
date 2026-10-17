@@ -277,6 +277,8 @@ pub fn spawn_play(app: &AppHandle, index: usize, auto: bool) {
             Ok(()) => st.consecutive_failures.store(0, Ordering::SeqCst),
             Err(AppError::Cancelled) => {}
             Err(e) => {
+                let what = st.queue.lock().unwrap().items.get(index).map(|i| format!("{} — {} [{}]", i.track.artist, i.track.title, i.track.versions.iter().map(|v| v.platform.label()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+                crate::report::report_app_error(&format!("playing {what}"), &e);
                 emit_status(&app, "error", e.to_string());
                 st.set_now(|n| {
                     n.phase = Phase::Error;
@@ -561,6 +563,7 @@ pub fn on_engine_event(app: &AppHandle, ev: EngineEvent) {
             if token != st.current_token.load(Ordering::SeqCst) {
                 return;
             }
+            crate::report::report_app_error("audio engine", &error);
             emit_status(app, "error", error.to_string());
             st.set_now(|n| {
                 n.phase = Phase::Error;

@@ -8,7 +8,20 @@ use crate::store::Settings;
 use crate::{localfiles, secrets, spotdl, ytdlp};
 
 /// Push settings into the running subsystems (engine, Discord, spotDL, yt-dlp).
+/// An error from the page (uncaught exception, failed action).
+#[tauri::command]
+pub fn report_error(kind: String, message: String, details: Option<String>) {
+    crate::report::report(&kind.chars().take(20).collect::<String>(), &message.chars().take(2000).collect::<String>(), &details.unwrap_or_default().chars().take(3000).collect::<String>());
+}
+
+/// Whether error reports can be sent (a webhook was built in).
+#[tauri::command]
+pub fn reports_available() -> bool {
+    crate::report::available()
+}
+
 pub fn apply_settings(st: &AppState, s: &Settings) {
+    crate::report::set_enabled(s.error_reports);
     st.audio.set_volume(s.volume);
     st.audio.set_eq(s.eq_enabled, &s.eq_gains);
     st.audio.set_device(&s.output_device);

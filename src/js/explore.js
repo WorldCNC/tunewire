@@ -246,7 +246,7 @@ async function updateCoverAccent(thumb) {
   if (accentFor === thumb) return;
   accentFor = thumb;
   let color = null;
-  try { color = await call('cover_color', { url: thumb }); } catch { /* keep theme accent */ }
+  try { color = await call('cover_color', { url: imgUrl(thumb, 120) }); } catch { /* keep theme accent */ }
   if (accentFor !== thumb) return;
   if (!color) { $('#accent-css').textContent = ''; return; }
   const v = accentVars(color);
@@ -342,45 +342,25 @@ async function startRadio(track) {
 
 // Spotify profile import ------------------------------------------------------------
 
+/** Someone's public playlists from a profile link (uses the Spotify login). */
 async function importSpotifyProfile() {
-  const url = await promptModal({ title: 'Import from a Spotify profile', label: 'Paste a profile link (Spotify → profile → ⋯ → Share → Copy link to profile). Only public playlists are visible.', placeholder: 'https://open.spotify.com/user/…', okLabel: 'Find playlists' });
+  const url = await promptModal({ title: 'Import someone’s Spotify playlists', label: 'Paste a profile link (Spotify → profile → ⋯ → Share → Copy link to profile). You’ll log in to Spotify once if you haven’t yet.', placeholder: 'https://open.spotify.com/user/…', okLabel: 'Find playlists' });
   if (!url) return;
-  let lists;
+  const body = h('div', { class: 'import-box' }, h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Connecting to Spotify… (log in in your browser if it opens)'));
+  const footer = h('div', { class: 'actions' });
+  const m = openModal({ title: 'Import from a Spotify profile', wide: true, body, footer: [footer] });
+  footer.replaceChildren(h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'));
   try {
-    toast('Looking up playlists…', 'info', 1500);
-    lists = await call('spotify_user_playlists', { url });
+    await call('spotify_library_login');
+    if (!body.isConnected) return;
+    body.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Looking up playlists…'));
+    const prof = await call('spotify_profile_playlists', { url });
+    if (!body.isConnected) return;
+    if (!prof.playlists.length) { body.replaceChildren(h('p', {}, `${prof.name} has no public playlists.`)); return; }
+    pickSpotify({ user: prof.name, liked: 0, playlists: prof.playlists }, body, footer, m, { heading: `${prof.name}’s public playlists. Choose what to bring over:` });
   } catch (e) {
-    toast(errMsg(e), 'error', 8000);
-    if (/Settings → Spotify/.test(errMsg(e))) showView('settings');
-    return;
+    if (body.isConnected) body.replaceChildren(h('p', { class: 'muted' }, errMsg(e)));
   }
-  if (!lists.length) { toast('No public playlists on that profile', 'warn'); return; }
-  const picked = new Set(lists.map((_, i) => i));
-  const rows = lists.map((p, i) => {
-    const cb = h('input', { type: 'checkbox', checked: true, onchange: (e) => (e.target.checked ? picked.add(i) : picked.delete(i)) });
-    return h('label', { class: 'import-row' }, cb, thumbEl(p.thumbnail, 'thumb'), h('span', { class: 'name' }, p.name), h('span', { class: 'meta' }, `${p.tracks} songs`));
-  });
-  const m = openModal({
-    title: `Import ${lists.length} playlists`,
-    subtitle: 'They become your own playlists. Use Sync on a playlist later to pull in changes.',
-    wide: true,
-    body: h('div', { class: 'import-list' }, ...rows),
-    footer: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async (e) => {
-      e.target.disabled = true;
-      const chosen = lists.filter((_, i) => picked.has(i));
-      let done = 0;
-      for (const p of chosen) {
-        e.target.textContent = `Importing ${done + 1}/${chosen.length}…`;
-        try {
-          const pl = await call('load_playlist', { url: p.url });
-          await call('create_playlist', { name: p.name, tracks: pl.tracks, sourceUrl: p.url });
-          done++;
-        } catch (err) { toast(`${p.name}: ${errMsg(err)}`, 'error'); }
-      }
-      m.close();
-      toast(`Imported ${done} playlist${done === 1 ? '' : 's'}`, 'ok');
-    } }, 'Import selected')],
-  });
 }
 
 async function syncPlaylist(id, btn) {
@@ -431,11 +411,13 @@ async function updateAmbient() {
   const thumb = p?.version?.thumbnail || p?.current?.track?.thumbnail;
   if (!thumb) return setAmbientLayer(null);
   if (mode === 'art') {
-    const big = thumb.replace('/mqdefault.jpg', '/hqdefault.jpg').replace('-t300x300.', '-t500x500.');
-    return setAmbientLayer(`url("${big.replace(/"/g, '%22')}")`);
+    // A tiny pre-blurred picture made by the backend: no live blur filter.
+    const wash = await call('cover_wash', { url: imgUrl(thumb, 120) }).catch(() => null);
+    if (seq !== ambient.seq) return;
+    return setAmbientLayer(wash ? `url("${wash}")` : null);
   }
   // tint: two soft pools of the cover's main color.
-  const color = await call('cover_color', { url: thumb }).catch(() => null);
+  const color = await call('cover_color', { url: imgUrl(thumb, 120) }).catch(() => null);
   if (seq !== ambient.seq) return;
   setAmbientLayer(color ? `radial-gradient(55% 55% at 20% 15%, ${color}, transparent 72%), radial-gradient(50% 60% at 85% 85%, ${color}99, transparent 72%)` : null);
 }

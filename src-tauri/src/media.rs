@@ -29,7 +29,10 @@ pub fn init(app: &tauri::App) {
     #[cfg(not(target_os = "windows"))]
     let hwnd = None;
 
-    let config = PlatformConfig { display_name: "Tunewire", dbus_name: "tunewire", hwnd };
+    // A unique bus name per process: a second Tunewire window must not crash
+    // because the first one already owns "tunewire".
+    let dbus_name = format!("tunewire.instance{}", std::process::id());
+    let config = PlatformConfig { display_name: "Tunewire", dbus_name: &dbus_name, hwnd };
     let mut controls = match MediaControls::new(config) {
         Ok(c) => c,
         Err(e) => {

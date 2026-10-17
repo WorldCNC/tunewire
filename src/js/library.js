@@ -24,11 +24,12 @@ function openPlaylist(id, { push = true } = {}) {
 function coverArt(tracks, cls, custom) {
   const box = h('div', { class: cls });
   if (custom) { box.append(h('img', { src: custom, alt: '' })); return box; }
+  const big = cls.includes('hero-art') ? 500 : cls.includes('lib-art') ? 96 : 160;
   const thumbs = [...new Set(tracks.map((t) => t.thumbnail).filter(Boolean))].slice(0, 4);
   if (!thumbs.length) { box.innerHTML = icon('music'); return box; }
   if (thumbs.length >= 4) box.classList.add('grid4');
   for (const t of thumbs.length >= 4 ? thumbs : thumbs.slice(0, 1)) {
-    box.append(h('img', { src: t, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
+    box.append(h('img', { src: t, 'data-px': thumbs.length >= 4 ? Math.round(big / 2) : big, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
   }
   return box;
 }
@@ -279,7 +280,7 @@ async function heroColor(el, thumb, seqCheck) {
   el.dataset.heroFor = thumb || '';
   if (!thumb) return;
   try {
-    const c = await call('cover_color', { url: thumb });
+    const c = await call('cover_color', { url: imgUrl(thumb, 120) });
     if (c) heroColors.set(thumb, c);
     if (c && (!seqCheck || seqCheck())) el.style.setProperty('--hero', c);
   } catch { /* keep gray */ }
@@ -372,14 +373,15 @@ function renderCollection(container, o) {
     }
     tableHead(head, { added: !!o.added, albumLabel: o.noAlbum ? '' : 'Album', sort: s, onSort: (key) => { ps.sort = ps.sort?.key === key ? (ps.sort.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }; renderRows(); } });
     const shown = idx.map(([t]) => t);
-    list.replaceChildren(...idx.map(([t, i], n) => trackRow(t, n, {
+    const row = ([t, i], n) => trackRow(t, n, {
       index: i,
       onPlay: () => playCollection(shown, n, o.id),
       added: o.added ? (o.added[t.key] || o.created || 0) : undefined,
       noCover: o.noCover,
       noAlbum: o.noAlbum,
       extraMenu: o.rowMenu ? o.rowMenu(t, i) : [],
-    })));
+    });
+    renderChunked(list, idx, row, view);
     // Reordering only makes sense in the playlist's own order.
     list._ctx = { removeMany: o.removeMany || null, removeLabel: o.removeLabel, reorder: !q && !s ? o.reorder || null : null };
     if (!idx.length && tracks.length) list.append(h('div', { class: 'empty' }, h('p', {}, `Nothing matches “${ps.query}”.`)));
@@ -398,6 +400,31 @@ function renderCollection(container, o) {
   if (firstShow && tracks[0] && !state.settings?.shuffle) prefetchTrack(tracks[0]);
   heroColor(view.querySelector('.hero')?.parentElement || container, o.cover || tracks.find((t) => t.thumbnail)?.thumbnail);
   return { list, renderRows };
+}
+
+/**
+ * Rows for `items`, CHUNK at a time: the next batch renders when the end of
+ * the list scrolls into view. A 3000-song library no longer builds 3000 rows
+ * (and decodes 3000 covers) just to show the first 15.
+ */
+const CHUNK = 80;
+function renderChunked(list, items, makeRow, root) {
+  list._chunkIo?.disconnect();
+  let n = Math.min(CHUNK, items.length);
+  list.replaceChildren(...items.slice(0, n).map((it, k) => makeRow(it, k)));
+  if (n >= items.length) return;
+  const sentinel = h('div', { class: 'chunk-sentinel' });
+  list.append(sentinel);
+  const io = new IntersectionObserver((entries) => {
+    if (!entries.some((e) => e.isIntersecting)) return;
+    const next = items.slice(n, n + CHUNK).map((it, k) => makeRow(it, n + k));
+    n += next.length;
+    sentinel.before(...next);
+    markPlaying();
+    if (n >= items.length) { io.disconnect(); sentinel.remove(); }
+  }, { root, rootMargin: '800px 0px' });
+  io.observe(sentinel);
+  list._chunkIo = io;
 }
 
 function isPlayingFrom(id) {
@@ -588,6 +615,7 @@ function recommendSection(pl, remote) {
   let rs = recState.get(id);
   if (!rs || rs.src !== tracks.length) {
     rs = { nonce: rs?.nonce || 1, list: null, loading: false, error: null, src: tracks.length, added: new Set(rs?.added || []) };
+    if (recState.size > 20) recState.delete(recState.keys().next().value);
     recState.set(id, rs);
   }
   const refresh = () => { rs.nonce++; rs.list = null; load(); };

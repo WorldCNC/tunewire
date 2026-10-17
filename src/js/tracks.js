@@ -241,7 +241,7 @@ function openRowMenu(row, anchor, ev) {
 const sel = { list: null, anchor: null };
 
 function listRows(list) {
-  return list ? [...list.children].filter((r) => r.classList?.contains('track') && r._track) : [];
+  return list ? [...list.children].filter((r) => r._track) : [];
 }
 function selectedRows() {
   return listRows(sel.list).filter((r) => r.classList.contains('selected'));

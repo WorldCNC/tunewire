@@ -143,6 +143,8 @@ function renderSettings() {
       settingToggle('Rich Presence', 'Shows the current song, artist, cover and progress on your Discord profile while the desktop client is running.', 'discord_rpc'),
       settingToggle('Link button', 'Adds an “Open on YouTube Music” (or SoundCloud, …) button to the status.', 'discord_buttons'),
       settingRow('Application ID', 'Discord shows this application’s name as the activity. To show “Tunewire”, create an application with that name at <code>discord.com/developers</code> and paste its ID.', clientId)),
+    group('Privacy', null,
+      settingToggle('Send error reports', 'When something breaks, Tunewire sends the developer a short report (app version, operating system and the error) so it can be fixed. Your folder paths and stream links are removed first; nothing about your library is sent.', 'error_reports')),
     group('Tools', null,
       updateSettingsRow(),
       settingRow('yt-dlp', `${esc($('#health').title || '')}<br><code>${esc(state.ytdlpPath || '')}</code>`, recheck(checkHealth)),

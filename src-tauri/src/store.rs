@@ -86,6 +86,8 @@ pub struct Settings {
     pub shuffle: bool,
     /// Show every source's icon on song rows (otherwise only on hover).
     pub show_sources: bool,
+    /// Send automatic error reports to the developer.
+    pub error_reports: bool,
 }
 
 impl Default for Settings {
@@ -128,6 +130,7 @@ impl Default for Settings {
             background_image: String::new(),
             shuffle: false,
             show_sources: false,
+            error_reports: true,
         }
     }
 }

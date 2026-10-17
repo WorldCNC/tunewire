@@ -119,7 +119,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   if (scBox) sections.push(scBox);
   if (a.description || a.audience) {
     const about = h('div', { class: 'about-card' }, h('div', {}, h('div', { class: 'about-aud' }, a.audience || ''), a.description ? h('p', {}, a.description) : null));
-    if (art) about.style.backgroundImage = `url("${art.replace(/"/g, '%22')}")`;
+    if (art) about.style.backgroundImage = `url("${bannerUrl(art, 900).replace(/"/g, '%22')}")`;
     about.addEventListener('click', () => openModal({ title: a.name, subtitle: a.audience, wide: true, body: h('p', { style: 'white-space:pre-wrap;line-height:1.6' }, a.description || '') }));
     sections.push(h('div', {}, h('div', { class: 'section-title' }, 'About'), about));
   }
@@ -175,7 +175,7 @@ function albumGrid(albums) {
 
 function setArt(el, url) {
   const play = el.querySelector('.tile-play');
-  el.replaceChildren(h('img', { src: url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); el.prepend(...h('div', { html: icon('disc') }).childNodes); } }));
+  el.replaceChildren(h('img', { src: url, 'data-px': 300, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); el.prepend(...h('div', { html: icon('disc') }).childNodes); } }));
   if (play) el.append(play);
 }
 
@@ -217,7 +217,7 @@ async function openAlbum(target, title = 'Album', { push = true } = {}) {
   if (seq !== albumSeq) return;
   const isAlbum = c.browse_id.startsWith('MPRE') || (!c.browse_id && c.kind !== 'Playlist');
   const art = h('div', { class: 'hero-art' });
-  if (c.cover) art.append(h('img', { src: c.cover, alt: '', referrerpolicy: 'no-referrer' }));
+  if (c.cover) art.append(h('img', { src: c.cover, 'data-px': 500, alt: '', referrerpolicy: 'no-referrer' }));
   else art.innerHTML = icon('disc');
   const line = [];
   if (c.artist) line.push(c.artist_browse ? h('button', { onclick: () => openArtist(c.artist, null, { browseId: c.artist_browse }) }, c.artist) : h('b', {}, c.artist));

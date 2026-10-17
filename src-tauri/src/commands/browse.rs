@@ -85,7 +85,33 @@ pub async fn artist_soundcloud(url: String, name: String) -> AppResult<Vec<Track
 
 #[tauri::command]
 pub async fn spotify_library_login() -> AppResult<SpotifyLibrary> {
-    imports::spotify_login().await
+    imports::spotify_login().await.inspect_err(|e| crate::report::report_app_error("Spotify library login", e))
+}
+
+#[derive(Serialize)]
+pub struct SpotifyProfile {
+    pub name: String,
+    pub playlists: Vec<imports::SpotifyPlaylistInfo>,
+}
+
+/// Someone's public playlists from their profile link (needs the login above).
+#[tauri::command]
+pub async fn spotify_profile_playlists(url: String) -> AppResult<SpotifyProfile> {
+    let user = url
+        .trim()
+        .trim_start_matches("spotify:user:")
+        .split("/user/")
+        .last()
+        .unwrap_or("")
+        .split(['?', '/', '#'])
+        .next()
+        .unwrap_or("")
+        .to_string();
+    if user.is_empty() || user.contains(':') {
+        return Err(AppError::Invalid("paste a Spotify profile link (open.spotify.com/user/…)".into()));
+    }
+    let (name, playlists) = imports::spotify_profile(&user).await.inspect_err(|e| crate::report::report_app_error("Spotify profile import", e))?;
+    Ok(SpotifyProfile { name, playlists })
 }
 
 #[derive(Serialize)]
@@ -115,7 +141,7 @@ pub async fn spotify_library_import(app: AppHandle, st: State<'_, AppState>, lik
     };
     if liked {
         progress(step, "Liked Songs");
-        let tracks = imports::spotify_liked().await?;
+        let tracks = imports::spotify_liked().await.inspect_err(|e| crate::report::report_app_error("Spotify liked songs import", e))?;
         let added = st.store.update_library(|lib| {
             let mut n = 0;
             for t in tracks {
@@ -140,7 +166,10 @@ pub async fn spotify_library_import(app: AppHandle, st: State<'_, AppState>, lik
                 sum.playlists += 1;
             }
             Ok(_) => {}
-            Err(_) => sum.missing += 1,
+            Err(e) => {
+                crate::report::report_app_error("Spotify playlist import", &e);
+                sum.missing += 1;
+            }
         }
         step += 1;
     }

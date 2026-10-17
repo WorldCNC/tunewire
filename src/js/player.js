@@ -22,7 +22,7 @@ function renderPlayback() {
     cover.dataset.src = thumb || '';
     $('#player-bar').style.setProperty('--np-art', thumb ? `url("${thumb.replace(/"/g, '%22')}")` : 'none');
     cover.innerHTML = thumb ? '' : icon('music');
-    if (thumb) cover.append(h('img', { src: thumb, alt: '', onerror: (e) => { e.target.remove(); cover.innerHTML = icon('music'); } }));
+    if (thumb) cover.append(h('img', { src: thumb, 'data-px': 120, alt: '', onerror: (e) => { e.target.remove(); cover.innerHTML = icon('music'); } }));
     updateCoverAccent(thumb);
     updateAmbient();
     if (fullLyrics.open) renderFullLyrics();

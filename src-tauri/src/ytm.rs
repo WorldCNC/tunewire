@@ -49,25 +49,35 @@ fn post_blocking_to(origin: &str, client: &str, version: &str, endpoint: &str, e
     Ok(serde_json::from_str(&text)?)
 }
 
-static CACHE: Mutex<Option<HashMap<String, (Instant, Value)>>> = Mutex::new(None);
+/// Responses kept as compact JSON text (a parsed `Value` is several times
+/// bigger), at most CACHE_MAX of them.
+static CACHE: Mutex<Option<HashMap<String, (Instant, std::sync::Arc<str>)>>> = Mutex::new(None);
 const TTL: Duration = Duration::from_secs(20 * 60);
+const CACHE_MAX: usize = 40;
 
 /// POST with a 20-minute response cache (pages are revisited a lot).
 async fn post(endpoint: &str, extra: Value) -> AppResult<Value> {
     let key = format!("{endpoint}|{extra}");
-    if let Some((at, v)) = CACHE.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned()) {
+    let hit = CACHE.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned());
+    if let Some((at, text)) = hit {
         if at.elapsed() < TTL {
-            return Ok(v);
+            return Ok(serde_json::from_str(&text)?);
         }
     }
     let ep = endpoint.to_string();
     let v = tauri::async_runtime::spawn_blocking(move || post_blocking(&ep, extra)).await.map_err(|e| AppError::Network(e.to_string()))??;
+    let text: std::sync::Arc<str> = serde_json::to_string(&v)?.into();
     let mut g = CACHE.lock().unwrap();
     let m = g.get_or_insert_with(HashMap::new);
-    if m.len() > 300 {
-        m.retain(|_, (at, _)| at.elapsed() < TTL);
+    m.retain(|_, (at, _)| at.elapsed() < TTL);
+    while m.len() >= CACHE_MAX {
+        let oldest = m.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone());
+        match oldest {
+            Some(k) => m.remove(&k),
+            None => break,
+        };
     }
-    m.insert(key, (Instant::now(), v.clone()));
+    m.insert(key, (Instant::now(), text));
     Ok(v)
 }
 

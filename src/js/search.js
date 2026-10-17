@@ -168,7 +168,7 @@ function cardSub(c) {
 /** A tile: cover, title, subtitle and a play button on hover. */
 function cardTile(c, i = 0) {
   const art = h('div', { class: 'tile-art' });
-  if (c.thumbnail) art.append(h('img', { src: c.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); art.innerHTML = icon(c.kind === 'artist' ? 'user' : 'disc'); } }));
+  if (c.thumbnail) art.append(h('img', { src: c.thumbnail, 'data-px': 300, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); art.innerHTML = icon(c.kind === 'artist' ? 'user' : 'disc'); } }));
   else art.innerHTML = icon(c.kind === 'artist' ? 'user' : 'disc');
   art.append(h('button', { class: 'tile-play', title: `Play ${c.title}`, html: icon('play'), onclick: (e) => { e.stopPropagation(); playCard(c); } }));
   const tile = h('div', { class: `tile${c.kind === 'artist' ? ' round' : ''}`, style: `--i:${i}`, role: 'button', tabindex: '0', title: c.title },
@@ -194,7 +194,7 @@ function renderSearchAll() {
   else if (x.top) {
     const c = x.top;
     const art = h('div', { class: `tc-art${c.kind === 'artist' ? ' round' : ''}` });
-    if (c.thumbnail) art.append(h('img', { src: c.thumbnail, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
+    if (c.thumbnail) art.append(h('img', { src: c.thumbnail, 'data-px': 200, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
     topEl = h('div', { class: 'top-card', role: 'button', tabindex: '0' }, art,
       h('div', { class: 'tc-title' }, c.title),
       h('div', { class: 'tc-sub' }, h('span', { class: 'tc-kind' }, c.kind[0].toUpperCase() + c.kind.slice(1)), c.kind === 'artist' ? null : h('span', {}, c.subtitle.split(' • ').slice(1, 2).join(''))),
@@ -272,7 +272,7 @@ async function renderHero() {
   const grid = h('div', { class: 'browse-grid' }, ...tiles.map((m, i) => {
     const tile = h('button', { class: 'browse-tile', style: `--c:${saturate(m.color)};--i:${i}`, onclick: () => openMood(m) }, h('span', {}, m.title));
     const img = moodArt.get(m.params);
-    if (img) tile.append(h('img', { src: img, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
+    if (img) tile.append(h('img', { src: img, 'data-px': 160, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
     tile._mood = m;
     return tile;
   }));
@@ -292,7 +292,7 @@ async function fillMoodArt(grid) {
         const url = shelves.flatMap((s) => s.cards).find((c) => c.thumbnail)?.thumbnail;
         if (!url) continue;
         moodArt.set(tile._mood.params, url);
-        if (tile.isConnected && !tile.querySelector('img')) tile.append(h('img', { src: url, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
+        if (tile.isConnected && !tile.querySelector('img')) tile.append(h('img', { src: url, 'data-px': 160, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
       } catch { /* leave it plain */ }
     }
   };

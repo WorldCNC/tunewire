@@ -1256,3 +1256,21 @@ body.dragging-tracks .track:hover { background: transparent; }
 .top-songs .track { grid-template-columns: 28px minmax(0, 1fr) 52px 32px; gap: 10px; padding: 0 10px; }
 .top-songs .t-like { display: none; }
 @media (max-width: 1380px) { .search-top { grid-template-columns: 1fr; } .top-card { min-height: 0; flex-direction: row; align-items: center; } .top-card .tc-title { font-size: 28px; } }
+
+/* ---- Lighter rendering: less GPU memory, no end-of-animation flicker ----
+   The background is a tiny pre-blurred picture scaled up (no live blur),
+   and entrance animations only fade: moving elements get their own GPU
+   layer, and dropping it when the animation ends redraws the text (flicker). */
+.amb-layer { filter: brightness(.62) !important; transform: none !important; inset: 0 !important; transition: opacity 1.2s ease !important; image-rendering: auto; }
+:root[data-mode="light"] .amb-layer { filter: brightness(1.12) !important; }
+#ambient.image .amb-layer { filter: blur(10px) saturate(.8) brightness(.7) !important; inset: -3% !important; }
+@keyframes tw-rise { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tw-pop { from { opacity: 0; } to { opacity: 1; } }
+.album-card:hover, .tile:hover, .mix-tile:hover .mix-cover, .wrapped-card:hover, .top-artist:hover .ta-img, .browse-tile:hover { transform: none; }
+.btn:hover, .btn.primary:hover, .tb-nav:hover, .tb-btn:hover, .tb-home:hover, .ab-icon:hover, .ab-follow:hover, .lib-plus:hover { transform: none; }
+.big-play:hover, .tile-play:hover, .play-btn:hover { transform: none !important; filter: brightness(1.1); }
+.btn:active, .icon-btn:active, .pdot:active, .big-play:active, .play-btn:active { transform: none; opacity: .8; }
+.tile-play { transform: none; }
+.tile:hover .tile-play { transform: none; }
+.mix-play { transform: none; }
+.selection-bar { animation: tw-fade .15s ease; }

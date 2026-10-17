@@ -38,16 +38,35 @@ class Log:
     def info(self, m): pass
     def warning(self, m): pass
     def error(self, m): self.errors.append(m)
+# Reuse YoutubeDL instances (per option set): their HTTP connections stay
+# open, so a song doesn't pay for fresh TLS handshakes every time.
+pools = {}
+plock = threading.Lock()
+def take(key, opts):
+    with plock:
+        free = pools.setdefault(key, [])
+        if free:
+            return free.pop()
+    return yt_dlp.YoutubeDL(opts)
+def give(key, y):
+    with plock:
+        free = pools.setdefault(key, [])
+        if len(free) < 4:
+            free.append(y)
 def handle(req):
     log = Log()
     opts = dict(req.get("opts") or {})
+    key = json.dumps(opts, sort_keys=True)
     opts.update(quiet=True, no_warnings=True, noprogress=True, logger=log)
+    y = take(key, opts)
+    y.params["logger"] = log
     try:
-        with yt_dlp.YoutubeDL(opts) as y:
-            info = y.extract_info(req["url"], download=False)
-            out({"id": req["id"], "ok": y.sanitize_info(info)})
+        info = y.extract_info(req["url"], download=False)
+        out({"id": req["id"], "ok": y.sanitize_info(info)})
     except BaseException as e:
         out({"id": req["id"], "err": "\n".join(log.errors) or ("ERROR: " + str(e))})
+    finally:
+        give(key, y)
 out({"id": 0, "ready": yt_dlp.version.__version__})
 for line in sys.stdin:
     try:

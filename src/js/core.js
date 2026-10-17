@@ -380,6 +380,9 @@ function showView(name, { push = true, reopen = null } = {}) {
   }
   curRoute = { view: name, reopen };
   state.view = name;
+  // A page opened again from navigation animates its rows again.
+  const viewEl = $(`#view-${name}`);
+  viewEl?.querySelectorAll(':scope > div').forEach((d) => { d._shownId = null; });
   for (const v of $$('.view')) v.classList.toggle('active', v.id === `view-${name}`);
   for (const n of $$('.nav-item[data-view]')) n.classList.toggle('active', n.dataset.view === name);
   if (name !== 'plugin-panel') for (const n of $$('#plugin-nav .nav-item')) n.classList.remove('active');

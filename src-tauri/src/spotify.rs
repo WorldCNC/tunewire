@@ -175,6 +175,11 @@ fn get_text(url: &str) -> AppResult<String> {
 }
 
 /// Anonymous access token embedded in any embed page (cached until expiry).
+/// Fetch the anonymous token ahead of the first search.
+pub fn warm() {
+    let _ = token(false);
+}
+
 fn token(force: bool) -> AppResult<String> {
     if !force {
         if let Some((t, exp)) = TOKEN.lock().unwrap().as_ref() {

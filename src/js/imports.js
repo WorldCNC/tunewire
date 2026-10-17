@@ -10,7 +10,7 @@ listen('import-progress', (e) => importUi.progress?.(e.payload));
 
 function openImport() {
   const status = h('div', { class: 'import-status meta' });
-  const linkInput = h('input', { class: 'input', placeholder: 'https://open.spotify.com/playlist/…  ·  music.apple.com/…  ·  YouTube / SoundCloud link', spellcheck: 'false', style: 'flex:1' });
+  const linkInput = h('input', { class: 'input', placeholder: 'Paste a Spotify, Apple Music, YouTube or SoundCloud link', spellcheck: 'false' });
   const linkBtn = h('button', { class: 'btn primary' }, 'Import');
   const file = h('input', { type: 'file', accept: '.csv,text/csv,.tsv,.txt', hidden: true });
   const m = openModal({
@@ -27,7 +27,7 @@ function openImport() {
         h('div', {}, h('b', {}, 'Someone’s public Spotify playlists'), h('span', {}, 'Paste a Spotify profile link.')),
         h('span', { html: icon('chevRight') })),
       h('div', { class: 'import-label' }, 'A playlist or album link'),
-      h('div', { style: 'display:flex;gap:8px' }, linkInput, linkBtn),
+      h('div', { class: 'import-link' }, linkInput, linkBtn),
       h('div', { class: 'import-label' }, 'A CSV file'),
       h('button', { class: 'import-option', onclick: () => file.click() },
         h('span', { class: 'src-ico', html: icon('upload') }),

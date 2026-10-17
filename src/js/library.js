@@ -271,11 +271,16 @@ function editPlaylistDetails(pl) {
 // Collection pages (playlist, album, liked, mix) -----------------------------------
 
 /** Pick a header color from the cover (falls back to a neutral gray). */
+const heroColors = new Map();
 async function heroColor(el, thumb, seqCheck) {
-  el.style.setProperty('--hero', '#4a4a4a');
+  // Known color: set it right away (re-renders must not flash gray).
+  if (heroColors.has(thumb)) { el.style.setProperty('--hero', heroColors.get(thumb)); return; }
+  if (el.dataset.heroFor !== (thumb || '')) el.style.setProperty('--hero', '#4a4a4a');
+  el.dataset.heroFor = thumb || '';
   if (!thumb) return;
   try {
     const c = await call('cover_color', { url: thumb });
+    if (c) heroColors.set(thumb, c);
     if (c && (!seqCheck || seqCheck())) el.style.setProperty('--hero', c);
   } catch { /* keep gray */ }
 }
@@ -309,6 +314,9 @@ const pageState = new Map(); // per page: { query, sort }
 function renderCollection(container, o) {
   const view = container.closest('.view');
   const ps = pageState.get(o.id) || { query: '', sort: null };
+  // Animate rows only when the page is opened, not when it re-renders.
+  const firstShow = container._shownId !== o.id;
+  container._shownId = o.id;
   pageState.set(o.id, ps);
   const tracks = o.tracks;
   const total = tracks.reduce((s, t) => s + (t.duration || 0), 0);
@@ -352,7 +360,7 @@ function renderCollection(container, o) {
     tracks.length > 1 ? sortBtn : null);
 
   const head = h('div', { class: 'table-head' });
-  const list = h('div', { class: 'track-list stagger' });
+  const list = h('div', { class: `track-list${firstShow ? ' stagger' : ''}` });
   const renderRows = () => {
     let idx = tracks.map((t, i) => [t, i]);
     const q = ps.query.trim().toLowerCase();
@@ -386,6 +394,8 @@ function renderCollection(container, o) {
   else children.push(o.empty || h('div', { class: 'empty' }, h('p', {}, 'Nothing here yet.')));
   if (o.after) children.push(o.after);
   container.replaceChildren(...children);
+  // The likely first click: resolve its stream now.
+  if (firstShow && tracks[0] && !state.settings?.shuffle) prefetchTrack(tracks[0]);
   heroColor(view.querySelector('.hero')?.parentElement || container, o.cover || tracks.find((t) => t.thumbnail)?.thumbnail);
   return { list, renderRows };
 }
@@ -425,7 +435,7 @@ function renderPlaylistDetail() {
       renderPlaylistDetail();
     } });
     if (tracks.length > 2) actions.push(smartBtn);
-    actions.push(h('button', { class: 'ab-icon', title: 'Download', html: icon('download'), onclick: () => downloadTracks(tracks) }));
+    actions.push(downloadRing(tracks));
   } else {
     actions.push(h('button', { class: 'ab-follow', onclick: async () => {
       try {
@@ -499,7 +509,7 @@ function renderFavorites() {
     tracks: state.favorites,
     art: h('div', { class: 'hero-art liked', html: icon('heartFill') }),
     line: [h('b', {}, 'You')],
-    actions: [h('button', { class: 'ab-icon', title: 'Download', html: icon('download'), onclick: () => downloadTracks(state.favorites) })],
+    actions: [downloadRing(state.favorites)],
     removeMany: async (indices) => { await likeMany(indices.map((i) => state.favorites[i]), false); clearSelection(); },
     removeLabel: 'Remove from Liked Songs',
     status: matchStatus(state.favorites),

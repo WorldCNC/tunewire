@@ -193,7 +193,7 @@
     ytm_collection: async ({ id }) => ({ title: id === 'VLPLall' ? 'All songs' : 'Discovery', kind: id?.startsWith('VL') ? 'Playlist' : 'Album', artist: 'Daft Punk', artist_browse: 'UCdaft', year: '2001', cover: yt('Qm9EpPeVrn8'), description: '', browse_id: id || 'MPREb_0', tracks: tracks.slice(0, 5) }),
     ytm_find_album: () => 'MPREb_0',
     ytm_moods: () => [{ title: 'Moods & moments', items: [{ title: 'Chill', params: 'p1', color: '#7fb3ff' }, { title: 'Workout', params: 'p2', color: '#ff7f50' }] }, { title: 'Genres', items: [{ title: 'Pop', params: 'p3', color: '#ff5fa2' }] }],
-    ytm_mood_page: () => [{ title: 'Chill pop', cards: [{ kind: 'playlist', title: 'Chill Hits', subtitle: 'Playlist', browse_id: 'VLchill', thumbnail: null, track: null }] }],
+    ytm_mood_page: () => [{ title: 'Chill pop', cards: [{ kind: 'playlist', title: 'Chill Hits', subtitle: 'Playlist', browse_id: 'VLchill', thumbnail: yt('Qm9EpPeVrn8'), track: null }] }],
     artist_soundcloud: () => [],
     spotify_library_login: async () => { await new Promise((r) => setTimeout(r, 200)); return { user: 'devuser', liked: 3, playlists: [{ id: 'sp1', name: 'Road trip', owner: 'devuser', total: 2, thumbnail: null }, { id: 'sp2', name: 'Focus', owner: 'Spotify', total: 3, thumbnail: null }] }; },
     spotify_library_import: async ({ liked, playlists: pls }) => {

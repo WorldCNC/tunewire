@@ -31,7 +31,6 @@ function syncSearchClear() {
   $('#search-form').classList.toggle('has-text', !!$('#search-input').value);
 }
 $('#search-input').addEventListener('input', syncSearchClear);
-$('#search-input').addEventListener('focus', () => { if (state.view !== 'search' && !$('#search-input').value) { showView('search'); } });
 $('#search-clear').addEventListener('click', () => {
   $('#search-input').value = '';
   syncSearchClear();
@@ -135,7 +134,7 @@ async function searchSongs(q, seq) {
     renderResults();
     setTimeout(() => results.classList.remove('stagger'), 700);
     if (srch.tab === 'all') renderSearchAll();
-    if (res.tracks[0]) prefetchTrack(res.tracks[0]);
+    res.tracks.slice(0, 2).forEach(prefetchTrack);
     plugins.emit('search-completed', { query: q, source: state.source, tracks: res.tracks });
   } catch (e) {
     if (seq !== searchSeq) return;
@@ -216,7 +215,7 @@ function renderSearchAll() {
   if (!srch.songsDone || songs.length || topEl) {
     blocks.push(h('div', { class: 'search-top' },
       topEl ? h('div', {}, h('h2', {}, 'Top result'), topEl) : h('div'),
-      h('div', {}, h('h2', { style: 'display:flex;align-items:baseline;justify-content:space-between' }, 'Songs', state.results.length > 4 ? h('button', { class: 'btn small', onclick: () => setSearchTab('songs') }, 'Show all') : null), songList)));
+      h('div', {}, h('h2', {}, 'Songs', state.results.length > 4 ? h('button', { class: 'btn small', onclick: () => setSearchTab('songs') }, 'Show all') : null), songList)));
   }
   if (x) {
     const shelf = (title, cards, tab) => (cards.length ? h('div', {}, h('div', { class: 'section-title' }, title, h('button', { class: 'btn small', style: 'margin-left:auto', onclick: () => setSearchTab(tab) }, 'Show all')), cardRow(cards, 7)) : null);
@@ -270,7 +269,35 @@ async function renderHero() {
     for (const m of sec.items) tiles.push(m);
   }
   if (browse.lastChild?.classList?.contains('loading-line')) browse.lastChild.remove();
-  browse.append(h('div', { class: 'browse-grid' }, ...tiles.map((m, i) => h('button', { class: 'browse-tile', style: `--c:${saturate(m.color)};--i:${i}`, onclick: () => openMood(m) }, m.title))));
+  const grid = h('div', { class: 'browse-grid' }, ...tiles.map((m, i) => {
+    const tile = h('button', { class: 'browse-tile', style: `--c:${saturate(m.color)};--i:${i}`, onclick: () => openMood(m) }, h('span', {}, m.title));
+    const img = moodArt.get(m.params);
+    if (img) tile.append(h('img', { src: img, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
+    tile._mood = m;
+    return tile;
+  }));
+  browse.append(grid);
+  fillMoodArt(grid);
+}
+
+// Each tile shows the cover of that category's top playlist (cached).
+const moodArt = new Map(Object.entries((() => { try { return JSON.parse(localStorage.getItem('tw-mood-art') || '{}'); } catch { return {}; } })()));
+async function fillMoodArt(grid) {
+  const todo = [...grid.children].filter((t) => !moodArt.has(t._mood.params));
+  const worker = async () => {
+    while (todo.length) {
+      const tile = todo.shift();
+      try {
+        const shelves = await call('ytm_mood_page', { params: tile._mood.params });
+        const url = shelves.flatMap((s) => s.cards).find((c) => c.thumbnail)?.thumbnail;
+        if (!url) continue;
+        moodArt.set(tile._mood.params, url);
+        if (tile.isConnected && !tile.querySelector('img')) tile.append(h('img', { src: url, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
+      } catch { /* leave it plain */ }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  try { localStorage.setItem('tw-mood-art', JSON.stringify(Object.fromEntries(moodArt))); } catch { /* optional */ }
 }
 
 /** YouTube's stripe colors are pastel; deepen them for white text. */

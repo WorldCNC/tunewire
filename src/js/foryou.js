@@ -186,7 +186,7 @@ function openMix(mix, { push = true } = {}) {
         if (!name) return;
         try { await call('create_playlist', { name, tracks: mix.tracks, sourceUrl: null }); toast(`Saved “${name}” to Your Library`, 'ok'); } catch (e) { toast(errMsg(e), 'error'); }
       } }),
-      h('button', { class: 'ab-icon', title: 'Download', html: icon('download'), onclick: () => downloadTracks(mix.tracks) }),
+      downloadRing(mix.tracks),
     ],
     menu: () => [{ label: 'Add to queue', icon: 'plus', onClick: () => enqueue(mix.tracks) }],
   });

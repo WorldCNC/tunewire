@@ -647,6 +647,13 @@ pub struct SearchResponse {
     pub cached: bool,
 }
 
+/// Native web APIs on/off (offline tests turn them off to exercise yt-dlp).
+pub static NATIVE_APIS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn native_apis() -> bool {
+    NATIVE_APIS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 async fn search_platform(platform: Platform, query: String, limit: usize, cache: &SearchCache) -> AppResult<(Vec<TrackVersion>, bool)> {
     let key = format!("{platform:?}|{}|{limit}", norm_text(&query));
     if let Some(hit) = cache.get(&key) {
@@ -668,6 +675,21 @@ async fn search_platform(platform: Platform, query: String, limit: usize, cache:
         if versions.is_empty() {
             return Err(AppError::EmptyResults);
         }
+        cache.put(key, versions.clone());
+        return Ok((versions, false));
+    }
+    // The platforms' own web APIs first (~0.5 s, full metadata); yt-dlp if they fail.
+    let native: AppResult<Vec<TrackVersion>> = match platform {
+        _ if !native_apis() => Err(AppError::Unsupported("native APIs off".into())),
+        Platform::Ytmusic => crate::ytm::search_songs(&query).await.map(|mut v| {
+            v.truncate(limit);
+            v
+        }),
+        Platform::Youtube => crate::ytm::search_videos(&query, limit).await.map(|es| es.iter().enumerate().filter_map(|(i, e)| parse_entry(e, platform, i)).collect()),
+        Platform::Soundcloud => crate::soundcloud::search(&query, limit).await,
+        _ => Err(AppError::Unsupported("no native search".into())),
+    };
+    if let Some(versions) = native.ok().filter(|v| !v.is_empty()) {
         cache.put(key, versions.clone());
         return Ok((versions, false));
     }
@@ -808,7 +830,7 @@ pub async fn search(
     let platforms_len = platforms.len();
     // YouTube Music results lack artist/duration; a parallel YouTube search
     // usually contains the same videos with that metadata.
-    let hidden = (platforms == [Platform::Ytmusic]).then_some(Platform::Youtube);
+    let hidden: Option<Platform> = None;
     let mut platforms = platforms;
     if let Some(h) = hidden {
         platforms.push(h);

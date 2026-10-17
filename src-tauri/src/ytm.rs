@@ -23,8 +23,12 @@ const F_COMMUNITY_PLAYLISTS: &str = "EgeKAQQoAEABagwQDhAKEAMQBBAJEAU=";
 // ---------------------------------------------------------------------------
 
 fn post_blocking(endpoint: &str, extra: Value) -> AppResult<Value> {
+    post_blocking_to("https://music.youtube.com", "WEB_REMIX", "1.20250101.01.00", endpoint, extra)
+}
+
+fn post_blocking_to(origin: &str, client: &str, version: &str, endpoint: &str, extra: Value) -> AppResult<Value> {
     let mut body = serde_json::json!({
-        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US" } }
+        "context": { "client": { "clientName": client, "clientVersion": version, "hl": "en", "gl": "US" } }
     });
     if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
         for (k, v) in e {
@@ -32,9 +36,9 @@ fn post_blocking(endpoint: &str, extra: Value) -> AppResult<Value> {
         }
     }
     let mut r = crate::http::agent()
-        .post(&format!("https://music.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false"))
+        .post(&format!("{origin}/youtubei/v1/{endpoint}?prettyPrint=false"))
         .header("Content-Type", "application/json")
-        .header("Origin", "https://music.youtube.com")
+        .header("Origin", origin)
         .header("User-Agent", crate::http::USER_AGENT)
         .send(body.to_string())
         .map_err(|e| AppError::Network(e.to_string()))?;
@@ -287,6 +291,43 @@ pub async fn search_songs(query: &str) -> AppResult<Vec<TrackVersion>> {
         v.rank = i;
         v
     }).collect())
+}
+
+/// YouTube (not Music) video search, as yt-dlp-style entries for `parse_entry`.
+pub async fn search_videos(query: &str, limit: usize) -> AppResult<Vec<Value>> {
+    let q = query.to_string();
+    let v = tauri::async_runtime::spawn_blocking(move || {
+        post_blocking_to("https://www.youtube.com", "WEB", "2.20250101.00.00", "search", serde_json::json!({ "query": q, "params": "EgIQAQ%3D%3D" }))
+    })
+    .await
+    .map_err(|e| AppError::Network(e.to_string()))??;
+    let sections = v.pointer("/contents/twoColumnSearchResultsRenderer/primaryContents/sectionListRenderer/contents").and_then(Value::as_array).cloned().unwrap_or_default();
+    let out: Vec<Value> = sections
+        .iter()
+        .filter_map(|s| s.pointer("/itemSectionRenderer/contents").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|i| i.get("videoRenderer"))
+        .filter_map(|r| {
+            let id = r.get("videoId")?.as_str()?;
+            let owner = r.pointer("/ownerText/runs/0")?;
+            let channel_path = owner.pointer("/navigationEndpoint/browseEndpoint/canonicalBaseUrl").and_then(Value::as_str).unwrap_or("");
+            let verified = r.get("ownerBadges").and_then(Value::as_array).map(|b| b.iter().any(|x| x.pointer("/metadataBadgeRenderer/style").and_then(Value::as_str).is_some_and(|s| s.contains("VERIFIED")))).unwrap_or(false);
+            Some(serde_json::json!({
+                "id": id,
+                "url": format!("https://www.youtube.com/watch?v={id}"),
+                "title": text(r.get("title")),
+                "channel": owner.get("text"),
+                "channel_url": if channel_path.is_empty() { Value::Null } else { Value::String(format!("https://www.youtube.com{channel_path}")) },
+                "channel_is_verified": verified,
+                "duration": r.pointer("/lengthText/simpleText").and_then(Value::as_str).and_then(parse_duration),
+            }))
+        })
+        .take(limit)
+        .collect();
+    if out.is_empty() {
+        return Err(AppError::EmptyResults);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize)]

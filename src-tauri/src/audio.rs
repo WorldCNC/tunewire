@@ -41,7 +41,7 @@ type Reopen = Arc<dyn Fn(f64) -> AppResult<(AudioDecoder, f64)> + Send + Sync>;
 
 /// A decoder ready to hand to the engine.
 pub struct LoadedTrack {
-    decoder: AudioDecoder,
+    pub(crate) decoder: AudioDecoder,
     shared: Arc<Shared>,
     duration: Option<f64>,
     reopen: Option<Reopen>,

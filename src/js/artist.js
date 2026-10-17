@@ -125,6 +125,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   }
   body.replaceChildren(...sections.filter(Boolean));
   renderPopular();
+  if (a.top_songs[0]) prefetchTrack(a.top_songs[0]);
   heroColor(body, a.thumbnail || art, () => seq === artistSeq);
 
   if (scBox) {
@@ -242,7 +243,7 @@ async function openAlbum(target, title = 'Album', { push = true } = {}) {
           void created;
         } catch (e) { toast(errMsg(e), 'error'); }
       } }),
-      h('button', { class: 'ab-icon', title: 'Download', html: icon('download'), onclick: () => downloadTracks(c.tracks) }),
+      downloadRing(c.tracks),
     ],
     menu: () => [
       { label: 'Add to queue', icon: 'plus', onClick: () => enqueue(c.tracks) },

@@ -39,6 +39,7 @@ mod plugins;
 mod radio;
 mod search;
 mod secrets;
+mod soundcloud;
 mod spotdl;
 mod spotify;
 mod spotify_play;
@@ -53,6 +54,8 @@ mod ytm;
 
 #[cfg(test)]
 mod itests;
+#[cfg(test)]
+mod bench;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -184,6 +187,7 @@ pub fn run() {
                 let history = st.store.library.lock().unwrap().history.clone();
                 stats::init(&st.store.dir, &history);
                 matcher::init(&st.store.dir);
+                soundcloud::init(&st.store.dir);
             }
             // Finish matching Spotify songs left over from last time.
             let h = app.handle().clone();
@@ -204,6 +208,12 @@ pub fn run() {
             tauri::async_runtime::spawn(async {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 ytdlp_worker::warm(ytdlp::binary()).await;
+                ytdlp::warm_youtube().await;
+            });
+            // Tokens/ids the first search would otherwise wait for.
+            tauri::async_runtime::spawn_blocking(|| {
+                soundcloud::warm();
+                spotify::warm();
             });
 
             // Pick up new/removed files in the local library.

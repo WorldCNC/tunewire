@@ -331,6 +331,7 @@ let trackDrag = null;
 function startTrackDrag(row, e) {
   const rows = row.classList.contains('selected') && selectedRows().length > 1 ? selectedRows() : [row];
   trackDrag = { rows, tracks: rows.map((r) => r._track), list: row.parentElement };
+  document.body.classList.add('dragging-tracks');
   rows.forEach((r) => r.classList.add('dragging'));
   e.dataTransfer.effectAllowed = 'copyMove';
   e.dataTransfer.setData('text/plain', rows.map((r) => `${r._track.artist} - ${r._track.title}`).join('\n'));
@@ -341,20 +342,28 @@ function startTrackDrag(row, e) {
 }
 function endTrackDrag() {
   if (trackDrag) trackDrag.rows.forEach((r) => r.classList.remove('dragging'));
+  setDropMark(null, null);
+  document.body.classList.remove('dragging-tracks');
   trackDrag = null;
   $$('.drop-before, .drop-after, .drop-target').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-target'));
 }
 
 // Reordering inside a list that allows it (list._ctx.reorder).
+let dropMark = { row: null, cls: null };
+function setDropMark(row, cls) {
+  if (dropMark.row === row && dropMark.cls === cls) return; // unchanged: no repaint
+  dropMark.row?.classList.remove('drop-before', 'drop-after');
+  if (row) row.classList.add(cls);
+  dropMark = { row, cls };
+}
 document.addEventListener('dragover', (e) => {
   if (!trackDrag) return;
   const row = e.target.closest?.('.track');
   const list = row?.parentElement;
-  $$('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
-  if (!row || list !== trackDrag.list || !list._ctx?.reorder) return;
+  if (!row || list !== trackDrag.list || !list._ctx?.reorder) { setDropMark(null, null); return; }
   e.preventDefault();
   const r = row.getBoundingClientRect();
-  row.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
+  setDropMark(row, e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
 });
 document.addEventListener('drop', (e) => {
   if (!trackDrag) return;

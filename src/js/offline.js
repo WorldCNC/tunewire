@@ -8,6 +8,7 @@ async function refreshDownloads() {
   try { state.downloads = await call('list_downloads'); } catch { state.downloads = []; }
   state.downloadKeys = new Set(state.downloads.map((d) => d.key));
   renderLibrary();
+  paintDownloadRings();
   if (state.view === 'downloads') renderDownloads();
 }
 
@@ -18,6 +19,55 @@ async function downloadTracks(tracks) {
     const n = await call('download_tracks', { tracks: todo });
     toast(n === 1 ? `Downloading “${todo[0].title}”` : `Downloading ${n} songs`, 'info', 2000);
   } catch (e) { toast(errMsg(e), 'error'); }
+}
+
+// Download button for a whole list: a ring fills up as its songs finish.
+const RING_C = 2 * Math.PI * 15;
+
+function downloadRing(tracks) {
+  const btn = h('button', { class: 'ab-icon dl-ring' });
+  btn._tracks = tracks;
+  btn.addEventListener('click', async () => {
+    const st = ringState(tracks);
+    if (st.active) return toast(`Downloading · ${st.done} of ${st.total} songs ready`, 'info', 2000);
+    if (st.total && st.done === st.total) {
+      if (await confirmModal({ title: 'Remove from downloads?', message: `The ${st.total} downloaded songs will be deleted from this computer. They stay in the playlist.`, okLabel: 'Remove', danger: true })) {
+        for (const t of tracks) if (state.downloadKeys.has(t.key)) await call('delete_download', { key: t.key }).catch(() => {});
+        toast('Removed from downloads', 'info', 1800);
+      }
+      return;
+    }
+    await downloadTracks(tracks);
+    paintRing(btn);
+  });
+  paintRing(btn);
+  return btn;
+}
+
+function ringState(tracks) {
+  const eligible = tracks.filter((t) => !t.versions.every((v) => v.platform === 'local'));
+  const done = eligible.filter((t) => state.downloadKeys.has(t.key)).length;
+  const active = eligible.some((t) => state.downloading.has(t.key));
+  return { total: eligible.length, done, active };
+}
+
+function paintRing(btn) {
+  const st = ringState(btn._tracks);
+  const full = st.total > 0 && st.done === st.total;
+  const frac = st.total ? st.done / st.total : 0;
+  btn.classList.toggle('done', full);
+  btn.classList.toggle('active', st.active);
+  btn.title = full ? 'Downloaded · click to remove' : st.active ? `Downloading · ${st.done} of ${st.total}` : 'Download';
+  const key = `${full}|${st.active}|${st.done}`;
+  if (btn.dataset.k === key) return;
+  btn.dataset.k = key;
+  if (full) { btn.innerHTML = '<span class="dl-done">' + icon('download') + '</span>'; return; }
+  if (!st.active) { btn.innerHTML = icon('download'); return; }
+  btn.innerHTML = `<svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15" class="ring-bg"/><circle cx="18" cy="18" r="15" class="ring-fg" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>${icon('download')}`;
+}
+
+function paintDownloadRings() {
+  for (const b of $$('.dl-ring')) paintRing(b);
 }
 
 async function deleteDownload(key) {
@@ -31,6 +81,8 @@ function fmtSize(b) {
 function onDownloadEvent({ key, title, state: s, message }) {
   if (s === 'done' || s === 'error') state.downloading.delete(key);
   else state.downloading.set(key, { title, state: s });
+  if (s === 'done') state.downloadKeys.add(key);
+  paintDownloadRings();
   if (s === 'error') toast(`Download failed: ${title}. ${message || ''}`, 'error');
   if (s === 'done' && state.downloading.size === 0) toast('Downloads finished', 'ok', 2000);
   renderDownloadActivity();

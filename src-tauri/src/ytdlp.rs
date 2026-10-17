@@ -280,7 +280,19 @@ pub fn prefetch_stream(url: String) {
     });
 }
 
+/// One throwaway YouTube lookup after startup: the worker then holds a
+/// ready instance with open connections, so the first real song is faster.
+pub async fn warm_youtube() {
+    let _ = extract_stream_with_format("https://www.youtube.com/watch?v=jNQXAC9IVRw", AUDIO_FORMAT).await;
+}
+
 pub async fn extract_stream(url: &str) -> AppResult<StreamInfo> {
+    // SoundCloud's own API answers in ~0.5 s (yt-dlp: ~1.7 s).
+    if url.contains("soundcloud.com/") && crate::search::native_apis() {
+        if let Ok(info) = crate::soundcloud::stream(url).await {
+            return Ok(info);
+        }
+    }
     extract_stream_with_format(url, AUDIO_FORMAT).await
 }
 

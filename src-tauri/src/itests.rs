@@ -155,6 +155,7 @@ fn audible(dec: &mut AudioDecoder, secs: f32) -> (usize, usize) {
 /// One test so the global yt-dlp path isn't raced by parallel tests.
 #[test]
 fn end_to_end_offline() {
+    search::NATIVE_APIS.store(false, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("tunewire-itest-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     stream::set_cache_dir(dir.join("cache"));

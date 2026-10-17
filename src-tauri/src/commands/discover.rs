@@ -85,6 +85,30 @@ pub async fn fetch_remote(st: &AppState, url: String) -> AppResult<RemotePlaylis
         return load_spotify(&st.store.settings().spotify_backend, &url).await;
     }
     ytdlp::validate_url(&url).map_err(|_| AppError::Invalid("paste a full http(s) link".into()))?;
+    // Native APIs first (full metadata, ~2× faster); yt-dlp below as fallback.
+    if url.contains("soundcloud.com/") && url.contains("/sets/") {
+        if let Ok((title, tracks)) = crate::soundcloud::playlist(&url).await {
+            return Ok(RemotePlaylist { title, url, platform: Some(Platform::Soundcloud), tracks });
+        }
+    }
+    if (url.contains("youtube.com/") || url.contains("youtu.be/")) && url.contains("list=") && !url.contains("list=RD") {
+        if let Some(bid) = crate::ytm::browse_id_from_url(&url) {
+            if let Ok(c) = crate::ytm::collection(&bid).await {
+                let music = url.contains("music.youtube.com");
+                let mut tracks = c.tracks;
+                if !music {
+                    // A YouTube link plays from YouTube (same videos, other URLs).
+                    for t in tracks.iter_mut() {
+                        for v in t.versions.iter_mut() {
+                            v.platform = Platform::Youtube;
+                            v.url = format!("https://www.youtube.com/watch?v={}", v.id);
+                        }
+                    }
+                }
+                return Ok(RemotePlaylist { title: c.title, url, platform: Some(if music { Platform::Ytmusic } else { Platform::Youtube }), tracks });
+            }
+        }
+    }
     let json = ytdlp::flat(&url, Some(1000)).await?;
     let platform = Platform::from_url(&url);
     let title = json.get("title").and_then(Value::as_str).unwrap_or("Playlist").to_string();

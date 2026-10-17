@@ -1123,8 +1123,11 @@ h2 { font-size: 20px; font-weight: 750; letter-spacing: -.01em; }
 .recent-card .x { opacity: 0; }
 .recent-card:hover .x { opacity: 1; }
 .browse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
-.browse-tile { position: relative; height: 110px; border-radius: 8px; overflow: hidden; padding: 14px 16px; text-align: left; color: #fff; font-size: 20px; font-weight: 850; letter-spacing: -.02em; background: var(--c); transition: transform .2s var(--ease-out), filter .2s; animation: tw-rise .3s var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 20) * 15ms); }
-.browse-tile::after { content: ""; position: absolute; right: -18px; bottom: -10px; width: 86px; height: 86px; border-radius: 8px; transform: rotate(25deg); background: linear-gradient(135deg, rgba(255,255,255,.35), rgba(0,0,0,.25)); box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+.browse-tile { position: relative; height: 120px; border-radius: 8px; overflow: hidden; padding: 14px 16px; text-align: left; color: #fff; font-size: 20px; font-weight: 850; letter-spacing: -.02em; background: var(--c); transition: transform .2s var(--ease-out), filter .2s; animation: tw-rise .3s var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 20) * 15ms); }
+.browse-tile::after { content: ""; position: absolute; right: -14px; bottom: -8px; width: 92px; height: 92px; border-radius: 6px; transform: rotate(25deg); background: linear-gradient(135deg, rgba(255,255,255,.3), rgba(0,0,0,.25)); box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+.browse-tile:has(img)::after { display: none; }
+.browse-tile span { position: relative; z-index: 1; display: block; max-width: 70%; text-shadow: 0 1px 6px rgba(0,0,0,.25); }
+.browse-tile img { position: absolute; right: -16px; bottom: -10px; width: 96px; height: 96px; object-fit: cover; border-radius: 6px; transform: rotate(25deg); box-shadow: 0 6px 18px rgba(0,0,0,.4); animation: tw-fade .4s ease both; }
 .browse-tile:hover { transform: translateY(-3px); filter: brightness(1.08); }
 
 /* Artist page ------------------------------------------------------------- */
@@ -1192,3 +1195,64 @@ h2 { font-size: 20px; font-weight: 750; letter-spacing: -.01em; }
 .selection-bar::-webkit-scrollbar { display: none; }
 .queue-head .actions { flex-wrap: nowrap; gap: 0; }
 .queue-head .actions .icon-btn { width: 28px; height: 28px; }
+
+/* Download ring (whole playlist) */
+.dl-ring { position: relative; }
+.dl-ring .ring { position: absolute; inset: 2px; width: 36px; height: 36px; transform: rotate(-90deg); }
+.dl-ring .ring circle { fill: none; stroke-width: 2.5; }
+.dl-ring .ring-bg { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+.dl-ring .ring-fg { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .4s var(--ease-out); }
+.dl-ring.active > svg.i { width: 16px; height: 16px; color: var(--accent); }
+.dl-ring .dl-done { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--accent-contrast); display: grid; place-items: center; }
+.dl-ring .dl-done svg.i { width: 18px; height: 18px; }
+
+/* Library filters stay on one line */
+.lib-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; }
+.lib-chips::-webkit-scrollbar { display: none; }
+.lib-chips button { flex: none; padding: 0 12px; font-size: 13px; }
+
+/* Bigger song covers */
+:root { --row-h: 64px; }
+.track .thumb { width: 48px; height: 48px; }
+.top-songs .track { height: 60px; }
+.top-songs .track .thumb { width: 44px; height: 44px; }
+
+/* No fade-in on images that are just being re-rendered (it flickered) */
+.thumb img, .lib-art img, .hero-art img { animation: none !important; }
+/* While dragging, rows shouldn't animate hover backgrounds. */
+body.dragging-tracks .track { transition: none !important; }
+body.dragging-tracks .track:hover { background: transparent; }
+
+/* Buttons that fit the v2 look ------------------------------------------- */
+.btn { height: 32px; padding: 0 16px; border-radius: 16px; background: transparent; border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); font-weight: 650; font-size: 13.5px; }
+.btn:hover { background: transparent; border-color: var(--text); transform: scale(1.03); }
+.btn.small { height: 28px; padding: 0 12px; border-radius: 14px; font-size: 12.5px; }
+.btn.primary { border-color: transparent; border-radius: 16px; }
+.btn.primary:hover { transform: scale(1.04); }
+.btn.danger { border-radius: 16px; }
+.btn.danger-ghost { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+/* "Show all", "See more", "Clear…": plain text links like section headers use. */
+.section-title .btn.small, .show-more, .rec-head .btn.small, .search-top h2 .btn.small, .npv-card h4 button {
+  height: auto; padding: 0; border: 0; border-radius: 0; background: none; color: var(--text-dim); font-size: 13.5px; font-weight: 700; letter-spacing: 0; transform: none !important;
+}
+.section-title .btn.small:hover, .show-more:hover, .rec-head .btn.small:hover, .search-top h2 .btn.small:hover { color: var(--text); text-decoration: underline; background: none; }
+.section-title .btn.small svg.i, .rec-head .btn.small svg.i { display: none; }
+.show-more { margin: 14px 0 0 16px; }
+.segmented { border-radius: 16px; border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.segmented button { height: 30px; font-weight: 600; }
+.segmented button.active { background: var(--text); color: var(--bg); }
+.input, .settings input[type=text], .settings input[type=number], .settings select { border-radius: 6px; height: 32px; }
+
+.import-link { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.modal .import-link input.input { flex: 1; width: auto; min-width: 0; height: 40px; border-radius: 20px; padding: 0 16px; }
+.import-link .btn { height: 40px; border-radius: 20px; padding: 0 22px; flex: none; }
+.import-label { margin-top: 14px; margin-bottom: 2px; }
+.import-box > .import-option + .import-option { margin-top: 0; }
+.search-top h2 { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; margin: 0 0 16px; }
+.search-top h2 .btn.small { margin-left: auto; }
+.top-songs { margin-top: 4px; }
+.section-title { align-items: center; }
+.search-top { grid-template-columns: minmax(260px, 1fr) minmax(340px, 1.5fr); }
+.top-songs .track { grid-template-columns: 28px minmax(0, 1fr) 52px 32px; gap: 10px; padding: 0 10px; }
+.top-songs .t-like { display: none; }
+@media (max-width: 1380px) { .search-top { grid-template-columns: 1fr; } .top-card { min-height: 0; flex-direction: row; align-items: center; } .top-card .tc-title { font-size: 28px; } }

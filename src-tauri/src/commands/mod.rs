@@ -1,6 +1,7 @@
 //! IPC commands, grouped by area.
 
 pub mod browse;
+pub mod cloud;
 pub mod customize;
 pub mod discover;
 pub mod explore;

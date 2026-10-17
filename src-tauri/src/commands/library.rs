@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
@@ -41,6 +43,8 @@ pub fn create_playlist(app: AppHandle, st: State<'_, AppState>, name: String, tr
         pinned: false,
         folder: None,
         added,
+        cloud_id: None,
+        cloud_role: None,
     };
     let out = pl.clone();
     st.store.update_library(|lib| {
@@ -147,6 +151,32 @@ pub fn move_many_in_playlist(app: AppHandle, st: State<'_, AppState>, id: String
         let at = to.min(p.tracks.len());
         for (k, t) in moving.into_iter().enumerate() {
             p.tracks.insert(at + k, t);
+        }
+        Ok(())
+    })
+}
+
+/// Link a playlist to its online copy (or unlink with nulls).
+#[tauri::command]
+pub fn set_playlist_cloud(app: AppHandle, st: State<'_, AppState>, id: String, cloud_id: Option<String>, role: Option<String>) -> AppResult<()> {
+    with_playlist(&app, &st, &id, |p| {
+        p.cloud_id = cloud_id;
+        p.cloud_role = role;
+        Ok(())
+    })
+}
+
+/// Take the songs from the online copy (collaborative edits, followed updates).
+#[tauri::command]
+pub fn replace_playlist_tracks(app: AppHandle, st: State<'_, AppState>, id: String, tracks: Vec<Track>, added: Option<HashMap<String, u64>>) -> AppResult<()> {
+    with_playlist(&app, &st, &id, |p| {
+        let now = store::now_ms();
+        p.tracks = crate::matcher::with_matches(clean_tracks(tracks));
+        if let Some(a) = added {
+            p.added.extend(a);
+        }
+        for t in &p.tracks {
+            p.added.entry(t.key.clone()).or_insert(now);
         }
         Ok(())
     })

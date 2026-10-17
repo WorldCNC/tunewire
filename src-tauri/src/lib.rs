@@ -19,6 +19,7 @@
 
 mod artist;
 mod audio;
+mod cloud;
 mod commands;
 mod controller;
 mod decoder;
@@ -126,6 +127,15 @@ pub(crate) fn show_main(app: &AppHandle) {
 pub fn run() {
     report::install_panic_hook();
     tauri::Builder::default()
+        // One app window: opening a tunewire:// link (or the app again) goes
+        // to the running instance.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            show_main(app);
+            if let Some(url) = argv.iter().find(|a| a.starts_with("tunewire://")) {
+                let _ = tauri::Emitter::emit(app, "deep-link", url.clone());
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -195,6 +205,8 @@ pub fn run() {
                 stats::init(&st.store.dir, &history);
                 matcher::init(&st.store.dir);
                 soundcloud::init(&st.store.dir);
+                let s = st.store.settings();
+                cloud::init(&st.store.dir, &s.supabase_url, &s.supabase_anon_key);
             }
             // Finish matching Spotify songs left over from last time.
             let h = app.handle().clone();
@@ -236,6 +248,19 @@ pub fn run() {
                 tauri::async_runtime::spawn_blocking(move || {
                     if localfiles::scan(&folders).is_ok() {
                         state::emit_library(&h, "local");
+                    }
+                });
+            }
+            // tunewire:// links: register (Linux/AppImage needs it at runtime)
+            // and forward links that arrive while running.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                let _ = app.deep_link().register_all();
+                let h = app.handle().clone();
+                app.deep_link().on_open_url(move |ev| {
+                    for u in ev.urls() {
+                        let _ = tauri::Emitter::emit(&h, "deep-link", u.to_string());
                     }
                 });
             }
@@ -301,8 +326,15 @@ pub fn run() {
             library::remove_many_from_playlist,
             library::move_many_in_playlist,
             library::update_playlist_meta,
+            library::set_playlist_cloud,
+            library::replace_playlist_tracks,
             playback::set_sleep_timer,
             commands::queue::set_shuffle,
+            commands::cloud::cloud_config,
+            commands::cloud::cloud_session,
+            commands::cloud::cloud_sign_in,
+            commands::cloud::cloud_sign_in_guest,
+            commands::cloud::cloud_sign_out,
             commands::foryou::for_you,
             commands::foryou::refresh_for_you,
             commands::foryou::listening_stats,

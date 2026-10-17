@@ -88,6 +88,13 @@ pub struct Settings {
     pub show_sources: bool,
     /// Send automatic error reports to the developer.
     pub error_reports: bool,
+    /// Development override of the online backend (normally built in).
+    pub supabase_url: String,
+    pub supabase_anon_key: String,
+    /// Followers can see what you're playing.
+    pub share_activity: bool,
+    /// Interface updates from the beta channel.
+    pub beta_updates: bool,
 }
 
 impl Default for Settings {
@@ -131,6 +138,10 @@ impl Default for Settings {
             shuffle: false,
             show_sources: false,
             error_reports: true,
+            supabase_url: String::new(),
+            supabase_anon_key: String::new(),
+            share_activity: true,
+            beta_updates: false,
         }
     }
 }
@@ -197,6 +208,12 @@ pub struct Playlist {
     /// Track key -> when it was added (ms).
     #[serde(default)]
     pub added: HashMap<String, u64>,
+    /// Linked online playlist (shared link / collaborative / followed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_id: Option<String>,
+    /// "owner" | "editor" | "follower"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

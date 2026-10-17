@@ -245,9 +245,15 @@ function throttle(fn, ms) {
   };
 }
 
+/** Hooks run after a command succeeds (online sync of playlist edits). */
+const commandHooks = [];
 async function call(cmd, args) {
   try {
-    return await invoke(cmd, args);
+    // Playlist edits: remember the songs before (removals are by index).
+    const before = /_playlist$|_in_playlist$|_from_playlist$/.test(cmd) && args?.id ? state.playlists.find((p) => p.id === args.id)?.tracks.slice() : null;
+    const result = await invoke(cmd, args);
+    for (const f of commandHooks) { try { f(cmd, args, result, before); } catch (e) { console.error(e); } }
+    return result;
   } catch (e) {
     throw (typeof e === 'object' && e) ? e : { kind: 'error', message: String(e) };
   }

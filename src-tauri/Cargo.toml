@@ -46,6 +46,10 @@ base64 = "0.22"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 mimalloc = { version = "0.1", default-features = false }
+getrandom = "0.2"
+open = "5"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [profile.release]
 codegen-units = 1

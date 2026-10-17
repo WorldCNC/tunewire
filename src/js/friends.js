@@ -135,8 +135,8 @@ function paintAlong() {
 async function friendList() {
   const me = cloud.session.user_id;
   const [out, inc] = await Promise.all([
-    db('GET', `follows?follower=eq.${me}&status=eq.accepted&select=followee,profiles!follows_followee_fkey(id,name,avatar,decoration)`),
-    db('GET', `follows?followee=eq.${me}&status=eq.accepted&select=follower,profiles!follows_follower_fkey(id,name,avatar,decoration)`),
+    db('GET', `follows?follower=eq.${me}&status=eq.accepted&select=followee,profiles!follows_followee_fkey(*)`),
+    db('GET', `follows?followee=eq.${me}&status=eq.accepted&select=follower,profiles!follows_follower_fkey(*)`),
   ]);
   const map = new Map();
   for (const f of out) if (f.profiles) map.set(f.profiles.id, f.profiles);
@@ -190,7 +190,7 @@ const INBOX_REACTIONS = ['🔥', '❤️', '😂', '🕺', '👏', '😮'];
 async function renderInbox(box) {
   box.replaceChildren(...skeletonFriends(3));
   let rows;
-  try { rows = await db('GET', `song_shares?to_user=eq.${cloud.session.user_id}&select=*,sender:profiles!song_shares_from_user_fkey(id,name,avatar,decoration)&order=created_at.desc&limit=60`); } catch (e) { box.replaceChildren(h('p', { class: 'meta' }, errMsg(e))); return; }
+  try { rows = await db('GET', `song_shares?to_user=eq.${cloud.session.user_id}&select=*,sender:profiles!song_shares_from_user_fkey(*)&order=created_at.desc&limit=60`); } catch (e) { box.replaceChildren(h('p', { class: 'meta' }, errMsg(e))); return; }
   if (!rows.length) { box.replaceChildren(h('div', { class: 'empty' }, h('p', {}, 'No songs yet'), h('p', { class: 'small' }, 'When friends send you a song, it shows up here. Send one with ⋯ → Send to a friend.'))); return; }
   box.replaceChildren(...rows.map((r) => {
     const t = fromCloudTrack(r.track);

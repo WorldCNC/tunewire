@@ -1192,7 +1192,7 @@ async function renderFriends() {
     const q = search.value.trim();
     if (q.length < 2) { results.replaceChildren(); return; }
     try {
-      const rows = await db('GET', `profiles?name=ilike.*${encodeURIComponent(q.replace(/[*,()]/g, ''))}*&select=id,name,avatar,decoration&limit=8`);
+      const rows = await db('GET', `profiles?name=ilike.*${encodeURIComponent(q.replace(/[*,()]/g, ''))}*&select=*&limit=8`);
       results.replaceChildren(...rows.filter((r) => r.id !== me()).map((r) => personRow(r)));
     } catch { /* offline */ }
   }, 300));
@@ -1201,8 +1201,8 @@ async function renderFriends() {
   content.replaceChildren(h('div', { class: 'friends-tools' }, search, h('button', { class: 'icon-btn', title: 'Copy link to your profile', 'aria-label': 'Copy link to your profile', html: icon('link'), onclick: () => { copyText(PROFILE_LINK(me())); toast('Profile link copied', 'ok', 1500); } })), results, requests, list);
   try {
     const [incoming, follows] = await Promise.all([
-      db('GET', `follows?followee=eq.${me()}&status=eq.pending&select=follower,profiles!follows_follower_fkey(id,name,avatar,decoration)`),
-      db('GET', `follows?follower=eq.${me()}&select=followee,status,profiles!follows_followee_fkey(id,name,avatar,decoration)`),
+      db('GET', `follows?followee=eq.${me()}&status=eq.pending&select=follower,profiles!follows_follower_fkey(*)`),
+      db('GET', `follows?follower=eq.${me()}&select=followee,status,profiles!follows_followee_fkey(*)`),
     ]);
     if (incoming.length) {
       requests.replaceChildren(h('div', { class: 'section-mini' }, `Follow requests (${incoming.length})`), ...incoming.map((r) => h('div', { class: 'friend' }, decoratedAvatar(r.profiles?.avatar, r.profiles?.name, r.profiles?.decoration),
@@ -1397,8 +1397,8 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
     const [[p], lists, followers, following, mine, stats, nps, badges, followsMe] = await Promise.all([
       db('GET', `profiles?id=eq.${userId}&select=*`),
       db('GET', `playlists?owner=eq.${userId}&visibility=eq.public&select=id,title,cover,tracks->0->thumbnail&order=updated_at.desc`),
-      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(id,name,avatar,decoration)&order=created_at.desc`),
-      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(id,name,avatar,decoration)&order=created_at.desc`),
+      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(*)&order=created_at.desc`),
+      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(*)&order=created_at.desc`),
       signed ? db('GET', `follows?follower=eq.${me()}&select=followee,status`) : Promise.resolve([]),
       signed ? db('GET', `profile_stats?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),
       signed ? db('GET', `now_playing?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),

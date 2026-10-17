@@ -42,6 +42,10 @@ librespot-core = { version = "0.8", default-features = false, features = ["rustl
 librespot-audio = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-metadata = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-protocol = "0.8"
+protobuf = "3.7"
+protobuf-json-mapping = "3.7"
+futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }

@@ -23,6 +23,12 @@ use crate::models::{Platform, Track, TrackVersion};
 // ---------------------------------------------------------------------------
 
 static TOKEN: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+/// The import's own Spotify client session (see spotify_lib.rs), if it opened.
+static LIB_SESSION: tokio::sync::Mutex<Option<librespot_core::Session>> = tokio::sync::Mutex::const_new(None);
+
+async fn lib_session() -> Option<librespot_core::Session> {
+    LIB_SESSION.lock().await.as_ref().filter(|s| !s.is_invalid()).cloned()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SpotifyPlaylistInfo {
@@ -165,7 +171,7 @@ pub async fn spotify_login(app: &AppHandle) -> AppResult<SpotifyLibrary> {
     let steps = Steps::new(app);
     if token().is_err() {
         steps.step("Waiting for you to log in in your browser…");
-        let tok = crate::spotify_play::oauth(&["user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await.inspect_err(|e| steps.step(&format!("Sign-in failed: {e}")))?;
+        let tok = crate::spotify_play::oauth(&["streaming", "user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await.inspect_err(|e| steps.step(&format!("Sign-in failed: {e}")))?;
         *TOKEN.lock().unwrap() = Some((tok, std::time::Instant::now()));
         steps.step("Signed in. Reading your library…");
     }
@@ -186,6 +192,35 @@ pub async fn spotify_login(app: &AppHandle) -> AppResult<SpotifyLibrary> {
 }
 
 async fn list_library(steps: &Steps<'_>) -> AppResult<SpotifyLibrary> {
+    // First choice: Spotify's client service (the Web API is rate-limited for
+    // the shared desktop-app id, see spotify_lib.rs).
+    if lib_session().await.is_none() {
+        if let Ok(t) = token() {
+            steps.step("Connecting to Spotify…");
+            match crate::spotify_lib::session(&t).await {
+                Ok(s) => *LIB_SESSION.lock().await = Some(s),
+                Err(e) => steps.step(&format!("Client connection failed ({e}); trying the Web API")),
+            }
+        }
+    }
+    if let Some(session) = lib_session().await {
+        let user = session.username();
+        steps.step(&format!("Connected as {user}. Reading your playlists…"));
+        match crate::spotify_lib::rootlist(&session).await {
+            Ok(playlists) => {
+                steps.step(&format!("{} playlists. Counting Liked Songs…", playlists.len()));
+                let liked = match crate::spotify_lib::liked_uris(&session).await {
+                    Ok(u) => u.len(),
+                    Err(e) => {
+                        steps.step(&format!("Liked Songs unavailable: {e}"));
+                        0
+                    }
+                };
+                return Ok(SpotifyLibrary { user, liked, playlists });
+            }
+            Err(e) => steps.step(&format!("Client playlist list failed ({e}); trying the Web API")),
+        }
+    }
     let me = api("/me".into()).await?;
     let user = me.get("display_name").and_then(Value::as_str).or_else(|| me.get("id").and_then(Value::as_str)).unwrap_or("you").to_string();
     steps.step(&format!("Account: {user}"));
@@ -229,6 +264,11 @@ async fn list_library(steps: &Steps<'_>) -> AppResult<SpotifyLibrary> {
 
 /// All saved (liked) songs, newest first.
 pub async fn spotify_liked() -> AppResult<Vec<Track>> {
+    if let Some(session) = lib_session().await {
+        if let Ok(uris) = crate::spotify_lib::liked_uris(&session).await {
+            return Ok(crate::spotify_lib::tracks(&session, uris, |_, _| {}).await);
+        }
+    }
     let mut out = Vec::new();
     let mut next = Some("/me/tracks?limit=50".to_string());
     while let Some(url) = next.take() {
@@ -255,6 +295,14 @@ async fn playlist_pages(first: String) -> AppResult<Vec<Track>> {
 /// (/tracks → /items), so both are tried; then the web player's listing
 /// (public playlists, also covers Spotify's own editorial ones).
 pub async fn spotify_playlist(id: &str) -> AppResult<Vec<Track>> {
+    if let Some(session) = lib_session().await {
+        if let Ok(uris) = crate::spotify_lib::playlist_uris(&session, id).await {
+            let t = crate::spotify_lib::tracks(&session, uris, |_, _| {}).await;
+            if !t.is_empty() {
+                return Ok(t);
+            }
+        }
+    }
     let mut last = None;
     for path in [format!("/playlists/{id}/items?limit=100"), format!("/playlists/{id}/tracks?limit=100")] {
         match playlist_pages(path).await {

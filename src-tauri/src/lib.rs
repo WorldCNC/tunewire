@@ -49,6 +49,7 @@ mod secrets;
 mod soundcloud;
 mod spotdl;
 mod spotify;
+mod spotify_lib;
 mod spotify_play;
 mod state;
 mod stats;

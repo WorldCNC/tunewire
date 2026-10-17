@@ -34,12 +34,11 @@ pub fn set_cache_dir(dir: PathBuf) {
     let _ = CACHE_DIR.set(dir);
 }
 
+/// Made again if something removed it (a cache cleaner, or another test).
 fn cache_dir() -> PathBuf {
-    CACHE_DIR.get().cloned().unwrap_or_else(|| {
-        let d = std::env::temp_dir().join("tunewire-stream-cache");
-        let _ = std::fs::create_dir_all(&d);
-        d
-    })
+    let d = CACHE_DIR.get().cloned().unwrap_or_else(|| std::env::temp_dir().join("tunewire-stream-cache"));
+    let _ = std::fs::create_dir_all(&d);
+    d
 }
 
 use crate::http::agent;

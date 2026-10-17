@@ -13,11 +13,11 @@ async function renderCharts(country) {
   const body = $('#charts-body');
   if (!state.chartCountries) state.chartCountries = await call('chart_countries').catch(() => [{ code: 'ZZ', name: 'Global' }]);
   const current = country || state.settings?.charts_country || 'ZZ';
-  const select = h('select', { class: 'input', style: 'width:auto' },
+  const select = h('select', { class: 'input w-auto' },
     ...state.chartCountries.map((c) => h('option', { value: c.code, selected: c.code === current }, c.name)));
   select.addEventListener('change', () => renderCharts(select.value));
   const head = h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Charts'), h('span', { class: 'meta' }, 'From YouTube Music, updated daily')), h('div', { class: 'actions' }, select));
-  body.replaceChildren(head, h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Loading charts…'));
+  body.replaceChildren(head, loadingBox('Loading charts', h('div', { class: 'track-list' }, ...skeletonRows(12))));
   let charts;
   try {
     charts = await call('get_charts', { country: current });
@@ -97,7 +97,7 @@ async function renderReleases(force = false) {
   const chips = h('div', { class: 'followed-chips' }, ...followed.map((a) => h('span', { class: 'chip' },
     h('button', { class: 'chip-name', onclick: () => openArtist(a.name) }, a.name),
     h('button', { class: 'chip-x', title: `Unfollow ${a.name}`, html: icon('x'), onclick: async () => { await call('follow_artist', { name: a.name }); renderReleases(); } }))));
-  body.replaceChildren(head, chips, h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Checking for new releases…'));
+  body.replaceChildren(head, chips, loadingBox('Checking for new releases', skeletonCards(8)));
   let feed;
   try {
     feed = await call('new_releases', { force });

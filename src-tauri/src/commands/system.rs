@@ -14,14 +14,16 @@ pub fn report_error(kind: String, message: String, details: Option<String>) {
     crate::report::report(&kind.chars().take(20).collect::<String>(), &message.chars().take(2000).collect::<String>(), &details.unwrap_or_default().chars().take(3000).collect::<String>());
 }
 
-/// Whether error reports can be sent (a webhook was built in).
+/// Whether error reports can be sent (the online backend is built in).
 #[tauri::command]
 pub fn reports_available() -> bool {
     crate::report::available()
 }
 
 pub fn apply_settings(st: &AppState, s: &Settings) {
-    crate::report::set_enabled(s.error_reports);
+    // Reports only after the first-run privacy question was answered with yes.
+    crate::report::set_enabled(s.error_reports && s.privacy_asked);
+    crate::scrobble::configure(s.scrobble_lastfm, s.scrobble_listenbrainz, &s.lastfm_api_key);
     st.audio.set_volume(s.volume);
     st.audio.set_eq(s.eq_enabled, &s.eq_gains);
     st.audio.set_device(&s.output_device);

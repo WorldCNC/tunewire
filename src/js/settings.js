@@ -13,7 +13,8 @@ async function updateSettings(patch) {
 function settingToggle(label, help, key) {
   const input = h('input', { type: 'checkbox', checked: !!state.settings[key] });
   input.addEventListener('change', async () => {
-    await updateSettings({ [key]: input.checked });
+    // Answering here counts as answering the first-run question.
+    await updateSettings(key === 'error_reports' ? { error_reports: input.checked, privacy_asked: true } : { [key]: input.checked });
     if (key === 'discord_rpc') toast(input.checked ? 'Discord Rich Presence on' : 'Discord Rich Presence off', 'ok', 1800);
     if (key === 'show_sources') document.body.classList.toggle('show-sources', input.checked);
     if (key === 'cover_accent') {
@@ -68,7 +69,7 @@ function renderSettings() {
     h('span', { class: 'n' }, String(i + 1)), miniLogo(p), h('span', { class: 'name' }, PLATFORMS[p].label),
     h('button', { class: 'icon-btn small', html: icon('up'), disabled: i === 0, title: 'Move up', onclick: () => move(i, -1) }),
     h('button', { class: 'icon-btn small', html: icon('down'), disabled: i === s.platform_order.length - 1, title: 'Move down', onclick: () => move(i, 1) }))));
-  const limit = h('input', { type: 'number', min: 3, max: 40, value: s.search_limit, style: 'width:70px' });
+  const limit = h('input', { class: 'w-70', type: 'number', min: 3, max: 40, value: s.search_limit });
   limit.addEventListener('change', () => updateSettings({ search_limit: Number(limit.value) }));
 
   const spotdl = state.tools?.spotdl;
@@ -76,9 +77,9 @@ function renderSettings() {
     ...[['auto', 'Automatic'], ['embed', 'Spotify web only'], ['spotdl', 'spotDL for links'], ['off', 'Off']]
       .map(([v, l]) => h('option', { value: v, selected: s.spotify_backend === v }, l)));
   backend.addEventListener('change', () => updateSettings({ spotify_backend: backend.value }));
-  const credId = h('input', { type: 'text', value: s.spotify_client_id || '', placeholder: 'Client ID', style: 'width:150px', spellcheck: 'false' });
+  const credId = h('input', { class: 'w-150', type: 'text', value: s.spotify_client_id || '', placeholder: 'Client ID', spellcheck: 'false' });
   const secretSaved = !!state.tools?.spotify_secret_saved;
-  const credSecret = h('input', { type: 'password', value: '', placeholder: secretSaved ? 'Saved in keychain' : 'Client secret', style: 'width:150px', spellcheck: 'false', autocomplete: 'off' });
+  const credSecret = h('input', { class: 'w-150', type: 'password', value: '', placeholder: secretSaved ? 'Saved in keychain' : 'Client secret', spellcheck: 'false', autocomplete: 'off' });
   credId.addEventListener('change', () => updateSettings({ spotify_client_id: credId.value.trim() }).then(() => toast('Client ID saved', 'ok', 1500)));
   credSecret.addEventListener('change', async () => {
     try {
@@ -141,8 +142,10 @@ function renderSettings() {
       discordStatusRow(),
       settingToggle('Rich Presence', 'Shows the current song, artist, cover and progress on your Discord profile while the desktop client is running.', 'discord_rpc'),
       settingToggle('Link button', 'Adds an “Open on YouTube Music” (or SoundCloud, …) button to the status.', 'discord_buttons')),
+    group('Scrobbling', null, ...scrobbleSettingsRows()),
+    group('Backup', null, ...backupSettingsRows()),
     group('Privacy', null,
-      settingToggle('Send error reports', 'When something breaks, Tunewire sends the developer a short report (app version, operating system and the error) so it can be fixed. Your folder paths and stream links are removed first; nothing about your library is sent.', 'error_reports')),
+      settingToggle('Send error reports', 'Off unless you turn it on. When something breaks, Tunewire sends the developer a short report (app version, operating system and the error) so it can be fixed. Your folder paths and stream links are removed first; nothing about your library is sent.', 'error_reports')),
     group('Tools', null,
       updateSettingsRow(),
       settingRow('yt-dlp', `${esc($('#health').title || '')}<br><code>${esc(state.ytdlpPath || '')}</code>`, recheck(checkHealth)),
@@ -192,8 +195,8 @@ function backgroundControl() {
 
 function strengthControl() {
   const v = state.settings.background_strength ?? 45;
-  const label = h('span', { class: 'meta', style: 'width:38px;text-align:right' }, `${v}%`);
-  const range = h('input', { type: 'range', min: 0, max: 100, step: 5, value: v, style: 'width:160px' });
+  const label = h('span', { class: 'meta w-38 text-right' }, `${v}%`);
+  const range = h('input', { class: 'w-160', type: 'range', min: 0, max: 100, step: 5, value: v });
   range.style.setProperty('--fill', `${v}%`);
   range.addEventListener('input', () => {
     label.textContent = `${range.value}%`;
@@ -205,7 +208,7 @@ function strengthControl() {
 }
 
 function outputDeviceControl() {
-  const sel = h('select', { style: 'max-width:240px' }, h('option', { value: '' }, 'System default'));
+  const sel = h('select', { class: 'maxw-240' }, h('option', { value: '' }, 'System default'));
   call('list_output_devices').then((devs) => {
     for (const d of devs) sel.append(h('option', { value: d.id, selected: d.id === state.settings.output_device }, d.default ? `${d.name} (default)` : d.name));
     if (state.settings.output_device && !devs.some((d) => d.id === state.settings.output_device)) {
@@ -270,8 +273,8 @@ function eqSetting() {
 
 function crossfadeControl() {
   const s = state.settings;
-  const label = h('span', { class: 'meta', style: 'width:34px;text-align:right' }, `${s.crossfade || 0} s`);
-  const range = h('input', { type: 'range', min: 0, max: 12, step: 1, value: s.crossfade || 0, style: 'width:140px' });
+  const label = h('span', { class: 'meta w-34 text-right' }, `${s.crossfade || 0} s`);
+  const range = h('input', { class: 'w-140', type: 'range', min: 0, max: 12, step: 1, value: s.crossfade || 0 });
   range.style.setProperty('--fill', `${((s.crossfade || 0) / 12) * 100}%`);
   range.addEventListener('input', () => { label.textContent = `${range.value} s`; range.style.setProperty('--fill', `${(range.value / 12) * 100}%`); });
   range.addEventListener('change', () => updateSettings({ crossfade: Number(range.value) }));

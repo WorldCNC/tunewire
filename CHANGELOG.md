@@ -3,6 +3,22 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
+## v1.0.5
+
+- Listen Together, rebuilt: only the host controls playback, the host can hand over or remove people and approve suggested songs, guests can chat and vote to skip, a sync indicator shows how close you are, and you can keep your own room link
+- Friends need your approval to follow you; sharing what you play is off until you turn it on, and you choose whether friends can compare Wrapped
+- Notifications for follow requests, accepted follows, changes to your shared playlists and friends starting a session
+- Shared playlists show whether they're synced, who's editing, and a Retry if something didn't sync; renames and new covers now reach everyone
+- Undo after deleting a playlist, removing songs or clearing history
+- Back up your whole library to one file and restore it; damaged library files repair themselves from a daily copy
+- Scrobble to Last.fm and ListenBrainz
+- Theme and plugin gallery
+- Links ask before joining a playlist or session or playing a song
+- Accounts sign in with Discord (guest accounts are gone)
+- Error reports are off unless you turn them on
+- Smoother scrolling in long playlists, keyboard navigation in song lists, screen reader labels, a compact player bar in narrow windows
+- New app icon
+
 ## v1.0.4
 
 - Accounts: sign in (or continue as a guest) to share and listen together; your music still lives on your computer

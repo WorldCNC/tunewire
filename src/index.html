@@ -15,7 +15,7 @@
     <!-- Title bar: window drag area, navigation and search (the window has no system frame). -->
     <header class="titlebar" data-tauri-drag-region>
       <div class="tb-left" data-tauri-drag-region>
-        <span class="tb-brand" data-tauri-drag-region><span class="tb-logo" aria-hidden="true"></span>Tunewire</span>
+        <span class="tb-brand" data-tauri-drag-region aria-label="Tunewire"><span class="tb-logo" aria-hidden="true"></span><span>tune<span class="tb-wire">wire</span></span></span>
         <button class="tb-nav" id="nav-back" title="Go back"><i data-icon="chevLeft"></i></button>
         <button class="tb-nav" id="nav-fwd" title="Go forward"><i data-icon="chevRight"></i></button>
       </div>
@@ -107,7 +107,7 @@
               </div>
               <div id="search-warnings"></div>
               <div class="table-head" id="results-head" hidden></div>
-              <div class="track-list" id="search-results"></div>
+              <div class="track-list" id="search-results" role="listbox" aria-label="Songs"></div>
             </div>
             <div id="search-grid" hidden></div>
             <h1 id="search-title" hidden></h1>
@@ -120,7 +120,7 @@
             <div class="actions"><button class="btn" id="history-clear"><i data-icon="trash"></i>Clear</button></div>
           </div>
           <div class="table-head" id="history-head"></div>
-          <div class="track-list" id="history-list"></div>
+          <div class="track-list" id="history-list" role="listbox" aria-label="Songs"></div>
         </section>
 
         <section class="view" id="view-themes">
@@ -129,6 +129,7 @@
             <div class="actions">
               <label class="btn"><i data-icon="upload"></i>Import<input type="file" id="theme-import-file" accept=".json,application/json" hidden /></label>
               <button class="btn" id="theme-import-paste"><i data-icon="clipboard"></i>Paste JSON</button>
+              <button class="btn primary" id="theme-gallery"><i data-icon="browse"></i>Gallery</button>
             </div>
           </div>
           <div class="theme-grid" id="theme-grid"></div>
@@ -138,7 +139,7 @@
         <section class="view" id="view-plugins">
           <div class="page-head">
             <h1>Plugins</h1>
-            <div class="actions"><button class="btn" id="plugins-reload"><i data-icon="refresh"></i>Reload</button></div>
+            <div class="actions"><button class="btn" id="plugins-reload"><i data-icon="refresh"></i>Reload</button><button class="btn primary" id="plugin-gallery"><i data-icon="browse"></i>Gallery</button></div>
           </div>
           <p class="meta" id="plugins-dir"></p>
           <div id="plugin-list" class="plugin-list"></div>
@@ -165,7 +166,7 @@
           <p class="meta" id="dl-dir"></p>
           <div id="dl-active"></div>
           <div class="table-head" id="dl-head" hidden></div>
-          <div class="track-list" id="dl-list"></div>
+          <div class="track-list" id="dl-list" role="listbox" aria-label="Songs"></div>
         </section>
 
         <section class="view" id="view-local">
@@ -180,7 +181,7 @@
           <div class="folder-list" id="local-folders"></div>
           <input class="input local-filter" id="local-filter" type="text" placeholder="Filter" spellcheck="false" />
           <div class="table-head" id="local-head" hidden></div>
-          <div class="track-list" id="local-list"></div>
+          <div class="track-list" id="local-list" role="listbox" aria-label="Songs"></div>
         </section>
 
         <section class="view" id="view-plugin-panel">
@@ -195,11 +196,11 @@
     <aside class="queue" id="queue">
       <div class="queue-head">
         <div class="panel-tabs" role="tablist">
-          <button data-panel="now" role="tab">Playing</button>
-          <button class="active" data-panel="queue" role="tab">Queue <span class="meta" id="queue-count"></span></button>
-          <button data-panel="lyrics" role="tab">Lyrics</button>
-          <button data-panel="friends" role="tab" class="cloud-only" hidden>Friends</button>
-          <button data-panel="together" role="tab" class="cloud-only" hidden>Together</button>
+          <button data-panel="now" role="tab" aria-controls="np-panel">Playing</button>
+          <button class="active" data-panel="queue" role="tab" aria-controls="queue-list">Queue <span class="meta" id="queue-count"></span></button>
+          <button data-panel="lyrics" role="tab" aria-controls="lyrics-panel">Lyrics</button>
+          <button data-panel="friends" role="tab" aria-controls="friends-panel" class="cloud-only" hidden>Friends</button>
+          <button data-panel="together" role="tab" aria-controls="together-panel" class="cloud-only" hidden>Together</button>
         </div>
         <div class="actions" id="lyrics-actions" hidden>
           <button class="icon-btn" id="lyrics-full" title="Full screen lyrics"><i data-icon="expand"></i></button>
@@ -210,11 +211,11 @@
         </div>
         <button class="icon-btn" id="panel-close" title="Close"><i data-icon="x"></i></button>
       </div>
-      <div class="np-panel" id="np-panel" hidden></div>
-      <div class="queue-list" id="queue-list"></div>
-      <div class="lyrics" id="lyrics-panel" hidden></div>
-      <div class="side-panel" id="friends-panel" hidden></div>
-      <div class="side-panel" id="together-panel" hidden></div>
+      <div class="np-panel" id="np-panel" role="tabpanel" hidden></div>
+      <div class="queue-list" id="queue-list" role="tabpanel"></div>
+      <div class="lyrics" id="lyrics-panel" role="tabpanel" hidden></div>
+      <div class="side-panel" id="friends-panel" role="tabpanel" hidden></div>
+      <div class="side-panel" id="together-panel" role="tabpanel" hidden></div>
     </aside>
 
     <footer class="player-bar" id="player-bar">
@@ -237,11 +238,11 @@
         </div>
         <div class="progress-row">
           <span class="time" id="t-pos">0:00</span>
-          <div class="progress" id="progress" role="slider" aria-label="Seek" tabindex="0">
+          <div class="progress" id="progress" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00 of 0:00" tabindex="0">
             <div class="track-bg"></div>
             <div class="buffered" id="p-buffered"></div>
             <div class="played" id="p-played"></div>
-            <div class="knob" id="p-knob"></div>
+            <div class="knob-wrap" id="p-knobwrap"><div class="knob" id="p-knob"></div></div>
             <div class="hover-time" id="p-hover"></div>
           </div>
           <span class="time" id="t-dur">0:00</span>
@@ -258,6 +259,7 @@
         <button class="icon-btn" id="btn-mute" title="Mute (M)"><i data-icon="volume"></i></button>
         <input type="range" id="volume" min="0" max="100" value="70" aria-label="Volume" />
         <button class="icon-btn" id="btn-full" title="Full screen"><i data-icon="expand"></i></button>
+        <button class="icon-btn" id="btn-more" title="More controls" aria-haspopup="menu"><i data-icon="dots"></i></button>
       </div>
     </footer>
   </div>
@@ -280,7 +282,6 @@
   <script src="js/plugins.js"></script>
   <script src="js/foryou.js"></script>
   <script src="js/shell.js"></script>
-  <script src="js/imports.js"></script>
   <script src="js/cloud.js"></script>
   <script src="js/social.js"></script>
   <script src="js/update.js"></script>

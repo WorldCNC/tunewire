@@ -1,19 +1,22 @@
-//! Automatic error reports to the developer's Discord webhook.
+//! Automatic error reports, sent only after the user agreed (first-run
+//! privacy question, Settings → Privacy).
 //!
-//! The webhook URL is baked in at build time from TUNEWIRE_REPORT_WEBHOOK
-//! (a CI secret), so it never appears in the source. Reports are short and
-//! scrubbed (home folder, stream URLs), de-duplicated, rate-limited, and can
-//! be turned off in Settings → Privacy.
+//! Reports go to the `report` Edge Function of Tunewire's Supabase project,
+//! which validates them, rate-limits per address and forwards them to the
+//! developer's Discord channel. The webhook itself is a server-side secret:
+//! nothing in this binary can be used to post to or delete it. Reports are
+//! short and scrubbed (home folder, stream URLs), de-duplicated and
+//! rate-limited here as well.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const WEBHOOK: Option<&str> = option_env!("TUNEWIRE_REPORT_WEBHOOK");
 const MAX_PER_SESSION: usize = 15;
 
-static ENABLED: AtomicBool = AtomicBool::new(true);
+/// Off until the settings say the user agreed.
+static ENABLED: AtomicBool = AtomicBool::new(false);
 static SENT: AtomicUsize = AtomicUsize::new(0);
 static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static LAST: Mutex<Option<Instant>> = Mutex::new(None);
@@ -22,8 +25,9 @@ pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
 
+/// Reports need the online backend (the Edge Function lives there).
 pub fn available() -> bool {
-    WEBHOOK.is_some_and(|w| w.starts_with("https://discord.com/api/webhooks/") || w.starts_with("https://discordapp.com/api/webhooks/"))
+    crate::cloud::config().is_some()
 }
 
 /// Remove personal bits: home folder paths, user names in paths, long URLs.
@@ -65,23 +69,14 @@ fn clip(s: &str, n: usize) -> String {
     }
 }
 
+/// What the Edge Function accepts (it re-checks every field).
 fn payload(kind: &str, message: &str, details: &str) -> serde_json::Value {
-    let color = match kind {
-        "crash" => 0xE5_3935,
-        "frontend" => 0xFB_8C00,
-        _ => 0xFD_D835,
-    };
     serde_json::json!({
-        "username": "Tunewire error reports",
-        "embeds": [{
-            "title": clip(&format!("{kind}: {}", scrub(message).lines().next().unwrap_or("")), 240),
-            "description": clip(&format!("```\n{}\n```", scrub(&format!("{message}\n{details}")).trim()), 3900),
-            "color": color,
-            "fields": [
-                { "name": "Version", "value": env!("CARGO_PKG_VERSION"), "inline": true },
-                { "name": "OS", "value": format!("{} {}", std::env::consts::OS, std::env::consts::ARCH), "inline": true },
-            ],
-        }]
+        "kind": clip(kind, 20),
+        "title": clip(&scrub(message).lines().next().unwrap_or("").to_string(), 240),
+        "details": clip(scrub(&format!("{message}\n{details}")).trim(), 3500),
+        "version": env!("CARGO_PKG_VERSION"),
+        "os": format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
     })
 }
 
@@ -104,9 +99,14 @@ fn should_send(kind: &str, message: &str) -> bool {
 }
 
 fn send_blocking(body: serde_json::Value) {
-    let Some(url) = WEBHOOK else { return };
+    let Some(c) = crate::cloud::config() else { return };
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(4))).build().into();
-    let _ = agent.post(url).header("Content-Type", "application/json").send(body.to_string());
+    let _ = agent
+        .post(&format!("{}/functions/v1/report", c.url))
+        .header("apikey", &c.anon_key)
+        .header("Authorization", &format!("Bearer {}", c.anon_key))
+        .header("Content-Type", "application/json")
+        .send(body.to_string());
 }
 
 /// Report in the background.
@@ -158,9 +158,11 @@ mod tests {
 
     #[test]
     fn dedupes() {
-        // No webhook in tests: never sends, never panics.
+        // Not enabled (no consent yet): never sends, never panics.
         assert!(!should_send("error", "x"));
         let p = payload("error", "boom", "details");
-        assert_eq!(p["embeds"][0]["title"], "error: boom");
+        assert_eq!(p["title"], "boom");
+        assert_eq!(p["kind"], "error");
+        assert!(p["details"].as_str().unwrap().contains("details"));
     }
 }

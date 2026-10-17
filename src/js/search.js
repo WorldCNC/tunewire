@@ -220,7 +220,7 @@ function renderSearchAll() {
       h('div', {}, h('h2', {}, 'Songs', state.results.length > 4 ? h('button', { class: 'btn small', onclick: () => setSearchTab('songs') }, 'Show all') : null), songList)));
   }
   if (x) {
-    const shelf = (title, cards, tab) => (cards.length ? h('div', {}, h('div', { class: 'section-title' }, title, h('button', { class: 'btn small', style: 'margin-left:auto', onclick: () => setSearchTab(tab) }, 'Show all')), cardRow(cards, 7)) : null);
+    const shelf = (title, cards, tab) => (cards.length ? h('div', {}, h('div', { class: 'section-title' }, title, h('button', { class: 'btn small ml-auto', onclick: () => setSearchTab(tab) }, 'Show all')), cardRow(cards, 7)) : null);
     blocks.push(shelf('Artists', x.artists, 'artists'), shelf('Albums', x.albums, 'albums'), shelf('Playlists', x.playlists, 'playlists'));
     if (srch.extrasErr && !state.results.length) blocks.push(h('div', { class: 'empty' }, h('p', {}, srch.extrasErr)));
   }
@@ -234,7 +234,7 @@ function renderSearchAll() {
 function renderSearchGrid() {
   const box = $('#search-grid');
   const x = srch.extras;
-  if (!x) { box.replaceChildren(h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Searching…')); return; }
+  if (!x) { box.replaceChildren(loadingBox('Searching', skeletonCards(8))); return; }
   const cards = x[srch.tab] || [];
   box.replaceChildren(cards.length ? h('div', { class: 'card-row' }, ...cards.map((c, i) => cardTile(c, i))) : h('div', { class: 'empty' }, h('p', {}, `No ${srch.tab} found.`)));
 }
@@ -254,8 +254,8 @@ async function renderHero() {
   const recent = recentSearches();
   if (recent.length) {
     blocks.push(h('div', { class: 'search-home-block' },
-      h('div', { class: 'section-title', style: 'margin-top:0' }, 'Recent searches',
-        h('button', { class: 'btn small', style: 'margin-left:auto', onclick: async () => { await call('clear_search_history', {}).catch(() => {}); state.settings.search_history = []; renderHero(); } }, 'Clear recent searches')),
+      h('div', { class: 'section-title mt-0' }, 'Recent searches',
+        h('button', { class: 'btn small ml-auto', onclick: async () => { await call('clear_search_history', {}).catch(() => {}); state.settings.search_history = []; renderHero(); } }, 'Clear recent searches')),
       h('div', { class: 'recent-cards' }, ...recent.map((q) => h('button', { class: 'recent-card', onclick: () => { $('#search-input').value = q; syncSearchClear(); doSearch(q); } },
         h('span', { class: 'rc-ico', html: icon('clock') }), h('span', {}, q))))));
   }
@@ -317,7 +317,7 @@ async function openMood(m, { push = true } = {}) {
   const body = $('#mood-body');
   body.replaceChildren(
     h('div', { class: 'hero', style: `--hero:${saturate(m.color)};min-height:220px` }, h('div', { class: 'hero-meta' }, h('div', { class: 'hero-kicker' }, 'Browse'), h('h1', { class: 'hero-title' }, m.title))),
-    h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Loading…'));
+    loadingBox('Loading', h('div', { class: 'section-title sk w-20' }), skeletonCards(6), h('div', { class: 'section-title sk w-20' }), skeletonCards(6)));
   let shelves;
   try { shelves = await call('ytm_mood_page', { params: m.params }); } catch (e) { if (seq === moodSeq) body.lastChild.replaceWith(h('div', { class: 'empty' }, h('p', {}, errMsg(e)))); return; }
   if (seq !== moodSeq) return;

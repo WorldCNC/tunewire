@@ -223,8 +223,8 @@ pub struct StreamInfo {
 /// (decoded via libopus), then anything else.
 pub const AUDIO_FORMAT: &str = "bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio[acodec=mp3]/bestaudio[acodec=opus]/bestaudio[acodec=flac]/bestaudio[acodec=vorbis]/bestaudio";
 
-/// Equivalent of `yt-dlp -g -f bestaudio --no-playlist <url>`, but via `-j` so
-/// we also receive the HTTP headers, codec and duration of the chosen format.
+// Equivalent of `yt-dlp -g -f bestaudio --no-playlist <url>`, but via `-j` so
+// we also receive the HTTP headers, codec and duration of the chosen format.
 // ---------------------------------------------------------------------------
 // Stream URL cache + prefetch: resolving takes 1-2 s, so likely next songs are
 // resolved ahead of time (hover, top result, next in queue) and a click only

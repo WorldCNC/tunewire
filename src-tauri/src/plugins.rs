@@ -156,6 +156,57 @@ impl PluginStore {
         out
     }
 
+    /// Install (or replace) a plugin from downloaded files. Everything is
+    /// written to a staging folder and checked (manifest, permissions,
+    /// stylesheet) before it replaces the installed copy.
+    pub fn install_files(&self, id: &str, files: &[(String, Vec<u8>)]) -> AppResult<Manifest> {
+        if !valid_id(id) {
+            return Err(AppError::Plugin("invalid plugin id".into()));
+        }
+        if files.len() > 8 || !files.iter().any(|(n, _)| n == "manifest.json") {
+            return Err(AppError::Plugin(format!("{id}: a plugin needs manifest.json and at most 8 files")));
+        }
+        let staging_id = format!(".install-{id}");
+        let staging = self.dir.join(&staging_id);
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging)?;
+        let result = (|| {
+            for (name, data) in files {
+                if !valid_file(name) || data.len() as u64 > MAX_JS {
+                    return Err(AppError::Plugin(format!("{id}: file '{name}' isn't allowed")));
+                }
+                crate::store::write_atomic(&staging.join(name), data)?;
+            }
+            let path = staging.join("manifest.json");
+            let s = std::fs::read_to_string(&path)?;
+            let mut m: Manifest = serde_json::from_str(&s).map_err(|e| AppError::Plugin(format!("{id}: invalid manifest.json ({e})")))?;
+            m.id = id.to_string();
+            if !valid_file(&m.main) || !staging.join(&m.main).exists() || m.style.as_deref().is_some_and(|s| !valid_file(s) || !staging.join(s).exists()) {
+                return Err(AppError::Plugin(format!("{id}: the manifest names files that aren't in the plugin")));
+            }
+            if let Some(bad) = m.permissions.iter().find(|p| !PERMISSIONS.contains(&p.as_str())) {
+                return Err(AppError::Plugin(format!("{id}: unknown permission '{bad}'")));
+            }
+            if let Some(style) = &m.style {
+                let css = std::fs::read_to_string(staging.join(style))?;
+                crate::css_guard::check(&css).map_err(|why| AppError::Plugin(format!("{id}: stylesheet refused: {why}")))?;
+            }
+            Ok(m)
+        })();
+        match result {
+            Ok(m) => {
+                let target = self.dir.join(id);
+                let _ = std::fs::remove_dir_all(&target);
+                std::fs::rename(&staging, &target)?;
+                Ok(m)
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&staging);
+                Err(e)
+            }
+        }
+    }
+
     pub fn exists(&self, id: &str) -> bool {
         valid_id(id) && self.dir.join(id).join("manifest.json").exists()
     }
@@ -176,7 +227,13 @@ impl PluginStore {
         };
         let js = read(&manifest.main, MAX_JS)?;
         let css = match &manifest.style {
-            Some(s) => Some(read(s, MAX_CSS)?),
+            // The stylesheet is injected into the page, outside the worker's
+            // sandbox: it may not load anything from the internet.
+            Some(s) => {
+                let css = read(s, MAX_CSS)?;
+                crate::css_guard::check(&css).map_err(|why| AppError::Plugin(format!("{id}: stylesheet refused: {why}")))?;
+                Some(css)
+            }
             None => None,
         };
         // Fill in declared defaults for settings the user never touched.

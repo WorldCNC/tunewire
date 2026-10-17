@@ -1,0 +1,32 @@
+{
+  "id": "ember",
+  "name": "Ember",
+  "author": "Tunewire",
+  "dark": true,
+  "vars": {
+    "--bg": "#150d0b",
+    "--bg-elev": "#1d1210",
+    "--bg-elev-2": "#271814",
+    "--surface-hover": "#2c1b16",
+    "--selected": "#3a221b",
+    "--border": "#33201a",
+    "--text": "#f6e7df",
+    "--text-dim": "#c1a395",
+    "--text-faint": "#8a6e62",
+    "--accent": "#ff7a45",
+    "--accent-contrast": "#200a02",
+    "--accent-soft": "rgba(255, 122, 69, 0.14)",
+    "--danger": "#e5675f",
+    "--warn": "#e5a54b",
+    "--ok": "#6dbf8b",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(0, 0, 0, 0.45)",
+    "--badge-soundcloud": "#ff5500",
+    "--badge-ytmusic": "#ff0033",
+    "--badge-youtube": "#ff0000",
+    "--badge-spotify": "#1ed760"
+  },
+  "css": ""
+}

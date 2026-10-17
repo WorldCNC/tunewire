@@ -1,0 +1,32 @@
+{
+  "id": "aurora",
+  "name": "Aurora",
+  "author": "Tunewire",
+  "dark": true,
+  "vars": {
+    "--bg": "#0b1020",
+    "--bg-elev": "#111830",
+    "--bg-elev-2": "#18213d",
+    "--surface-hover": "#1c2747",
+    "--selected": "#22305a",
+    "--border": "#243055",
+    "--text": "#e8ecff",
+    "--text-dim": "#9aa6cf",
+    "--text-faint": "#66729a",
+    "--accent": "#7cf0c8",
+    "--accent-contrast": "#05221a",
+    "--accent-soft": "rgba(124, 240, 200, 0.14)",
+    "--danger": "#e5675f",
+    "--warn": "#e5a54b",
+    "--ok": "#7cf0c8",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(0, 0, 0, 0.45)",
+    "--badge-soundcloud": "#ff5500",
+    "--badge-ytmusic": "#ff0033",
+    "--badge-youtube": "#ff0000",
+    "--badge-spotify": "#1ed760"
+  },
+  "css": ""
+}

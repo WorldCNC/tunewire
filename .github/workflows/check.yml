@@ -1,5 +1,7 @@
-# Compiles and tests on Windows (the platform releases ship for) on every push,
-# so platform-specific code can't break a release unnoticed.
+# Every push and pull request: build and test on Windows and Linux (the
+# platforms releases ship for), lint the Rust code, check the frontend
+# scripts parse, test the Edge Functions, and run the database migrations
+# plus their row level security tests on a real Postgres.
 name: Check
 
 on:
@@ -8,11 +10,23 @@ on:
   pull_request:
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev libdbus-1-dev pkg-config cmake
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -22,3 +36,32 @@ jobs:
       - name: Offline tests
         working-directory: src-tauri
         run: cargo test --locked
+      - name: Clippy
+        if: matrix.platform == 'ubuntu-22.04'
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets -- -D clippy::correctness -D clippy::suspicious
+
+  web:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Frontend scripts parse
+        run: deno run --allow-read scripts/check-frontend.ts
+      - name: Edge Functions
+        run: |
+          deno check supabase/functions/report/index.ts supabase/functions/share/index.ts
+          deno test supabase/functions
+      - name: Gallery index is up to date
+        run: |
+          python3 scripts/build-gallery.py
+          git diff --exit-code gallery/index.json
+
+  database:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migrations and row level security tests
+        run: scripts/test-db.sh

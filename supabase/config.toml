@@ -161,7 +161,8 @@ site_url = "http://127.0.0.1:5590/callback"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["http://127.0.0.1:5590/callback", "http://localhost:5590/callback"]
+# The app tries ports 5590-5594 (the first free one).
+additional_redirect_urls = ["http://127.0.0.1:5590/callback", "http://127.0.0.1:5591/callback", "http://127.0.0.1:5592/callback", "http://127.0.0.1:5593/callback", "http://127.0.0.1:5594/callback"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -176,7 +177,9 @@ refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
 enable_signup = true
 # Allow/disallow anonymous sign-ins to your project.
-enable_anonymous_sign_ins = true
+# Off: Tunewire accounts are Discord only (the database refuses writes from
+# anonymous sessions too).
+enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
@@ -320,6 +323,12 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
+# Tunewire signs in with Discord only.
+[auth.external.discord]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_DISCORD_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_DISCORD_SECRET)"
+
 [auth.external.apple]
 enabled = false
 client_id = ""
@@ -371,6 +380,14 @@ enabled = false
 authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
+
+[functions.report]
+# Error reports come from the app with the public anon key.
+verify_jwt = false
+
+[functions.share]
+# Link previews are fetched by chat apps without any key.
+verify_jwt = false
 
 [edge_runtime]
 enabled = true

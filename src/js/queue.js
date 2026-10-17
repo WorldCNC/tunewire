@@ -15,7 +15,7 @@ function renderQueue() {
   $('#queue-count').textContent = items.length ? `· ${items.length}` : '';
   const list = $('#queue-list');
   if (!items.length) {
-    list.replaceChildren(h('div', { class: 'empty', style: 'padding:50px 16px' },
+    list.replaceChildren(h('div', { class: 'empty pad-50'},
       h('p', {}, 'Queue is empty'), h('p', { class: 'muted small' }, 'Add songs from search or a playlist.')));
     return;
   }
@@ -40,7 +40,7 @@ function renderQueue() {
     if (isCur) {
       const el = h('div', { class: 'q-now', dataset: { index: i, uid: item.uid } }, thumbEl(t.thumbnail),
         h('div', { class: 't-main' }, h('div', { class: 't-title', title: t.title }, t.title),
-          h('div', { class: 't-sub' }, h('span', { html: EQ }), logo, h('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, t.artist || ''))));
+          h('div', { class: 't-sub' }, h('span', { html: EQ }), logo, h('span', { class: 'ellipsis' }, t.artist || ''))));
       el.addEventListener('contextmenu', menu);
       return el;
     }
@@ -49,7 +49,7 @@ function renderQueue() {
       thumbEl(t.thumbnail),
       h('div', { class: 't-main' },
         h('div', { class: 't-title', title: t.title }, t.title),
-        h('div', { class: 't-sub' }, logo, h('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, t.artist || ''))),
+        h('div', { class: 't-sub' }, logo, h('span', { class: 'ellipsis' }, t.artist || ''))),
       h('div', { class: 'q-actions' },
         h('button', { class: 'icon-btn', title: 'Move up', html: icon('up'), disabled: i === 0, onclick: (e) => { e.stopPropagation(); moveQueue(i, i - 1); } }),
         h('button', { class: 'icon-btn', title: 'Move down', html: icon('down'), disabled: i === items.length - 1, onclick: (e) => { e.stopPropagation(); moveQueue(i, i + 1); } }),

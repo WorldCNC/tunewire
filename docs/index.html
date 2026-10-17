@@ -2,95 +2,656 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tunewire</title>
-<meta name="description" content="A free music player for YouTube Music, SoundCloud, YouTube and Spotify.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800;900&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tunewire: free music player for YouTube Music, SoundCloud, YouTube &amp; Spotify</title>
+<meta name="description" content="Tunewire is a free desktop music player. Search YouTube Music, SoundCloud, YouTube and Spotify at once, import your Spotify library, listen together with friends and share playlists. No ads, your music stays on your computer.">
+<link rel="canonical" href="https://worldcnc.github.io/tunewire/">
+<meta name="theme-color" content="#0b0b14" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef0fb" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="preload" href="fonts/Figtree-VF.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preconnect" href="https://api.github.com" crossorigin>
+
+<!-- Link previews (Discord, WhatsApp, iMessage, X…) -->
+<meta property="og:site_name" content="Tunewire">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://worldcnc.github.io/tunewire/">
+<meta property="og:title" content="Tunewire: all your music, one beautiful player">
+<meta property="og:description" content="Search YouTube Music, SoundCloud, YouTube and Spotify at once. Listen together with friends. Free, no ads.">
+<meta property="og:image" content="https://worldcnc.github.io/tunewire/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Tunewire music player">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Tunewire: all your music, one beautiful player">
+<meta name="twitter:description" content="Search YouTube Music, SoundCloud, YouTube and Spotify at once. Listen together with friends. Free, no ads.">
+<meta name="twitter:image" content="https://worldcnc.github.io/tunewire/og.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Tunewire",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Windows, Linux",
+  "description": "A free desktop music player for YouTube Music, SoundCloud, YouTube and Spotify, with Listen Together, collaborative playlists, lyrics, stats and Wrapped.",
+  "url": "https://worldcnc.github.io/tunewire/",
+  "downloadUrl": "https://github.com/WorldCNC/tunewire/releases/latest",
+  "image": "https://worldcnc.github.io/tunewire/og.png",
+  "screenshot": "https://worldcnc.github.io/tunewire/img/home.webp",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+
 <style>
-  :root { --bg: #0d0d0f; --card: #17171b; --text: #f2f2f2; --dim: #a7a7ad; --accent: #4d8dff; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: radial-gradient(80% 60% at 30% 0%, #1d2a4a 0%, var(--bg) 60%); color: var(--text); font: 15px/1.5 Figtree, system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 40px 16px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 22px; margin-bottom: 28px; }
-  .logo { width: 30px; height: 30px; border-radius: 8px; background: conic-gradient(from 210deg, var(--accent), #b9d2ff, var(--accent)); }
-  .card { width: min(560px, 100%); background: var(--card); border-radius: 16px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
-  .head { display: flex; gap: 18px; align-items: center; }
-  .cover { width: 120px; height: 120px; border-radius: 10px; background: #26262c center/cover; flex: none; }
-  .cover.round { border-radius: 50%; }
-  .kicker { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
-  h1 { margin: 4px 0; font-size: clamp(24px, 6vw, 36px); line-height: 1.1; font-weight: 900; letter-spacing: -.02em; overflow-wrap: anywhere; }
-  .sub { color: var(--dim); }
-  .songs { margin: 18px 0 0; padding: 0; list-style: none; max-height: 300px; overflow: auto; }
-  .songs li { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid #222228; }
-  .songs img { width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: #26262c; }
-  .songs b { display: block; font-weight: 600; }
-  .songs span { color: var(--dim); font-size: 13px; }
-  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 22px; border-radius: 23px; font-weight: 800; text-decoration: none; color: var(--text); border: 1px solid #3a3a42; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #06122b; }
-  .note { color: var(--dim); font-size: 13px; margin-top: 14px; }
-  .dl { margin-top: 26px; width: min(560px, 100%); color: var(--dim); font-size: 13px; text-align: center; }
-  .dl a { color: var(--text); }
+@font-face {
+  font-family: Figtree;
+  src: url(fonts/Figtree-VF.woff2) format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+}
+
+:root {
+  --bg: #07070d;
+  --text: #f4f5fb;
+  --dim: #b4b7c9;
+  --faint: #7d8096;
+  --accent: #7aa2ff;
+  --accent-2: #c48bff;
+  --accent-3: #4fe3c1;
+  --on-accent: #070b1a;
+  --glass: rgba(255, 255, 255, .075);
+  --glass-strong: rgba(255, 255, 255, .12);
+  --glass-edge: rgba(255, 255, 255, .22);
+  --glass-shine: rgba(255, 255, 255, .55);
+  --glass-shadow: 0 24px 70px rgba(0, 0, 0, .45), 0 2px 8px rgba(0, 0, 0, .25);
+  --blob-a: #5b3cff;
+  --blob-b: #ff4fa7;
+  --blob-c: #1ec8ff;
+  --blob-d: #2bd9a4;
+  --blob-opacity: .55;
+  --radius: 24px;
+  --radius-sm: 16px;
+  --max: 1160px;
+  --gutter: 20px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #eef0fb;
+    --text: #12131c;
+    --dim: #4a4d63;
+    --faint: #7a7d93;
+    --accent: #3d5cff;
+    --accent-2: #9b4dff;
+    --accent-3: #0aa37c;
+    --on-accent: #ffffff;
+    --glass: rgba(255, 255, 255, .55);
+    --glass-strong: rgba(255, 255, 255, .72);
+    --glass-edge: rgba(255, 255, 255, .9);
+    --glass-shine: rgba(255, 255, 255, .95);
+    --glass-shadow: 0 24px 60px rgba(40, 48, 110, .16), 0 2px 8px rgba(40, 48, 110, .08);
+    --blob-opacity: .45;
+  }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 Figtree, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+
+/* The light behind the glass: slow aurora blobs (transform only). */
+.aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.aurora i {
+  position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%;
+  filter: blur(70px); opacity: var(--blob-opacity); will-change: transform;
+  animation: drift 26s ease-in-out infinite alternate;
+}
+.aurora i:nth-child(1) { background: radial-gradient(circle at 30% 30%, var(--blob-a), transparent 65%); top: -22vmax; left: -12vmax; }
+.aurora i:nth-child(2) { background: radial-gradient(circle at 60% 40%, var(--blob-b), transparent 62%); top: 8vmax; right: -24vmax; animation-duration: 31s; animation-delay: -8s; }
+.aurora i:nth-child(3) { background: radial-gradient(circle at 50% 50%, var(--blob-c), transparent 62%); bottom: -30vmax; left: 8vmax; animation-duration: 36s; animation-delay: -15s; }
+.aurora i:nth-child(4) { background: radial-gradient(circle at 50% 50%, var(--blob-d), transparent 60%); top: 55vmax; right: 10vmax; width: 40vmax; height: 40vmax; animation-duration: 29s; animation-delay: -4s; }
+.aurora::after {
+  content: ""; position: absolute; inset: 0; opacity: .5; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+}
+@keyframes drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+  100% { transform: translate3d(-4vmax, 7vmax, 0) scale(.95); }
+}
+
+/* Liquid glass: translucent, saturated blur, a bright rim on top and a
+   soft highlight that follows the pointer. */
+.glass {
+  position: relative;
+  background: linear-gradient(145deg, var(--glass-strong), var(--glass) 55%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 rgba(255, 255, 255, .04);
+  isolation: isolate;
+}
+.glass::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 1;
+  background: linear-gradient(135deg, var(--glass-shine), rgba(255, 255, 255, .06) 30%, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, .28));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+.glass::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1;
+  background: radial-gradient(420px circle at var(--mx, 30%) var(--my, -20%), rgba(255, 255, 255, .14), transparent 45%);
+  opacity: var(--glow, .7); transition: opacity .3s;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: color-mix(in srgb, var(--bg) 88%, var(--text)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+.wrap { width: min(var(--max), 100% - 2 * var(--gutter)); margin-inline: auto; }
+
+/* Navigation */
+.nav { position: sticky; top: 12px; z-index: 20; margin-top: 12px; }
+.nav .bar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-radius: 999px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 850; font-size: 18px; letter-spacing: -.01em; text-decoration: none; margin-right: auto; }
+.brand img { width: auto; height: 28px; filter: drop-shadow(0 4px 14px rgba(90, 70, 255, .45)); }
+.brand { font-size: 21px; letter-spacing: -.02em; }
+.brand .wire { background: linear-gradient(100deg, #9b5cff, #4d7dff 50%, #18c8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.nav a.link { text-decoration: none; color: var(--dim); font-weight: 600; font-size: 14.5px; padding: 8px 12px; border-radius: 999px; transition: color .2s, background .2s; }
+.nav a.link:hover { color: var(--text); background: rgba(255, 255, 255, .08); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 52px; padding: 0 24px; border-radius: 999px; border: 0; cursor: pointer;
+  font: inherit; font-weight: 800; font-size: 16px; text-decoration: none; white-space: nowrap;
+  transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s, background .2s;
+}
+.btn svg { width: 20px; height: 20px; flex: none; }
+.btn.primary {
+  color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -2px 6px rgba(0, 0, 0, .15);
+}
+.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 16px 40px color-mix(in srgb, var(--accent) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, .5); }
+.btn.ghost { color: var(--text); }
+.btn.ghost:hover { transform: translateY(-2px); }
+.btn.small { height: 40px; padding: 0 18px; font-size: 14.5px; }
+.btn:active { transform: translateY(0) scale(.98); }
+
+/* Hero */
+.hero { padding: 72px 0 40px; text-align: center; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 10px; border-radius: 999px; font-size: 13.5px; font-weight: 700; color: var(--dim); }
+.pill b { color: var(--text); }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-3); box-shadow: 0 0 12px var(--accent-3); }
+h1 {
+  margin: 22px auto 18px; max-width: 14ch;
+  font-size: clamp(42px, 8.2vw, 92px); line-height: .98; font-weight: 900; letter-spacing: -.045em;
+}
+h1 .grad { background: linear-gradient(100deg, var(--accent) 10%, var(--accent-2) 55%, #ff7eb6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lead { margin: 0 auto; max-width: 620px; color: var(--dim); font-size: clamp(17px, 2.2vw, 20px); }
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 32px 0 12px; }
+.cta-note { color: var(--faint); font-size: 13.5px; min-height: 1.5em; }
+.cta-note a { color: var(--dim); }
+
+/* Shared link card */
+.share { max-width: 620px; margin: 0 auto 36px; padding: 22px; text-align: left; }
+.share[hidden] { display: none; }
+.share .head { display: flex; gap: 18px; align-items: center; }
+.share .cover { width: 112px; height: 112px; border-radius: 16px; flex: none; background: linear-gradient(135deg, var(--blob-a), var(--blob-b)) center / cover; box-shadow: 0 12px 30px rgba(0, 0, 0, .35); }
+.share .cover.round { border-radius: 50%; }
+.share .kicker { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.share h2 { margin: 4px 0 2px; font-size: clamp(22px, 4.8vw, 32px); line-height: 1.1; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.share .sub { color: var(--dim); overflow-wrap: anywhere; }
+.share .songs { list-style: none; margin: 16px 0 0; padding: 0; max-height: 260px; overflow: auto; }
+.share .songs li { display: flex; gap: 12px; align-items: center; padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+.share .songs img, .share .songs .noimg { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; flex: none; background: rgba(255, 255, 255, .08); }
+.share .songs b { display: block; font-weight: 700; }
+.share .songs span { color: var(--dim); font-size: 13.5px; }
+.share .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.share .note { color: var(--faint); font-size: 13.5px; margin-top: 12px; }
+
+/* Showcase */
+.showcase { position: relative; margin: 40px auto 0; max-width: 1080px; perspective: 1600px; }
+.window { padding: 10px; border-radius: 22px; transform: rotateX(8deg) translateZ(0); transform-origin: 50% 100%; transition: transform .8s cubic-bezier(.2, .8, .2, 1); }
+.showcase.in .window { transform: rotateX(0) translateZ(0); }
+.window .dots { display: flex; gap: 7px; padding: 4px 6px 10px; }
+.window .dots i { width: 11px; height: 11px; border-radius: 50%; background: rgba(255, 255, 255, .25); }
+.window img { border-radius: 14px; width: 100%; height: auto; aspect-ratio: 1600 / 978; }
+.float { position: absolute; width: 34%; padding: 8px; border-radius: 18px; }
+.float img { border-radius: 12px; width: 100%; height: auto; aspect-ratio: 800 / 489; }
+.float.left { left: -6%; bottom: -14%; transform: rotate(-4deg); }
+.float.right { right: -5%; top: 18%; transform: rotate(3.5deg); }
+
+/* Sections */
+section { padding: 96px 0 0; }
+.section-head { text-align: center; max-width: 680px; margin: 0 auto 40px; }
+.eyebrow { font-weight: 800; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+h2.title { margin: 10px 0 12px; font-size: clamp(32px, 5vw, 52px); line-height: 1.05; letter-spacing: -.035em; font-weight: 900; }
+.section-head p { color: var(--dim); margin: 0; font-size: 18px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { padding: 24px; border-radius: var(--radius); }
+.card .ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; margin-bottom: 16px; color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 8px 20px rgba(0, 0, 0, .2); }
+.card .ico svg { width: 22px; height: 22px; }
+.card h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--dim); font-size: 15px; }
+.i1 { background: linear-gradient(135deg, #6a7dff, #a45bff); }
+.i2 { background: linear-gradient(135deg, #ff6aa8, #ff8a5b); }
+.i3 { background: linear-gradient(135deg, #18c7ff, #3d7bff); }
+.i4 { background: linear-gradient(135deg, #2bd9a4, #13a3c4); }
+.i5 { background: linear-gradient(135deg, #ffb340, #ff6a3d); }
+.i6 { background: linear-gradient(135deg, #b16cff, #ff5fd2); }
+
+/* Listen together */
+.split { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+.split .copy h2.title { text-align: left; }
+.checks { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 12px; }
+.checks li { display: flex; gap: 12px; color: var(--dim); }
+.checks svg { flex: none; width: 22px; height: 22px; color: var(--accent-3); margin-top: 1px; }
+.checks b { color: var(--text); }
+.session { padding: 20px; }
+.session .top { display: flex; justify-content: space-between; align-items: center; }
+.session .live { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; }
+.session .live i { width: 8px; height: 8px; border-radius: 50%; background: #5ad38a; box-shadow: 0 0 10px #5ad38a; animation: beat 1.4s ease-in-out infinite; }
+@keyframes beat { 50% { transform: scale(1.5); opacity: .6; } }
+.people { display: flex; margin: 16px 0; }
+.people span { width: 40px; height: 40px; border-radius: 50%; margin-left: -10px; display: grid; place-items: center; font-weight: 800; color: #fff; border: 2px solid rgba(255, 255, 255, .5); }
+.people span:first-child { margin-left: 0; }
+.np { display: flex; gap: 14px; align-items: center; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, .07); }
+.np .art { width: 56px; height: 56px; border-radius: 12px; background: linear-gradient(135deg, #a855f7, #ec4899); flex: none; }
+.np b { display: block; }
+.np span { color: var(--dim); font-size: 14px; }
+.prog { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .15); margin-top: 8px; overflow: hidden; }
+.prog i { display: block; height: 100%; width: 42%; background: var(--text); border-radius: 2px; }
+.chat { margin-top: 14px; display: grid; gap: 8px; font-size: 14px; }
+.chat div { padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgba(255, 255, 255, .08); width: fit-content; max-width: 85%; }
+.chat div.me { margin-left: auto; border-radius: 14px 14px 4px 14px; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.chat b { color: var(--accent-3); }
+.react { display: flex; gap: 8px; margin-top: 14px; }
+.react span { padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, .08); }
+
+/* Privacy */
+.trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+/* Downloads */
+.downloads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.os { padding: 26px; display: flex; flex-direction: column; gap: 10px; }
+.os.mine { box-shadow: var(--glass-shadow), inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent), inset 0 1px 0 var(--glass-edge); }
+.os h3 { margin: 0; font-size: 22px; display: flex; align-items: center; gap: 10px; }
+.os h3 svg { width: 26px; height: 26px; }
+.os p { margin: 0; color: var(--dim); font-size: 14.5px; }
+.os .links { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 10px; }
+.os .btn { width: 100%; }
+.tag { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+
+/* FAQ */
+.faq { max-width: 760px; margin: 0 auto; display: grid; gap: 12px; }
+.faq details { padding: 0 22px; border-radius: var(--radius-sm); }
+.faq summary { cursor: pointer; list-style: none; padding: 18px 0; font-weight: 750; font-size: 17px; display: flex; justify-content: space-between; gap: 16px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font-size: 22px; line-height: 1; color: var(--dim); transition: transform .25s; }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq details p { margin: 0 0 18px; color: var(--dim); }
+
+footer { padding: 96px 0 40px; color: var(--faint); font-size: 14px; text-align: center; }
+footer a { color: var(--dim); }
+.final { padding: 44px 28px; text-align: center; border-radius: 32px; }
+.final h2.title { margin-top: 0; }
+
+/* Reveal on scroll */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s cubic-bezier(.2, .8, .2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .aurora i, .session .live i { animation: none; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .window { transform: none; transition: none; }
+  .btn, .btn:hover { transition: none; transform: none; }
+}
+
+/* Tablet */
+@media (max-width: 960px) {
+  .grid, .downloads { grid-template-columns: repeat(2, 1fr); }
+  .split { grid-template-columns: 1fr; gap: 32px; }
+  .trio { grid-template-columns: 1fr; }
+  .float { display: none; }
+}
+/* Phone */
+@media (max-width: 640px) {
+  :root { --gutter: 16px; --radius: 20px; }
+  .nav a.link { display: none; }
+  .hero { padding-top: 48px; }
+  .grid, .downloads { grid-template-columns: 1fr; }
+  section { padding-top: 72px; }
+  .btn { height: 50px; }
+  .cta .btn { width: 100%; }
+  .share .head { flex-direction: column; align-items: flex-start; }
+  .share .cover { width: 88px; height: 88px; }
+  .window { padding: 6px; border-radius: 16px; transform: none; }
+  .window .dots { display: none; }
+  .window img { border-radius: 11px; }
+  /* Lighter glass on phones: big blurs are costly on small GPUs. */
+  .glass { -webkit-backdrop-filter: blur(16px) saturate(160%); backdrop-filter: blur(16px) saturate(160%); }
+  .aurora i { filter: blur(50px); }
+}
 </style>
 </head>
 <body>
-  <div class="brand"><span class="logo"></span>Tunewire</div>
-  <div class="card" id="card"><div class="sub">Loading…</div></div>
-  <div class="dl">Tunewire is a free music player for YouTube Music, SoundCloud, YouTube and Spotify.<br>
-    <a id="dl-win" href="https://github.com/WorldCNC/tunewire/releases/latest">Download for Windows</a> ·
-    <a href="https://github.com/WorldCNC/tunewire/releases/latest">Linux</a></div>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+<header class="nav wrap">
+  <nav class="bar glass" aria-label="Main">
+    <a class="brand" href="#top" aria-label="Tunewire home"><img src="img/logo-mark.png" alt="" width="62" height="28"><span>tune<span class="wire">wire</span></span></a>
+    <a class="link" href="#features">Features</a>
+    <a class="link" href="#together">Listen together</a>
+    <a class="link" href="#privacy">Privacy</a>
+    <a class="link" href="https://github.com/WorldCNC/tunewire">GitHub</a>
+    <a class="btn primary small" href="#download" id="nav-download">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+  <div class="hero wrap">
+    <!-- A shared playlist, song, profile or invite (from a #p= / #s= … link) -->
+    <article class="share glass" id="share" hidden aria-live="polite"></article>
+
+    <span class="pill glass"><span class="dot"></span><b>Free</b> · No ads · Open source</span>
+    <h1>All your music. <span class="grad">One beautiful player.</span></h1>
+    <p class="lead">Search YouTube Music, SoundCloud, YouTube and Spotify at once, bring over your Spotify library, and listen together with friends. Your music and listening stay on your computer.</p>
+    <div class="cta">
+      <a class="btn primary" id="cta-main" href="https://github.com/WorldCNC/tunewire/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>
+        <span id="cta-label">Download Tunewire</span>
+      </a>
+      <a class="btn ghost glass" href="#features">See what it does</a>
+    </div>
+    <p class="cta-note" id="cta-note">For Windows and Linux. Free forever.</p>
+
+    <div class="showcase" id="showcase">
+      <div class="window glass">
+        <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        <picture>
+          <source type="image/webp" srcset="img/home-800.webp 800w, img/home.webp 1600w" sizes="(max-width: 1100px) 100vw, 1080px">
+          <img src="img/home.webp" width="1600" height="978" alt="Tunewire's Home: daily mixes, Discover Weekly, your library and the song that's playing" fetchpriority="high">
+        </picture>
+      </div>
+      <div class="float left glass" aria-hidden="true"><img src="img/playlist-800.webp" width="800" height="489" alt="" loading="lazy" decoding="async"></div>
+      <div class="float right glass" aria-hidden="true"><img src="img/stats-800.webp" width="800" height="489" alt="" loading="lazy" decoding="async"></div>
+    </div>
+  </div>
+
+  <section id="features" class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Everything in one place</div>
+      <h2 class="title">Every source. One search.</h2>
+      <p>Tunewire finds a song on every platform at once and plays the best version, with no accounts or API keys needed.</p>
+    </div>
+    <div class="grid">
+      <div class="card glass reveal"><div class="ico i1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div><h3>One search for everything</h3><p>YouTube Music, SoundCloud, YouTube, Spotify and your own files, merged into one clean list with duplicates folded together.</p></div>
+      <div class="card glass reveal"><div class="ico i2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div><h3>Sounds right</h3><p>Gapless playback, crossfade, loudness levelling and a 10-band equalizer. Songs start in under a second.</p></div>
+      <div class="card glass reveal"><div class="ico i3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></div><h3>Bring your Spotify library</h3><p>Liked Songs and every playlist, matched to the same recordings, plus Apple Music links and CSV files.</p></div>
+      <div class="card glass reveal"><div class="ico i4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div><h3>Your stats &amp; Wrapped</h3><p>Minutes listened, top artists and songs, streaks, and your year in music as a story you can share.</p></div>
+      <div class="card glass reveal"><div class="ico i5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div><h3>Synced lyrics</h3><p>Lines light up as they're sung, full screen or next to your queue, with one-click translation.</p></div>
+      <div class="card glass reveal"><div class="ico i6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-1.1-.9-1.6-.9-2.6 0-1.1.9-2 2-2h2.3A4.7 4.7 0 0 0 22 9.7C22 5.9 17.5 3 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7" r="1"/></svg></div><h3>Make it yours</h3><p>Themes and sandboxed plugins from the gallery, offline downloads, Last.fm and ListenBrainz scrobbling.</p></div>
+    </div>
+  </section>
+
+  <section id="together" class="wrap">
+    <div class="split">
+      <div class="copy reveal">
+        <div class="eyebrow">Better with friends</div>
+        <h2 class="title">Listen together, from anywhere.</h2>
+        <p class="lead" style="margin:0">Start a session, send the link, and everyone hears the same song at the same moment.</p>
+        <ul class="checks">
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Chat, react, vote to skip.</b> Guests suggest songs and the host decides.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Collaborative playlists.</b> Everyone adds and reorders, and changes show up live.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Friends, on your terms.</b> People follow you only after you approve, and you choose what they see.</span></li>
+        </ul>
+      </div>
+      <div class="session glass reveal" aria-hidden="true">
+        <div class="top"><span class="live"><i></i>Friday night session</span><span style="color:var(--dim);font-size:14px">4 listening</span></div>
+        <div class="people"><span style="background:#7c5cff">M</span><span style="background:#ff5f9e">J</span><span style="background:#19b6e8">A</span><span style="background:#2fbf8f">K</span></div>
+        <div class="np"><div class="art"></div><div style="flex:1;min-width:0"><b>Neon Harbor</b><span>Velvet Static</span><div class="prog"><i></i></div></div></div>
+        <div class="chat"><div><b>Mira</b> this one's so good</div><div class="me">queueing Glass Lanterns next 🎶</div><div><b>Kai</b> 🔥🔥</div></div>
+        <div class="react"><span>🔥</span><span>❤️</span><span>🕺</span><span>👏</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy" class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Private by default</div>
+      <h2 class="title">Your music stays yours.</h2>
+      <p>No ads, no tracking, no account needed to listen.</p>
+    </div>
+    <div class="trio">
+      <div class="card glass reveal"><h3>On your computer</h3><p>Playlists, Liked Songs, history and stats live on your computer, with daily backups and one-file export.</p></div>
+      <div class="card glass reveal"><h3>You choose what's shared</h3><p>An account (Discord sign-in) is only used for sharing and listening together. What friends see is off until you turn it on.</p></div>
+      <div class="card glass reveal"><h3>Asked, never assumed</h3><p>Error reports are off unless you agree, and even then they never include your library, file names or links.</p></div>
+    </div>
+  </section>
+
+  <section id="download" class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Download</div>
+      <h2 class="title">Get Tunewire</h2>
+      <p id="dl-version">Free, for Windows and Linux. Updates install themselves.</p>
+    </div>
+    <div class="downloads">
+      <div class="os glass reveal" data-os="windows">
+        <span class="tag">Recommended for you</span>
+        <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3zm8.5-1.2L21 3v8.5h-9.5zM3 12.5h7.5v7.1L3 18.5zm8.5 0H21V21l-9.5-1.3z"/></svg>Windows</h3>
+        <p>Windows 10 and 11. Installs in seconds, updates in the background.</p>
+        <div class="links"><a class="btn primary" data-asset=".exe" href="https://github.com/WorldCNC/tunewire/releases/latest">Download installer</a><a class="btn ghost glass small" data-asset=".msi" href="https://github.com/WorldCNC/tunewire/releases/latest">MSI package</a></div>
+      </div>
+      <div class="os glass reveal" data-os="linux">
+        <span class="tag">Recommended for you</span>
+        <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.6.4 2.7-.6 4.3C6.5 13 5 15.4 5 17.6c0 .8.3 1.5.8 2-.5.6-.7 1.2-.4 1.8.5 1 2.4.9 4.2.3.8.2 1.6.3 2.4.3s1.6-.1 2.4-.3c1.8.6 3.7.7 4.2-.3.3-.6.1-1.2-.4-1.8.5-.5.8-1.2.8-2 0-2.2-1.5-4.6-2.8-6.7-1-1.6-.6-2.7-.6-4.3C15.6 3.9 14.2 2 12 2zm-1.6 4.1c.5 0 .8.6.8 1.3s-.3 1.2-.8 1.2-.8-.5-.8-1.2.3-1.3.8-1.3zm3.2 0c.5 0 .8.6.8 1.3s-.3 1.2-.8 1.2-.8-.5-.8-1.2.3-1.3.8-1.3zM12 9.6c.9 0 2 .5 2 1s-1.1 1-2 1-2-.5-2-1 1.1-1 2-1z"/></svg>Linux</h3>
+        <p>AppImage runs anywhere and updates itself; .deb and .rpm update with your system.</p>
+        <div class="links"><a class="btn primary" data-asset=".AppImage" href="https://github.com/WorldCNC/tunewire/releases/latest">AppImage</a><a class="btn ghost glass small" data-asset=".deb" href="https://github.com/WorldCNC/tunewire/releases/latest">.deb (Debian, Ubuntu)</a><a class="btn ghost glass small" data-asset=".rpm" href="https://github.com/WorldCNC/tunewire/releases/latest">.rpm (Fedora, openSUSE)</a></div>
+      </div>
+      <div class="os glass reveal" data-os="mac">
+        <span class="tag">Recommended for you</span>
+        <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.8-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.2-1.2 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.8-1-2.8-4.2zM14 5.2c.7-.8 1.2-2 1-3.2-1 .1-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.1 1.2.1 2.3-.6 3.1-1.5z"/></svg>macOS</h3>
+        <p>No ready-made Mac download yet. You can build it from the source code in a few commands.</p>
+        <div class="links"><a class="btn ghost glass" href="https://github.com/WorldCNC/tunewire#build--run">Build from source</a></div>
+      </div>
+    </div>
+    <p class="cta-note" id="mobile-note" style="text-align:center;margin-top:18px" hidden>Tunewire is a desktop app. <button class="btn ghost glass small" id="send-link" type="button">Send this page to your computer</button></p>
+  </section>
+
+  <section id="faq" class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Questions</div>
+      <h2 class="title">Good to know</h2>
+    </div>
+    <div class="faq">
+      <details class="glass reveal"><summary>Is Tunewire really free?</summary><p>Yes. There's no subscription, no ads and no premium tier. It's open source on GitHub.</p></details>
+      <details class="glass reveal"><summary>Where does the music come from?</summary><p>Tunewire plays music from YouTube Music, SoundCloud and YouTube, and your own files. Spotify songs play from the same recording on another platform, or from Spotify itself if you have Premium.</p></details>
+      <details class="glass reveal"><summary>Do I need an account?</summary><p>No. Everything works without one. A free account (sign in with Discord) is only needed to share playlists, edit playlists together, listen together and follow friends.</p></details>
+      <details class="glass reveal"><summary>What happens to my data?</summary><p>Your library lives on your computer. Shared playlists store only song names and links, never audio. You can export everything to one backup file at any time.</p></details>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="final glass reveal">
+      <h2 class="title">Ready when you are.</h2>
+      <p class="lead" style="margin:0 auto 26px">All your music, one player, zero ads.</p>
+      <a class="btn primary" id="cta-final" href="#download">Download Tunewire</a>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p>Tunewire is not affiliated with YouTube, SoundCloud or Spotify. Brand names belong to their owners.<br>
+    <a href="https://github.com/WorldCNC/tunewire">Source code</a> · <a href="https://github.com/WorldCNC/tunewire/releases">All releases</a> · <a href="https://github.com/WorldCNC/tunewire/blob/main/CHANGELOG.md">What's new</a></p>
+</footer>
+
+<noscript><style>.reveal { opacity: 1; transform: none; } .os .tag { display: none; }</style></noscript>
 <script src="config.js"></script>
 <script>
-// Share links: #p=<playlist id> · #c=<invite code> · #s=<song> · #j=<session> · #u=<profile>
-const card = document.getElementById('card');
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const [kind, code] = (location.hash.slice(1).match(/^([pcsju])=(.+)$/) || []).slice(1);
-const appLink = kind ? `tunewire://${kind}/${code}` : 'tunewire://';
-const latest = 'https://github.com/WorldCNC/tunewire/releases/latest';
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+};
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-function render({ kicker, title, sub, cover, round, songs }) {
-  card.innerHTML = `
-    <div class="head">${cover !== undefined ? `<div class="cover${round ? ' round' : ''}" style="background-image:url('${esc(cover || '')}')"></div>` : ''}
-      <div><div class="kicker">${esc(kicker)}</div><h1>${esc(title)}</h1><div class="sub">${esc(sub || '')}</div></div></div>
-    ${songs?.length ? `<ul class="songs">${songs.slice(0, 50).map((t) => `<li><img src="${esc(t.thumbnail || '')}" alt="" loading="lazy" referrerpolicy="no-referrer"><div><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div></li>`).join('')}</ul>` : ''}
-    <div class="actions"><a class="btn primary" href="${esc(appLink)}">Open in Tunewire</a><a class="btn" href="${latest}">Get Tunewire</a></div>
-    <div class="note">Nothing happened? Install Tunewire, then click “Open in Tunewire” again.</div>`;
+// Which computer is this? -----------------------------------------------------
+const ua = navigator.userAgent;
+const mobile = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const os = mobile ? 'mobile' : /Windows/i.test(ua) ? 'windows' : /Mac OS X|Macintosh/i.test(ua) ? 'mac' : /Linux|X11|CrOS/i.test(ua) ? 'linux' : 'other';
+const REL = 'https://github.com/WorldCNC/tunewire/releases/latest';
+
+for (const card of document.querySelectorAll('.os')) {
+  const mine = card.dataset.os === os;
+  card.classList.toggle('mine', mine);
+  card.querySelector('.tag').hidden = !mine;
+}
+const cta = $('#cta-main'), label = $('#cta-label'), note = $('#cta-note');
+if (os === 'windows') { label.textContent = 'Download for Windows'; note.textContent = 'Windows 10 and 11 · Free forever'; }
+else if (os === 'linux') { label.textContent = 'Download for Linux'; note.innerHTML = 'AppImage · also <a href="#download">.deb and .rpm</a> · Free forever'; }
+else if (os === 'mac') { label.textContent = 'Get Tunewire for Mac'; cta.href = '#download'; note.textContent = 'No Mac download yet: build it from source, or use Windows or Linux.'; }
+else if (os === 'mobile') {
+  label.textContent = 'Get it on your computer';
+  cta.href = '#download';
+  note.textContent = 'Tunewire is a desktop app for Windows and Linux.';
+  $('#mobile-note').hidden = false;
 }
 
+// Real file links from the latest release.
+fetch('https://api.github.com/repos/WorldCNC/tunewire/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((rel) => {
+    if (!rel?.assets) return;
+    const find = (ext) => rel.assets.find((a) => a.name.endsWith(ext) && !a.name.endsWith('.sig'))?.browser_download_url;
+    for (const a of document.querySelectorAll('[data-asset]')) { const u = find(a.dataset.asset); if (u) a.href = u; }
+    const main = os === 'windows' ? find('.exe') : os === 'linux' ? find('.AppImage') : null;
+    if (main) cta.href = main;
+    $('#dl-version').textContent = `Version ${rel.tag_name.replace(/^v/, '')} · free, for Windows and Linux. Updates install themselves.`;
+  })
+  .catch(() => {});
+
+// Phones: send the link to yourself instead of a download that can't run.
+$('#send-link')?.addEventListener('click', async () => {
+  const data = { title: 'Tunewire', text: 'Free music player for YouTube Music, SoundCloud, YouTube and Spotify', url: 'https://worldcnc.github.io/tunewire/' };
+  try { if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(data.url); $('#send-link').textContent = 'Link copied'; } } catch { /* cancelled */ }
+});
+
+// Shared links: #p= playlist · #s= song · #u= profile · #j= session · #c= invite ----------
+const CODES = {
+  p: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  u: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  c: /^[0-9a-f]{24,64}$/,
+  j: /^[a-z0-9]{8,24}$/,
+  s: /^[A-Za-z0-9_-]{4,4000}$/,
+};
+/** Only web images or inline images; set through the style API, never as markup. */
+function setCover(node, url) {
+  if (typeof url === 'string' && (/^https:\/\/[^\s"'()\\]+$/.test(url) || /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(url))) {
+    node.style.backgroundImage = `url("${url}")`;
+  }
+}
 async function db(path) {
   const r = await fetch(`${TW.url}/rest/v1/${path}`, { headers: { apikey: TW.anon, Authorization: `Bearer ${TW.anon}` } });
   if (!r.ok) throw new Error(r.status);
   return r.json();
 }
-
-(async () => {
-  if (!kind) {
-    card.innerHTML = `<h1>Your music, from everywhere.</h1><div class="sub">Search YouTube Music, SoundCloud, YouTube and Spotify at once, import your Spotify library, listen together with friends.</div><div class="actions"><a class="btn primary" href="${latest}">Download Tunewire</a></div>`;
-    return;
-  }
-  // Try the app right away; the page stays as a fallback.
-  setTimeout(() => { location.href = appLink; }, 300);
+function renderShare({ kicker, title, sub, cover, round, songs, appLink, explain }) {
+  const box = $('#share');
+  const art = el('div', { class: `cover${round ? ' round' : ''}`, role: 'img', 'aria-label': '' });
+  setCover(art, cover);
+  const list = songs?.length ? el('ul', { class: 'songs' }, ...songs.slice(0, 50).map((t) => {
+    const img = typeof t.thumbnail === 'string' && /^https:\/\//.test(t.thumbnail) ? el('img', { src: t.thumbnail, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', width: 40, height: 40 }) : el('span', { class: 'noimg' });
+    return el('li', {}, img, el('div', {}, el('b', {}, String(t.title || '')), el('span', {}, String(t.artist || ''))));
+  })) : null;
+  const open = el('a', { class: 'btn primary', href: appLink }, 'Open in Tunewire');
+  const get = el('a', { class: 'btn ghost glass', href: '#download' }, 'Get Tunewire');
+  const hint = el('p', { class: 'note' }, mobile
+    ? 'Open this link on your computer to listen in Tunewire.'
+    : explain || 'Nothing happened? Install Tunewire, then press “Open in Tunewire” again.');
+  box.replaceChildren(...[
+    el('div', { class: 'head' }, art, el('div', {}, el('div', { class: 'kicker' }, kicker), el('h2', {}, title), sub ? el('div', { class: 'sub' }, sub) : null)),
+    list,
+    el('div', { class: 'actions' }, mobile ? null : open, get),
+    hint].filter(Boolean));
+  box.hidden = false;
+}
+function decodeSong(code) {
+  const bin = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+}
+async function showShare() {
+  const m = location.hash.slice(1).match(/^([pcsju])=(.+)$/);
+  const box = $('#share');
+  if (!m) { box.hidden = true; return; }
+  let [, kind, code] = m;
+  try { code = decodeURIComponent(code); } catch { code = ''; }
+  if (!CODES[kind].test(code)) { renderShare({ kicker: 'Tunewire', title: 'This link looks broken', sub: 'Ask whoever sent it for a new one.', appLink: 'tunewire://' }); return; }
+  const appLink = `tunewire://${kind}/${code}`;
+  // No automatic jump to the app: the page explains first, the button opens it.
   try {
     if (kind === 's') {
-      const o = JSON.parse(decodeURIComponent(escape(atob(code.replace(/-/g, '+').replace(/_/g, '/')))));
-      render({ kicker: 'Song', title: o.t, sub: o.a, cover: o.i || '' });
+      const o = decodeSong(code);
+      renderShare({ kicker: 'Song', title: String(o.t || 'A song'), sub: String(o.a || ''), cover: o.i, appLink });
     } else if (kind === 'p') {
-      const [pl] = await db(`playlists?id=eq.${encodeURIComponent(code)}&select=title,description,cover,tracks,profiles!playlists_owner_fkey(name)`);
-      if (!pl) return render({ kicker: 'Playlist', title: 'This playlist isn’t shared anymore', sub: 'Or it’s private.' });
-      render({ kicker: `Playlist · ${pl.tracks.length} songs`, title: pl.title, sub: `by ${pl.profiles?.name || 'someone'}${pl.description ? ' · ' + pl.description : ''}`, cover: pl.cover || pl.tracks[0]?.thumbnail || '', songs: pl.tracks });
+      const [pl] = await db(`playlists?id=eq.${code}&select=title,description,cover,tracks,profiles!playlists_owner_fkey(name)`);
+      if (!pl) return renderShare({ kicker: 'Playlist', title: 'This playlist isn’t shared anymore', sub: 'Or it’s private.', appLink });
+      renderShare({ kicker: `Playlist · ${pl.tracks.length} songs`, title: pl.title, sub: `by ${pl.profiles?.name || 'someone'}${pl.description ? ` · ${pl.description}` : ''}`, cover: pl.cover || pl.tracks[0]?.thumbnail, songs: pl.tracks, appLink });
     } else if (kind === 'c') {
-      render({ kicker: 'Collaborative playlist', title: 'You’re invited', sub: 'Open it in Tunewire to add songs together.' });
+      renderShare({ kicker: 'Collaborative playlist', title: 'You’re invited', sub: 'Open it in Tunewire to add songs together. You’ll be asked before joining.', appLink });
     } else if (kind === 'j') {
-      render({ kicker: 'Listen together', title: 'Join the session', sub: 'Open Tunewire to hear the same music at the same time.' });
+      renderShare({ kicker: 'Listen together', title: 'Join the session', sub: 'Everyone hears the same song at the same moment. You’ll be asked before joining.', appLink });
     } else if (kind === 'u') {
-      const [p] = await db(`profiles?id=eq.${encodeURIComponent(code)}&select=name,avatar`);
-      const lists = await db(`playlists?owner=eq.${encodeURIComponent(code)}&visibility=eq.public&select=title`);
-      render({ kicker: 'Profile', title: p?.name || 'Tunewire user', sub: `${lists.length} public playlists`, cover: p?.avatar || '', round: true });
+      const [p] = await db(`profiles?id=eq.${code}&select=name,avatar`);
+      const lists = await db(`playlists?owner=eq.${code}&visibility=eq.public&select=id`);
+      renderShare({ kicker: 'Profile', title: p?.name || 'Tunewire listener', sub: `${lists.length} public playlist${lists.length === 1 ? '' : 's'}`, cover: p?.avatar, round: true, appLink });
     }
-  } catch (e) {
-    render({ kicker: 'Tunewire', title: 'Open this in Tunewire', sub: '' });
+  } catch {
+    renderShare({ kicker: 'Tunewire', title: 'Open this in Tunewire', sub: '', appLink });
   }
-})();
+}
+showShare();
+// In-page links (#features…) change the hash too: only share links re-render.
+addEventListener('hashchange', () => { if (/^#[pcsju]=/.test(location.hash)) showShare(); });
+
+// Motion: reveal on scroll, the window tilts in, glass catches the pointer. --
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+}, { rootMargin: '0px 0px -8% 0px' });
+document.querySelectorAll('.reveal, .showcase').forEach((n) => io.observe(n));
+
+if (!reduced && matchMedia('(hover: hover)').matches) {
+  let raf = 0, last;
+  addEventListener('pointermove', (e) => {
+    last = e;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const g = last.target.closest?.('.glass');
+      if (!g) return;
+      const r = g.getBoundingClientRect();
+      g.style.setProperty('--mx', `${last.clientX - r.left}px`);
+      g.style.setProperty('--my', `${last.clientY - r.top}px`);
+    });
+  }, { passive: true });
+}
 </script>
 </body>
 </html>

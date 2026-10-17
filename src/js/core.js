@@ -96,6 +96,7 @@ function icon(name) {
 }
 
 function hydrateIcons(root = document) {
+  for (const b of $$('button[title]:not([aria-label])', root)) if (!b.textContent.trim()) b.setAttribute('aria-label', b.title);
   for (const el of $$('i[data-icon]', root)) {
     el.outerHTML = el.className ? `<span class="${esc(el.className)}">${icon(el.dataset.icon)}</span>` : icon(el.dataset.icon);
   }
@@ -153,6 +154,8 @@ function h(tag, attrs = {}, ...children) {
     if (c == null || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
+  // Icon-only buttons: screen readers read the tooltip as the name.
+  if (tag === 'button' && el.title && !el.hasAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', el.title);
   return el;
 }
 
@@ -247,6 +250,31 @@ function throttle(fn, ms) {
   };
 }
 
+/**
+ * Load a rarely used part of the app (js/lazy/<name>.js) on first use.
+ * Its functions replace the small stubs that called this.
+ */
+const lazyLoads = new Map();
+function lazyModule(name) {
+  if (!lazyLoads.has(name)) {
+    lazyLoads.set(name, new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = `js/lazy/${name}.js`;
+      s.onload = () => resolve();
+      s.onerror = () => { lazyLoads.delete(name); reject({ kind: 'error', message: `Couldn’t load ${name}` }); };
+      document.body.append(s);
+    }));
+  }
+  return lazyLoads.get(name);
+}
+// Stubs: the real functions arrive with their module.
+function openImport() { return lazyModule('imports').then(() => openImport()); }
+function openSpotifyImport() { return lazyModule('imports').then(() => openSpotifyImport()); }
+function pickSpotify(...a) { return lazyModule('imports').then(() => pickSpotify(...a)); }
+function openGallery(kind) { return lazyModule('gallery').then(() => openGallery(kind)); }
+function backupSettingsRows() { const box = h('div', { class: 'lazy-rows' }); lazyModule('backup').then(() => box.replaceWith(...backupSettingsRows())).catch(() => {}); return [box]; }
+function scrobbleSettingsRows() { const box = h('div', { class: 'lazy-rows' }); lazyModule('backup').then(() => box.replaceWith(...scrobbleSettingsRows())).catch(() => {}); return [box]; }
+
 /** Hooks run after a command succeeds (online sync of playlist edits). */
 const commandHooks = [];
 async function call(cmd, args) {
@@ -297,17 +325,35 @@ const state = {
 // Toasts, modals, menus
 // ===========================================================================
 
-function toast(message, level = 'info', ms) {
+/**
+ * A short message. `action: {label, onClick}` adds a button (Undo, Retry…);
+ * returns { close } so callers can dismiss it early.
+ */
+function toast(message, level = 'info', ms, { action } = {}) {
   const ico = { info: 'info', ok: 'check', warn: 'alert', error: 'alert' }[level] || 'info';
-  const el = h('div', { class: `toast ${level}` },
+  const el = h('div', { class: `toast ${level}`, role: level === 'error' ? 'alert' : 'status' },
     h('span', { class: 't-ico', html: icon(ico) }),
     h('div', { class: 'msg' }, message),
-    h('button', { title: 'Dismiss', html: icon('x'), onclick: () => close() }));
-  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 200); };
+    action ? h('button', { class: 'toast-action', onclick: () => { close(); action.onClick(); } }, action.label) : null,
+    h('button', { title: 'Dismiss', 'aria-label': 'Dismiss', html: icon('x'), onclick: () => close() }));
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; el.classList.add('out'); setTimeout(() => el.remove(), 200); };
   $('#toasts').append(el);
   const toasts = $$('.toast', $('#toasts'));
   if (toasts.length > 4) toasts[0].remove();
-  setTimeout(close, ms ?? (level === 'error' ? 8000 : level === 'warn' ? 6000 : 3000));
+  // Toasts with a button stay a little longer (time to reach it).
+  setTimeout(close, ms ?? (action ? 7000 : level === 'error' ? 8000 : level === 'warn' ? 6000 : 3000));
+  return { close };
+}
+
+/**
+ * Undo for a destructive action: the change is shown at once; `undo` runs
+ * if the button is pressed. Returns the toast.
+ */
+function undoToast(message, undo) {
+  return toast(message, 'ok', 7000, { action: { label: 'Undo', onClick: async () => {
+    try { await undo(); toast('Undone', 'info', 1500); } catch (e) { toast(errMsg(e), 'error'); }
+  } } });
 }
 
 let modalStack = [];
@@ -371,8 +417,13 @@ function closeMenu() {
 }
 
 /** items: [{label, icon, onClick} | {label: 'x', heading: true} | 'sep'] */
+let lastMenuAnchor = null;
 function openMenu(anchor, items, { onClose, at } = {}) {
   closeMenu();
+  // A hidden anchor (a control moved into the "more" menu): open where the
+  // previous menu was instead of the window's corner.
+  if (!at && anchor && !anchor.getClientRects().length && lastMenuAnchor?.getClientRects().length) anchor = lastMenuAnchor;
+  if (anchor?.getClientRects().length) lastMenuAnchor = anchor;
   const menu = h('div', { class: 'menu', role: 'menu' });
   for (const it of items) {
     if (it === 'sep') { menu.append(h('hr')); continue; }

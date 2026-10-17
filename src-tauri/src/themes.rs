@@ -92,18 +92,14 @@ fn validate(t: &mut Theme) -> AppResult<()> {
         if !key_ok {
             return Err(AppError::Theme(format!("invalid variable name '{k}'")));
         }
-        let lower = v.to_lowercase();
-        if v.len() > 300 || v.contains([';', '{', '}', '<', '>']) || lower.contains("url(") || lower.contains("expression(") {
+        if v.len() > 300 || v.contains([';', '{', '}', '<', '>', '\\']) || crate::css_guard::normalize(v).contains("url(") || crate::css_guard::check(v).is_err() {
             return Err(AppError::Theme(format!("invalid value for {k}")));
         }
     }
     if t.css.len() > 64 * 1024 {
         return Err(AppError::Theme("custom CSS is too large (max 64 KB)".into()));
     }
-    let lower = t.css.to_lowercase();
-    if lower.contains("@import") || lower.contains("</style") || lower.contains("url(http") || lower.contains("url('http") || lower.contains("url(\"http") {
-        return Err(AppError::Theme("custom CSS may not use @import or remote url()".into()));
-    }
+    crate::css_guard::check(&t.css).map_err(|why| AppError::Theme(format!("custom CSS refused: {why}")))?;
     Ok(())
 }
 

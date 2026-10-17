@@ -176,8 +176,8 @@ function pickSpotify(lib, body, footer, m, opts = {}) {
   const paint = () => { go.textContent = `Import ${picked.size + (liked ? 1 : 0)}`; go.disabled = !picked.size && !liked; };
   body.replaceChildren(...[
     opts.heading ? h('p', {}, opts.heading) : h('p', {}, `Logged in as `, h('b', {}, lib.user), '. Choose what to bring over:'),
-    lib.liked ? h('label', { class: 'import-row' }, likedCb, h('div', { class: 'lib-art liked', style: 'width:36px;height:36px', html: icon('heartFill') }), h('span', { class: 'name' }, 'Liked Songs'), h('span', { class: 'meta' }, `${lib.liked} songs → your Liked Songs`)) : null,
-    lib.playlists.length ? h('label', { class: 'import-row', style: 'border-bottom:1px solid var(--panel-border)' }, all, h('span', { class: 'name', style: 'font-weight:700' }, `All playlists (${lib.playlists.length})`)) : null,
+    lib.liked ? h('label', { class: 'import-row' }, likedCb, h('div', { class: 'lib-art liked size-36', html: icon('heartFill') }), h('span', { class: 'name' }, 'Liked Songs'), h('span', { class: 'meta' }, `${lib.liked} songs → your Liked Songs`)) : null,
+    lib.playlists.length ? h('label', { class: 'import-row border-b'}, all, h('span', { class: 'name fw-700' }, `All playlists (${lib.playlists.length})`)) : null,
     h('div', { class: 'import-list' }, ...lib.playlists.map((p) => h('label', { class: 'import-row' },
       h('input', { type: 'checkbox', class: 'sp-pl', checked: true, onchange: (e) => { e.target.checked ? picked.add(p.id) : picked.delete(p.id); paint(); } }),
       thumbEl(p.thumbnail, 'thumb'), h('span', { class: 'name' }, p.name), h('span', { class: 'meta' }, `${p.total} songs${p.owner && p.owner !== lib.user ? ` · by ${p.owner}` : ''}`))))].filter(Boolean));
@@ -187,7 +187,7 @@ function pickSpotify(lib, body, footer, m, opts = {}) {
     go.disabled = true;
     const chosen = lib.playlists.filter((p) => picked.has(p.id)).map((p) => [p.id, p.name]);
     const line = h('div', { class: 'loading-line' }, h('span', { class: 'spinner' }), 'Starting…');
-    const bar = h('div', { class: 'match-bar', style: 'max-width:none' }, h('i'));
+    const bar = h('div', { class: 'match-bar maxw-none' }, h('i'));
     body.replaceChildren(line, bar);
     importUi.progress = (p) => {
       if (!line.isConnected) return;

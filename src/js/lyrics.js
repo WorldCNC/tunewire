@@ -19,7 +19,11 @@ function parseLrc(text) {
 
 function showPanel(name) {
   state.panel = name;
-  for (const b of $$('.panel-tabs button')) b.classList.toggle('active', b.dataset.panel === name);
+  for (const b of $$('.panel-tabs button')) {
+    b.classList.toggle('active', b.dataset.panel === name);
+    b.setAttribute('aria-selected', String(b.dataset.panel === name));
+    b.tabIndex = b.dataset.panel === name ? 0 : -1;
+  }
   $('#queue-list').hidden = name !== 'queue';
   $('#queue-actions').hidden = name !== 'queue';
   $('#lyrics-panel').hidden = name !== 'lyrics';
@@ -34,6 +38,14 @@ function showPanel(name) {
   syncPanelButtons();
   try { localStorage.setItem('tw-panel', name); } catch { /* optional */ }
 }
+// Arrow keys move between the panel tabs.
+$('.panel-tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = $$('.panel-tabs button[data-panel]').filter((b) => !b.hidden);
+  const i = tabs.findIndex((b) => b.dataset.panel === state.panel);
+  const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+  if (next) { e.preventDefault(); showPanel(next.dataset.panel); next.focus(); }
+});
 $('.panel-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-panel]');
   if (b) showPanel(b.dataset.panel);

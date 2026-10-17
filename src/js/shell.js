@@ -290,15 +290,15 @@ function paintHealth() {
 
 /** Shown when yt-dlp isn't found: one click installs Tunewire's own copy. */
 function offerYtdlpInstall(message) {
-  const status = h('p', { class: 'muted small', style: 'min-height:18px' });
+  const status = h('p', { class: 'muted small min-h-18' });
   const install = h('button', { class: 'btn primary' }, 'Install it for me');
   const m = openModal({
     title: 'yt-dlp is needed to play music',
     subtitle: message,
     body: h('div', {},
       h('p', {}, 'Tunewire uses yt-dlp to find and stream songs. It can download its own up-to-date copy (the official build from GitHub, checksum-verified). Nothing else on your computer is changed.'),
-      h('details', {}, h('summary', { class: 'muted small', style: 'cursor:pointer' }, 'Prefer to install it yourself?'),
-        h('pre', { class: 'card', style: 'font-size:12px;white-space:pre-wrap;margin-top:8px' }, 'Windows: winget install yt-dlp\nmacOS:   brew install yt-dlp\nLinux:   pipx install yt-dlp')),
+      h('details', {}, h('summary', { class: 'muted small pointer' }, 'Prefer to install it yourself?'),
+        h('pre', { class: 'card fs-12 prewrap mt-8'}, 'Windows: winget install yt-dlp\nmacOS:   brew install yt-dlp\nLinux:   pipx install yt-dlp')),
       status),
     footer: [h('button', { class: 'btn', onclick: () => m.close() }, 'Not now'), install],
   });

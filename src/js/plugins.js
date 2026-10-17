@@ -388,10 +388,10 @@ async function renderPlugins() {
     const card = h('div', { class: 'card plugin-card' },
       h('span', { class: 'p-ico', html: icon('puzzle') }),
       h('div', {},
-        h('h3', {}, m ? m.name : p.id, m?.version ? h('span', { class: 'faint', style: 'font-weight:400;font-size:12px' }, `v${m.version}`) : null),
+        h('h3', {}, m ? m.name : p.id, m?.version ? h('span', { class: 'faint fw-400 fs-12' }, `v${m.version}`) : null),
         m ? h('p', {}, m.description || '') : null,
-        m ? h('div', { class: 'actions', style: 'margin-top:8px' },
-          m.author ? h('span', { class: 'faint', style: 'font-size:12px' }, `by ${m.author}`) : null,
+        m ? h('div', { class: 'actions mt-8' },
+          m.author ? h('span', { class: 'faint fs-12' }, `by ${m.author}`) : null,
           ...(m.permissions || []).map((perm) => h('span', { class: `perm${perm === 'network' ? ' risky' : ''}`, title: perm === 'network' ? 'Can make network requests' : '' }, perm))) : null),
       h('label', { class: 'switch', title: p.enabled ? 'Disable' : 'Enable' }, toggle, h('span')),
       p.error ? h('div', { class: 'plugin-error' }, p.error) : null,
@@ -417,7 +417,7 @@ async function renderPlugins() {
             plugins.running.get(p.id)?.send('event', { name: 'settings-changed', payload: { key: spec.key, value } });
           } catch (e) { toast(errMsg(e), 'error'); }
         });
-        box.append(h('div', { class: 'setting', style: 'padding:6px 0' }, h('div', { class: 'label' }, spec.label), spec.type === 'toggle' ? h('label', { class: 'switch' }, input, h('span')) : input));
+        box.append(h('div', { class: 'setting py-6' }, h('div', { class: 'label' }, spec.label), spec.type === 'toggle' ? h('label', { class: 'switch' }, input, h('span')) : input));
       }
       card.append(box);
     }

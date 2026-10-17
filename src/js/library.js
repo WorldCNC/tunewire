@@ -42,7 +42,7 @@ const libFolders = new Set(JSON.parse((() => { try { return localStorage.getItem
 
 function libItem({ art, name, sub, active, onClick, onMenu, dropPlaylist, playing }) {
   const el = h('button', { class: `lib-item${active ? ' active' : ''}${playing ? ' playing' : ''}`, title: name }, art,
-    h('div', { style: 'min-width:0' }, h('div', { class: 'lib-name' }, name), h('div', { class: 'lib-sub' }, ...[].concat(sub))),
+    h('div', { class: 'min-w-0' }, h('div', { class: 'lib-name' }, name), h('div', { class: 'lib-sub' }, ...[].concat(sub))),
     playing ? h('span', { class: 'lib-eq', html: EQ }) : h('span'));
   el.addEventListener('click', onClick);
   if (onMenu) el.addEventListener('contextmenu', (e) => { e.preventDefault(); onMenu(e, el); });
@@ -214,13 +214,30 @@ function folderMenuItems(name, inside) {
   ];
 }
 
+/** Deleted at once, with Undo (the whole playlist is kept until then). */
 async function deletePlaylist(pl) {
-  if (await confirmModal({ title: 'Delete from Your Library?', message: `This will delete “${pl.name}” from Your Library.`, okLabel: 'Delete', danger: true })) {
-    try {
-      await call('delete_playlist', { id: pl.id });
-      if (state.selectedPlaylist === pl.id) { state.selectedPlaylist = null; if (state.view === 'playlist') goBack(); }
-    } catch (e) { toast(errMsg(e), 'error'); }
-  }
+  const snapshot = state.playlists.find((p) => p.id === pl.id) || pl;
+  const index = state.playlists.indexOf(snapshot);
+  try {
+    await call('delete_playlist', { id: pl.id });
+    if (state.selectedPlaylist === pl.id) { state.selectedPlaylist = null; if (state.view === 'playlist') goBack(); }
+    undoToast(`Deleted “${pl.name}”`, () => call('restore_playlist', { playlist: snapshot, index: index < 0 ? null : index }));
+  } catch (e) { toast(errMsg(e), 'error'); }
+}
+
+/** Remove songs (by index) with Undo: the old list is put back as it was. */
+async function removeWithUndo(pl, indices) {
+  const live = state.playlists.find((p) => p.id === pl.id) || pl;
+  const before = live.tracks.slice();
+  const added = { ...(live.added || {}) };
+  try {
+    const n = indices.length === 1
+      ? (await call('remove_from_playlist', { id: pl.id, index: indices[0] }), 1)
+      : await call('remove_many_from_playlist', { id: pl.id, indices });
+    clearSelection();
+    undoToast(`Removed ${n === 1 ? `“${before[indices[0]]?.title || 'song'}”` : `${n} songs`} from ${pl.name}`,
+      () => call('replace_playlist_tracks', { id: pl.id, tracks: before, added }));
+  } catch (e) { toast(errMsg(e), 'error'); }
 }
 
 /** Resize a picked image to a 300×300 JPEG data: URL. */
@@ -247,7 +264,7 @@ function editPlaylistDetails(pl) {
   const art = coverArt(pl.tracks, 'hero-art editable', cover);
   art.style.cssText = 'width:180px;height:180px';
   const name = h('input', { class: 'input', value: pl.name, placeholder: 'Add a name', maxlength: 120 });
-  const desc = h('textarea', { class: 'input', rows: 5, placeholder: 'Add an optional description', maxlength: 600, style: 'font-family:inherit;font-size:13.5px' }, pl.description || '');
+  const desc = h('textarea', { class: 'input font-inherit fs-135', rows: 5, placeholder: 'Add an optional description', maxlength: 600}, pl.description || '');
   art.addEventListener('click', () => file.click());
   file.addEventListener('change', async () => {
     if (!file.files[0]) return;
@@ -260,9 +277,9 @@ function editPlaylistDetails(pl) {
   const m = openModal({
     title: 'Edit details',
     wide: true,
-    body: h('div', { style: 'display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:start' },
-      h('div', { style: 'display:flex;flex-direction:column;gap:8px;align-items:flex-start' }, art, pl.cover ? removeCover : null, file),
-      h('div', { style: 'display:flex;flex-direction:column;gap:10px' }, name, desc)),
+    body: h('div', { class: 'edit-grid' },
+      h('div', { class: 'col gap-8 items-start' }, art, pl.cover ? removeCover : null, file),
+      h('div', { class: 'col gap-10' }, name, desc)),
     footer: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
       try {
         await call('update_playlist_meta', { id: pl.id, patch: { name: name.value, description: desc.value, ...(cover !== (pl.cover || null) ? { cover: cover || '' } : {}) } });
@@ -364,7 +381,7 @@ function renderCollection(container, o) {
     tracks.length > 1 ? sortBtn : null);
 
   const head = h('div', { class: 'table-head' });
-  const list = h('div', { class: `track-list${firstShow ? ' stagger' : ''}` });
+  const list = h('div', { class: `track-list${firstShow ? ' stagger' : ''}`, role: 'listbox', 'aria-label': 'Songs', 'aria-multiselectable': 'true' });
   const renderRows = () => {
     let idx = tracks.map((t, i) => [t, i]);
     const q = ps.query.trim().toLowerCase();
@@ -406,26 +423,42 @@ function renderCollection(container, o) {
 }
 
 /**
- * Rows for `items`, CHUNK at a time: the next batch renders when the end of
- * the list scrolls into view. A 3000-song library no longer builds 3000 rows
- * (and decodes 3000 covers) just to show the first 15.
+ * Rows for `items`, built as they come near the screen: the first screenful
+ * at once, the rest in small batches spread over animation frames, so
+ * scrolling never waits for a big batch to be built (that was the stutter
+ * when the end of a long playlist came into view).
  */
-const CHUNK = 80;
+const FIRST_ROWS = 40;
+const BATCH_ROWS = 16;
 function renderChunked(list, items, makeRow, root) {
   list._chunkIo?.disconnect();
-  let n = Math.min(CHUNK, items.length);
+  cancelAnimationFrame(list._chunkRaf || 0);
+  let n = Math.min(FIRST_ROWS, items.length);
   list.replaceChildren(...items.slice(0, n).map((it, k) => makeRow(it, k)));
   if (n >= items.length) return;
-  const sentinel = h('div', { class: 'chunk-sentinel' });
+  const sentinel = h('div', { class: 'chunk-sentinel', 'aria-hidden': 'true' });
   list.append(sentinel);
-  const io = new IntersectionObserver((entries) => {
-    if (!entries.some((e) => e.isIntersecting)) return;
-    const next = items.slice(n, n + CHUNK).map((it, k) => makeRow(it, n + k));
-    n += next.length;
-    sentinel.before(...next);
+  let near = false;
+  const step = () => {
+    list._chunkRaf = 0;
+    if (!near || !sentinel.isConnected) return;
+    const t0 = performance.now();
+    const frag = document.createDocumentFragment();
+    // About 4 ms of work per frame, at least one batch.
+    do {
+      const next = items.slice(n, n + BATCH_ROWS).map((it, k) => makeRow(it, n + k));
+      n += next.length;
+      frag.append(...next);
+    } while (n < items.length && performance.now() - t0 < 4);
+    sentinel.before(frag);
     markPlaying();
-    if (n >= items.length) { io.disconnect(); sentinel.remove(); }
-  }, { root, rootMargin: '800px 0px' });
+    if (n >= items.length) { io.disconnect(); sentinel.remove(); return; }
+    list._chunkRaf = requestAnimationFrame(step);
+  };
+  const io = new IntersectionObserver((entries) => {
+    near = entries.some((e) => e.isIntersecting);
+    if (near && !list._chunkRaf) list._chunkRaf = requestAnimationFrame(step);
+  }, { root, rootMargin: '1600px 0px' });
   io.observe(sentinel);
   list._chunkIo = io;
 }
@@ -500,25 +533,20 @@ function renderPlaylistDetail() {
     tracks,
     cover: remote ? pl.cloud?.cover || null : pl.cover,
     description: remote ? pl.cloud?.description || '' : pl.description,
-    line: [remote && pl.cloud ? h('button', { onclick: () => openProfile(pl.cloud.owner) }, pl.cloud.ownerName || 'Someone') : h('b', {}, remote ? 'Opened link' : pl.cloud_role === 'follower' || pl.cloud_role === 'editor' ? (cm?.ownerName || 'Shared with you') : 'You')],
+    line: [remote && pl.cloud ? h('button', { onclick: () => openProfile(pl.cloud.owner) }, pl.cloud.ownerName || 'Someone') : h('b', {}, remote ? 'Opened link' : pl.cloud_role === 'follower' || pl.cloud_role === 'editor' ? (cm?.ownerName || 'Shared with you') : 'You'),
+      remote ? null : syncBadge(pl)].filter(Boolean),
     added: remote ? null : pl.added || {},
     created: pl.created,
     editable: remote ? null : () => editPlaylistDetails(pl),
     smart,
     actions,
     menu: remote ? () => [{ label: 'Add to queue', icon: 'plus', onClick: () => enqueue(tracks) }] : () => playlistMenuItems(pl),
-    removeMany: remote ? null : async (indices) => {
-      try {
-        const n = await call('remove_many_from_playlist', { id: pl.id, indices });
-        clearSelection();
-        toast(`Removed ${n} song${n === 1 ? '' : 's'} from ${pl.name}`, 'ok', 2000);
-      } catch (e) { toast(errMsg(e), 'error'); }
-    },
+    removeMany: remote ? null : (indices) => removeWithUndo(pl, indices),
     reorder: remote ? null : (indices, to) => call('move_many_in_playlist', { id: pl.id, indices, to }).catch((e) => toast(errMsg(e), 'error')),
-    rowMenu: remote ? null : (t, i) => ['sep', { label: 'Remove from this playlist', icon: 'trash', onClick: () => call('remove_from_playlist', { id: pl.id, index: i }).catch((e) => toast(errMsg(e), 'error')) }],
+    rowMenu: remote ? null : (t, i) => ['sep', { label: 'Remove from this playlist', icon: 'trash', onClick: () => removeWithUndo(pl, [i]) }],
     status: matchStatus(tracks),
     empty: h('div', { class: 'empty' }, h('p', {}, 'Let’s find something for your playlist'), h('p', { class: 'small' }, 'Search for songs, then drag them here or use ⋯ → Add to playlist.'),
-      h('button', { class: 'btn', style: 'margin-top:12px', onclick: () => { showView('search'); $('#search-input').focus(); } }, 'Find songs')),
+      h('button', { class: 'btn mt-12', onclick: () => { showView('search'); $('#search-input').focus(); } }, 'Find songs')),
     after: recommendSection(pl, remote),
   });
 }
@@ -643,7 +671,7 @@ function recommendSection(pl, remote) {
         rs.list?.length ? h('button', { class: 'btn small', html: `${icon('play')}Play all`, onclick: () => playList(rs.list.map((r) => r.track), 0) }) : null,
         h('button', { class: 'btn small', html: `${icon('refresh')}Refresh`, disabled: rs.loading, onclick: refresh })));
     if (rs.loading && !rs.list) {
-      box.replaceChildren(head, h('div', { class: 'track-list' }, ...skeletonRows(5)));
+      box.replaceChildren(head, h('div', { class: 'track-list', role: 'listbox', 'aria-label': 'Songs' }, ...skeletonRows(5)));
       return;
     }
     if (rs.error) {
@@ -651,7 +679,7 @@ function recommendSection(pl, remote) {
       return;
     }
     const visible = (rs.list || []).filter((r) => !rs.added.has(r.track.key));
-    const list = h('div', { class: 'track-list stagger' }, ...visible.map((r, i) => {
+    const list = h('div', { class: 'track-list stagger', role: 'listbox', 'aria-label': 'Songs' }, ...visible.map((r, i) => {
       const add = remote ? null : h('button', { class: 'icon-btn small rec-add', title: `Add to ${pl.name}`, html: icon('plus'), onclick: async (e) => {
         e.stopPropagation();
         // The playlist grows by one: keep this list instead of refetching
@@ -712,7 +740,10 @@ async function refreshHistory() {
   markPlaying();
 }
 $('#history-clear').addEventListener('click', async () => {
-  if (await confirmModal({ title: 'Clear history?', message: 'Your local playback history will be erased.', okLabel: 'Clear', danger: true })) {
-    call('clear_history').catch((e) => toast(errMsg(e), 'error'));
-  }
+  try {
+    const entries = await call('list_history', { limit: 5000 });
+    if (!entries.length) return;
+    await call('clear_history');
+    undoToast(`Cleared ${entries.length} song${entries.length === 1 ? '' : 's'} from history`, () => call('restore_history', { entries }));
+  } catch (e) { toast(errMsg(e), 'error'); }
 });

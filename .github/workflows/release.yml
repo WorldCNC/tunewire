@@ -72,8 +72,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Discord webhook for automatic error reports (built in; not in the source).
-          TUNEWIRE_REPORT_WEBHOOK: ${{ secrets.TUNEWIRE_REPORT_WEBHOOK }}
+          # Error reports go through the `report` Edge Function; the Discord
+          # webhook is a function secret (supabase secrets set DISCORD_WEBHOOK=…)
+          # and is never built into the app.
+          # Optional: link-preview server for share links (supabase/functions/share).
+          TUNEWIRE_SHARE_URL: ${{ secrets.TUNEWIRE_SHARE_URL }}
+          # Optional: Last.fm API account for scrobbling (users can also add their own).
+          TUNEWIRE_LASTFM_KEY: ${{ secrets.TUNEWIRE_LASTFM_KEY }}
+          TUNEWIRE_LASTFM_SECRET: ${{ secrets.TUNEWIRE_LASTFM_SECRET }}
           # Online features (project URL + public anon key; RLS protects the data).
           TUNEWIRE_SUPABASE_URL: ${{ secrets.TUNEWIRE_SUPABASE_URL }}
           TUNEWIRE_SUPABASE_ANON_KEY: ${{ secrets.TUNEWIRE_SUPABASE_ANON_KEY }}

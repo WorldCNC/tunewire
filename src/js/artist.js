@@ -19,9 +19,9 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   const body = $('#artist-body');
   body.style.setProperty('--hero', '#3a3a3a');
   body.replaceChildren(
-    h('div', { class: 'artist-hero' }, h('div', {}, h('h1', {}, primary || 'Artist'))),
+    h('div', { class: 'artist-hero' }, h('div', {}, h('h1', {}, primary || 'Artist'), h('div', { class: 'sk w-20 on-hero' }))),
     h('div', { class: 'action-bar' }, h('span', { class: 'big-play', html: icon('play') })),
-    h('div', { class: 'track-list popular' }, ...skeletonRows(5)));
+    loadingBox(`Loading ${primary || 'artist'}`, h('div', { class: 'section-title sk w-20' }), h('div', { class: 'track-list popular' }, ...skeletonRows(5)), h('div', { class: 'section-title sk w-20' }), skeletonCards(6)));
   let a;
   try {
     a = await call('ytm_artist', { name: primary, browseId: browseId || artistBrowseId(track) });
@@ -37,7 +37,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   const art = a.banner || thumbnail || a.thumbnail;
   const hero = h('div', { class: 'artist-hero' },
     h('div', {},
-      h('div', { class: 'verified' }, h('span', { html: icon('verified'), style: 'color:#3d91f4;display:grid' }), 'Artist'),
+      h('div', { class: 'verified' }, h('span', { html: icon('verified'), class: 'verified-ico' }), 'Artist'),
       h('h1', {}, a.name),
       h('div', { class: 'audience' }, a.audience || (a.subscribers ? `${a.subscribers} subscribers` : ''))));
   if (art) hero.style.backgroundImage = `url("${art.replace(/"/g, '%22')}")`;
@@ -107,7 +107,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   if (tabs.length) renderDisc();
 
   const sections = [hero, bar,
-    a.top_songs.length ? h('div', {}, h('div', { class: 'section-title', style: 'margin-top:8px' }, 'Popular'), popular, a.top_songs.length > 5 || a.all_songs ? more : null) : null,
+    a.top_songs.length ? h('div', {}, h('div', { class: 'section-title mt-8' }, 'Popular'), popular, a.top_songs.length > 5 || a.all_songs ? more : null) : null,
     tabs.length ? h('div', {}, h('div', { class: 'section-title' }, 'Discography'), discBox) : null];
   for (const shelf of a.shelves) {
     if (!shelf.cards.length || /live performance/i.test(shelf.title)) continue;
@@ -120,7 +120,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   if (a.description || a.audience) {
     const about = h('div', { class: 'about-card' }, h('div', {}, h('div', { class: 'about-aud' }, a.audience || ''), a.description ? h('p', {}, a.description) : null));
     if (art) about.style.backgroundImage = `url("${bannerUrl(art, 900).replace(/"/g, '%22')}")`;
-    about.addEventListener('click', () => openModal({ title: a.name, subtitle: a.audience, wide: true, body: h('p', { style: 'white-space:pre-wrap;line-height:1.6' }, a.description || '') }));
+    about.addEventListener('click', () => openModal({ title: a.name, subtitle: a.audience, wide: true, body: h('p', { class: 'prewrap lh-16' }, a.description || '') }));
     sections.push(h('div', {}, h('div', { class: 'section-title' }, 'About'), about));
   }
   body.replaceChildren(...sections.filter(Boolean));
@@ -131,7 +131,7 @@ async function openArtist(name, track = null, { browseId = null, thumbnail = nul
   if (scBox) {
     call('artist_soundcloud', { url: scUrl, name: a.name }).then((tracks) => {
       if (seq !== artistSeq || !tracks.length) return;
-      const list = h('div', { class: 'track-list' }, ...tracks.slice(0, 10).map((t, i) => trackRow(t, i, { onPlay: () => playList(tracks, i) })));
+      const list = h('div', { class: 'track-list', role: 'listbox', 'aria-label': 'Songs' }, ...tracks.slice(0, 10).map((t, i) => trackRow(t, i, { onPlay: () => playList(tracks, i) })));
       list._ctx = {};
       scBox.replaceChildren(h('div', { class: 'section-title' }, 'On SoundCloud'), list);
       markPlaying();
@@ -205,7 +205,7 @@ async function openAlbum(target, title = 'Album', { push = true } = {}) {
   body.replaceChildren(
     h('div', { class: 'hero' }, h('div', { class: 'hero-art', html: icon('disc') }), h('div', { class: 'hero-meta' }, h('div', { class: 'hero-kicker' }, browseId?.startsWith('VL') ? 'Playlist' : 'Album'), h('h1', { class: 'hero-title' }, title))),
     h('div', { class: 'action-bar' }, h('span', { class: 'big-play', html: icon('play') })),
-    h('div', { class: 'track-list' }, ...skeletonRows(8)));
+    h('div', { class: 'track-list', role: 'listbox', 'aria-label': 'Songs' }, ...skeletonRows(8)));
   let c;
   try {
     c = await call('ytm_collection', { id: browseId, url });

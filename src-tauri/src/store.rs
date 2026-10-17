@@ -1,5 +1,7 @@
 //! JSON persistence for settings and the local library. Writes are atomic
-//! (temp file + rename). The library is split so frequent writes stay small:
+//! and durable (unique temp file, fsync, rename), serialized per file, and
+//! library.json keeps 7 daily snapshots in backups/ that a corrupt file is
+//! restored from. The library is split so frequent writes stay small:
 //!   library.json   playlists + favorites
 //!   history.json   playback history (written on every track start)
 //!   downloads.json offline downloads
@@ -89,8 +91,21 @@ pub struct Settings {
     pub shuffle: bool,
     /// Show every source's icon on song rows (otherwise only on hover).
     pub show_sources: bool,
-    /// Send automatic error reports to the developer.
+    /// Send automatic error reports to the developer (only once
+    /// `privacy_asked`: the first-run question was answered).
     pub error_reports: bool,
+    /// The first-run privacy question (error reports) was answered.
+    pub privacy_asked: bool,
+    /// The after-sign-in question (what friends see) was answered.
+    pub cloud_privacy_asked: bool,
+    /// Scrobbling (credentials are in the keychain).
+    pub scrobble_lastfm: bool,
+    pub scrobble_listenbrainz: bool,
+    /// Display names of the connected accounts.
+    pub lastfm_user: String,
+    pub listenbrainz_user: String,
+    /// The user's own Last.fm API key (its secret is in the keychain); empty = built in.
+    pub lastfm_api_key: String,
     /// Development override of the online backend (normally built in).
     pub supabase_url: String,
     pub supabase_anon_key: String,
@@ -140,10 +155,17 @@ impl Default for Settings {
             background_image: String::new(),
             shuffle: false,
             show_sources: false,
-            error_reports: true,
+            error_reports: false,
+            privacy_asked: false,
+            cloud_privacy_asked: false,
+            scrobble_lastfm: false,
+            scrobble_listenbrainz: false,
+            lastfm_user: String::new(),
+            listenbrainz_user: String::new(),
+            lastfm_api_key: String::new(),
             supabase_url: String::new(),
             supabase_anon_key: String::new(),
-            share_activity: true,
+            share_activity: false,
             beta_updates: false,
         }
     }
@@ -260,21 +282,93 @@ pub struct Store {
 pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
     match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-            // Keep the broken file around instead of silently overwriting it.
-            eprintln!("tunewire: {} is corrupt ({e}); starting fresh", path.display());
-            let _ = std::fs::rename(path, path.with_extension("json.bak"));
+            // Keep the broken file (never overwritten by a later failure) and
+            // fall back to the newest snapshot that still parses.
+            eprintln!("tunewire: {} is corrupt ({e}); trying backups", path.display());
+            let _ = std::fs::rename(path, path.with_extension(format!("corrupt-{}.json", now_ms())));
+            for b in backups_of(path) {
+                if let Some(v) = std::fs::read_to_string(&b).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+                    eprintln!("tunewire: restored {} from {}", path.display(), b.display());
+                    return v;
+                }
+            }
             T::default()
         }),
         Err(_) => T::default(),
     }
 }
 
-pub fn write_atomic(path: &Path, data: &[u8]) -> AppResult<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, data)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+/// Snapshots of `path` in <dir>/backups, newest first.
+fn backups_of(path: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return Vec::new() };
+    let prefix = format!("{stem}-");
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir.join("backups"))
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".json"))).collect())
+        .unwrap_or_default();
+    v.sort();
+    v.reverse();
+    v
 }
+
+const BACKUPS_KEPT: usize = 7;
+
+/// Once a day, keep a copy of `path` before it's replaced (7 days kept).
+fn snapshot_daily(path: &Path) {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return };
+    if !path.exists() {
+        return;
+    }
+    let day = chrono::Local::now().format("%Y%m%d").to_string();
+    let target = dir.join("backups").join(format!("{stem}-{day}.json"));
+    if target.exists() {
+        return;
+    }
+    // Only snapshot a file that parses: a broken one would push out good copies.
+    let Ok(data) = std::fs::read(path) else { return };
+    if serde_json::from_slice::<serde::de::IgnoredAny>(&data).is_err() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(dir.join("backups"));
+    if write_atomic(&target, &data).is_ok() {
+        for old in backups_of(path).into_iter().skip(BACKUPS_KEPT) {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+}
+
+/// Crash- and power-safe replace: a unique temp file (concurrent writers
+/// never share one), flushed to disk before the rename, then the directory
+/// entry flushed too.
+pub fn write_atomic(path: &Path, data: &[u8]) -> AppResult<()> {
+    use std::io::Write;
+    static N: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let res = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        if let Some(dir) = path.parent() {
+            if let Ok(d) = std::fs::File::open(dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(())
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    Ok(res?)
+}
+
+/// One lock per file kind: serializing and writing happen in the same order,
+/// so an older snapshot can never land on top of a newer one.
+static SAVE_SETTINGS: Mutex<()> = Mutex::new(());
+static SAVE_LIBRARY: Mutex<()> = Mutex::new(());
+static SAVE_HISTORY: Mutex<()> = Mutex::new(());
+static SAVE_DOWNLOADS: Mutex<()> = Mutex::new(());
 
 impl Store {
     pub fn open(dir: PathBuf) -> AppResult<Store> {
@@ -293,6 +387,7 @@ impl Store {
     }
 
     pub fn save_settings(&self) -> AppResult<()> {
+        let _w = SAVE_SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
         let data = serde_json::to_vec_pretty(&*self.settings.lock().unwrap())?;
         write_atomic(&self.dir.join("settings.json"), &data)
     }
@@ -305,18 +400,23 @@ impl Store {
             favorites: &'a [Track],
             followed: &'a [FollowedArtist],
         }
+        let _w = SAVE_LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
         let lib = self.library.lock().unwrap();
         let data = serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites, followed: &lib.followed })?;
         drop(lib);
-        write_atomic(&self.dir.join("library.json"), &data)
+        let path = self.dir.join("library.json");
+        snapshot_daily(&path);
+        write_atomic(&path, &data)
     }
 
     fn save_history(&self) -> AppResult<()> {
+        let _w = SAVE_HISTORY.lock().unwrap_or_else(|e| e.into_inner());
         let data = serde_json::to_vec(&self.library.lock().unwrap().history)?;
         write_atomic(&self.dir.join("history.json"), &data)
     }
 
     fn save_downloads(&self) -> AppResult<()> {
+        let _w = SAVE_DOWNLOADS.lock().unwrap_or_else(|e| e.into_inner());
         let data = serde_json::to_vec(&self.library.lock().unwrap().downloads)?;
         write_atomic(&self.dir.join("downloads.json"), &data)
     }
@@ -373,5 +473,60 @@ impl Store {
             history.truncate(HISTORY_MAX);
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("tw-store-{name}-{}", now_ms()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn concurrent_saves_never_corrupt_or_go_back_in_time() {
+        let dir = tmp("race");
+        let store = std::sync::Arc::new(Store::open(dir.clone()).unwrap());
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let s = store.clone();
+                std::thread::spawn(move || {
+                    for i in 0..40 {
+                        s.update_library(|lib| {
+                            lib.followed.push(FollowedArtist { name: format!("{t}-{i}"), url: None, thumbnail: None, seen: vec![], followed_at: 0 });
+                            Ok(())
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let on_disk: Library = load_json(&dir.join("library.json"));
+        assert_eq!(on_disk.followed.len(), 320, "the last write must hold every change");
+        // No temp files left behind.
+        assert!(std::fs::read_dir(&dir).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains(".tmp")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_corrupt_library_comes_back_from_the_daily_snapshot() {
+        let dir = tmp("corrupt");
+        let store = Store::open(dir.clone()).unwrap();
+        store.update_library(|lib| { lib.followed.push(FollowedArtist { name: "kept".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 }); Ok(()) }).unwrap();
+        // Second save snapshots the first version.
+        store.update_library(|lib| { lib.followed.push(FollowedArtist { name: "newer".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 }); Ok(()) }).unwrap();
+        std::fs::write(dir.join("library.json"), "").unwrap(); // power loss
+        let lib: Library = load_json(&dir.join("library.json"));
+        assert_eq!(lib.followed.len(), 1);
+        assert_eq!(lib.followed[0].name, "kept");
+        // The broken file is kept for inspection.
+        assert!(std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("corrupt-")));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

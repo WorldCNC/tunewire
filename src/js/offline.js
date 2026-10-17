@@ -58,6 +58,7 @@ function paintRing(btn) {
   btn.classList.toggle('done', full);
   btn.classList.toggle('active', st.active);
   btn.title = full ? 'Downloaded · click to remove' : st.active ? `Downloading · ${st.done} of ${st.total}` : 'Download';
+  btn.setAttribute('aria-label', btn.title);
   const key = `${full}|${st.active}|${st.done}`;
   if (btn.dataset.k === key) return;
   btn.dataset.k = key;

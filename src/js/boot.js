@@ -77,6 +77,9 @@ async function wireEvents() {
 // Boot
 // ===========================================================================
 
+$('#theme-gallery')?.addEventListener('click', () => openGallery('themes'));
+$('#plugin-gallery')?.addEventListener('click', () => openGallery('plugins'));
+
 async function boot() {
   hydrateIcons();
   await wireEvents();
@@ -88,6 +91,8 @@ async function boot() {
     state.settings = { platform_order: ['ytmusic', 'soundcloud', 'youtube', 'spotify'], search_limit: 12, theme: 'midnight', last_source: 'all', plugin_settings: {}, enabled_plugins: [] };
   }
   setSource(state.settings.last_source || 'all');
+  // First run: ask before anything is ever reported.
+  setTimeout(askPrivacyFirstRun, 1200);
   setVolumeUI(state.settings.volume ?? 0.7);
 
   // Everything the first screen needs, in parallel (all local reads).

@@ -1,0 +1,13 @@
+{
+  "name": "Now Playing Notes",
+  "version": "1.0.0",
+  "description": "Example plugin: a side panel with per-track notes, session stats and a “more by this artist” button, plus a player-bar button.",
+  "author": "Tunewire",
+  "main": "main.js",
+  "style": "style.css",
+  "permissions": ["playback", "queue", "search", "ui", "storage"],
+  "settings": [
+    { "key": "toast_on_change", "label": "Show a toast when a new track starts", "type": "toggle", "default": false },
+    { "key": "similar_count", "label": "Tracks to queue with “More by this artist”", "type": "number", "default": 3 }
+  ]
+}

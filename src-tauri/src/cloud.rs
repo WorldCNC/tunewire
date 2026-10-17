@@ -1,7 +1,11 @@
-//! Tunewire accounts (Supabase Auth). Sign-in opens the browser (Discord or
-//! Google, PKCE) and catches the redirect on a loopback port; guests get an
-//! anonymous account. The refresh token lives in the OS keychain; the page
-//! asks for a fresh access token and talks to the database/realtime itself.
+//! Tunewire accounts (Supabase Auth). Sign-in is Discord only: it opens the
+//! browser (PKCE) and catches the redirect on a loopback port. There are no
+//! guest accounts. The refresh token lives in the OS keychain; the page asks
+//! for a fresh access token and talks to the database/realtime itself.
+//!
+//! Refreshing is single-flight: refresh tokens are one-time use, so two
+//! concurrent refreshes would spend the same token twice. Only a rejected
+//! grant signs the user out; network or server trouble keeps the session.
 //!
 //! Project URL and anon key are public by design (row level security does
 //! the protecting). They're baked in at build time (TUNEWIRE_SUPABASE_URL,
@@ -20,13 +24,22 @@ use sha2::Digest;
 use crate::error::{AppError, AppResult};
 use crate::store::now_ms;
 
-const REDIRECT_PORT: u16 = 5590;
+/// Loopback ports tried in order. The auth settings allow-list
+/// http://127.0.0.1:559*/callback, so any of them works.
+const REDIRECT_PORTS: [u16; 5] = [5590, 5591, 5592, 5593, 5594];
 const KEY_REFRESH: &str = "cloud_refresh_token";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudConfig {
     pub url: String,
     pub anon_key: String,
+    /// Where the `share` function (link previews) is served; empty = links
+    /// go straight to the GitHub Pages landing page.
+    pub share_url: String,
+}
+
+fn share_url() -> String {
+    option_env!("TUNEWIRE_SHARE_URL").unwrap_or("").trim_end_matches('/').to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +48,6 @@ pub struct CloudSession {
     pub user_id: String,
     pub name: String,
     pub avatar: Option<String>,
-    pub anonymous: bool,
     /// ms timestamp.
     pub expires_at: u64,
 }
@@ -46,13 +58,15 @@ struct Inner {
 }
 
 static SESSION: Mutex<Option<Inner>> = Mutex::new(None);
+/// Held for the whole refresh request (see the module docs).
+static REFRESHING: Mutex<()> = Mutex::new(());
 static OVERRIDE: Mutex<Option<CloudConfig>> = Mutex::new(None);
 static FALLBACK_FILE: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 
 pub fn init(dir: &std::path::Path, settings_url: &str, settings_key: &str) {
     *FALLBACK_FILE.lock().unwrap() = Some(dir.join("cloud_session"));
     if !settings_url.is_empty() && !settings_key.is_empty() {
-        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url: settings_url.trim_end_matches('/').to_string(), anon_key: settings_key.to_string() });
+        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url: settings_url.trim_end_matches('/').to_string(), anon_key: settings_key.to_string(), share_url: share_url() });
     }
 }
 
@@ -61,7 +75,7 @@ pub fn config() -> Option<CloudConfig> {
         return Some(c);
     }
     match (option_env!("TUNEWIRE_SUPABASE_URL"), option_env!("TUNEWIRE_SUPABASE_ANON_KEY")) {
-        (Some(u), Some(k)) if !u.is_empty() && !k.is_empty() => Some(CloudConfig { url: u.trim_end_matches('/').to_string(), anon_key: k.to_string() }),
+        (Some(u), Some(k)) if !u.is_empty() && !k.is_empty() => Some(CloudConfig { url: u.trim_end_matches('/').to_string(), anon_key: k.to_string(), share_url: share_url() }),
         _ => None,
     }
 }
@@ -74,11 +88,16 @@ fn cfg() -> AppResult<CloudConfig> {
 fn save_refresh(token: &str) {
     if crate::secrets::set(KEY_REFRESH, token).is_err() {
         if let Some(p) = FALLBACK_FILE.lock().unwrap().as_ref() {
-            let _ = std::fs::write(p, token);
+            // Created private: never briefly readable by other users.
+            let mut o = std::fs::OpenOptions::new();
+            o.write(true).create(true).truncate(true);
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
+                use std::os::unix::fs::OpenOptionsExt;
+                o.mode(0o600);
+            }
+            if let Ok(mut f) = o.open(p) {
+                let _ = f.write_all(token.as_bytes());
             }
         }
     }
@@ -95,8 +114,49 @@ fn clear_refresh() {
     }
 }
 
-fn post(path: &str, body: Value, bearer: Option<&str>) -> AppResult<Value> {
-    let c = cfg()?;
+/// How an auth request failed.
+#[derive(Debug)]
+enum AuthFail {
+    /// The server rejected the grant (bad, used or revoked token): signed out.
+    Rejected(String),
+    Other(AppError),
+}
+
+impl From<AuthFail> for AppError {
+    fn from(f: AuthFail) -> Self {
+        match f {
+            AuthFail::Rejected(m) => AppError::Unavailable(m),
+            AuthFail::Other(e) => e,
+        }
+    }
+}
+
+/// Only these mean "this session is over"; anything else may be temporary.
+fn is_rejected_grant(code: &str, msg: &str) -> bool {
+    matches!(code, "invalid_grant" | "refresh_token_not_found" | "refresh_token_already_used" | "session_not_found" | "session_expired" | "user_not_found" | "user_banned")
+        || msg.contains("Invalid Refresh Token")
+}
+
+/// Map an auth server reply (status + JSON body) to a result.
+fn classify(status: u16, v: Value) -> Result<Value, AuthFail> {
+    match status {
+        200..=299 => Ok(v),
+        400 | 401 | 403 => {
+            let code = v.get("error_code").or_else(|| v.get("error")).and_then(Value::as_str).unwrap_or("");
+            let msg = v.get("msg").or_else(|| v.get("error_description")).or_else(|| v.get("message")).and_then(Value::as_str).unwrap_or("sign-in failed").to_string();
+            if is_rejected_grant(code, &msg) {
+                Err(AuthFail::Rejected(msg))
+            } else {
+                Err(AuthFail::Other(AppError::Unavailable(format!("sign-in failed: {msg}"))))
+            }
+        }
+        429 => Err(AuthFail::Other(AppError::Network("too many sign-in attempts, try again in a minute".into()))),
+        c => Err(AuthFail::Other(AppError::Network(format!("Tunewire server returned HTTP {c}")))),
+    }
+}
+
+fn post(path: &str, body: Value, bearer: Option<&str>) -> Result<Value, AuthFail> {
+    let c = cfg().map_err(AuthFail::Other)?;
     let mut req = crate::http::agent()
         .post(&format!("{}{path}", c.url))
         .header("apikey", &c.anon_key)
@@ -104,14 +164,12 @@ fn post(path: &str, body: Value, bearer: Option<&str>) -> AppResult<Value> {
     if let Some(b) = bearer {
         req = req.header("Authorization", &format!("Bearer {b}"));
     }
-    match req.send(body.to_string()) {
-        Ok(mut r) => {
-            let text = r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
-            Ok(if text.trim().is_empty() { Value::Null } else { serde_json::from_str(&text)? })
-        }
-        Err(ureq::Error::StatusCode(c)) => Err(if c == 400 || c == 401 || c == 403 { AppError::Unavailable(format!("sign-in failed (HTTP {c})")) } else { AppError::Network(format!("Tunewire server returned HTTP {c}")) }),
-        Err(e) => Err(AppError::Network(e.to_string())),
-    }
+    // The shared agent returns HTTP errors as responses, so both the status
+    // and the error body (`error_code`, `msg`) can be checked.
+    let mut r = req.send(body.to_string()).map_err(|e| AuthFail::Other(AppError::Network(e.to_string())))?;
+    let status = r.status().as_u16();
+    let text = r.body_mut().read_to_string().map_err(|e| AuthFail::Other(AppError::Network(e.to_string())))?;
+    classify(status, if text.trim().is_empty() { Value::Null } else { serde_json::from_str(&text).unwrap_or(Value::Null) })
 }
 
 fn adopt(v: &Value) -> AppResult<CloudSession> {
@@ -119,14 +177,19 @@ fn adopt(v: &Value) -> AppResult<CloudSession> {
     let refresh = v.get("refresh_token").and_then(Value::as_str).unwrap_or("").to_string();
     let expires_in = v.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
     let user = v.get("user").cloned().unwrap_or(Value::Null);
+    if user.get("is_anonymous").and_then(Value::as_bool).unwrap_or(false) {
+        // Guest accounts are gone: an old guest session just ends.
+        clear_refresh();
+        *SESSION.lock().unwrap() = None;
+        return Err(AppError::Unavailable("guest accounts are no longer supported; sign in with Discord".into()));
+    }
     let meta = user.get("user_metadata").cloned().unwrap_or(Value::Null);
     let s = |k: &str| meta.get(k).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_string);
     let session = CloudSession {
         access_token: access,
         user_id: user.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
-        name: s("full_name").or_else(|| s("name")).or_else(|| s("user_name")).unwrap_or_else(|| "Guest".into()),
+        name: s("full_name").or_else(|| s("name")).or_else(|| s("user_name")).unwrap_or_else(|| "Listener".into()),
         avatar: s("avatar_url"),
-        anonymous: user.get("is_anonymous").and_then(Value::as_bool).unwrap_or(false),
         expires_at: now_ms() + expires_in * 1000,
     };
     if !refresh.is_empty() {
@@ -142,7 +205,42 @@ fn random_b64(n: usize) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }
 
-/// Wait for the browser to come back to http://127.0.0.1:5590/callback?code=…
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// The callback query → the auth code, or why there is none.
+fn parse_callback(query: &str) -> Result<String, Option<String>> {
+    let param = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{k}="))).map(|v| percent_decode(&v.replace('+', " ")));
+    if let Some(c) = param("code").filter(|c| !c.is_empty()) {
+        return Ok(c);
+    }
+    // The provider/auth server explains failures in error_description.
+    match param("error_description").or_else(|| param("error")) {
+        Some(r) if r != "access_denied" => Err(Some(r)),
+        _ => Err(None),
+    }
+}
+
+/// Wait for the browser to come back to http://127.0.0.1:<port>/callback?code=…
 fn catch_code(listener: TcpListener, deadline: Instant) -> AppResult<String> {
     listener.set_nonblocking(true)?;
     loop {
@@ -162,17 +260,18 @@ fn catch_code(listener: TcpListener, deadline: Instant) -> AppResult<String> {
                     let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
                     continue;
                 }
-                let query = path.split_once('?').map(|(_, q)| q).unwrap_or("");
-                let param = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{k}="))).map(|v| v.replace('+', " "));
-                let ok = param("code").is_some();
-                let page = format!(
-                    "<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>{}</p>",
-                    if ok { "You're signed in to Tunewire. You can close this tab." } else { "Sign-in was cancelled. You can close this tab." }
-                );
+                let result = parse_callback(path.split_once('?').map(|(_, q)| q).unwrap_or(""));
+                let text = match &result {
+                    Ok(_) => "You're signed in to Tunewire. You can close this tab.".to_string(),
+                    Err(Some(r)) => format!("Sign-in failed: {}. You can close this tab.", html_escape(r)),
+                    Err(None) => "Sign-in was cancelled. You can close this tab.".to_string(),
+                };
+                let page = format!("<!doctype html><meta charset=utf-8><title>Tunewire</title><body style=\"font:16px system-ui;background:#111;color:#eee;display:grid;place-items:center;height:90vh\"><p>{text}</p>");
                 let _ = sock.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len()).as_bytes());
-                return match param("code") {
-                    Some(c) => Ok(c),
-                    None => Err(AppError::Cancelled),
+                return match result {
+                    Ok(c) => Ok(c),
+                    Err(Some(r)) => Err(AppError::Unavailable(format!("sign-in failed: {r}"))),
+                    Err(None) => Err(AppError::Cancelled),
                 };
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(100)),
@@ -181,18 +280,21 @@ fn catch_code(listener: TcpListener, deadline: Instant) -> AppResult<String> {
     }
 }
 
-/// Sign in with "discord" or "google" in the browser.
+/// Sign in with Discord in the browser (the only sign-in method).
 pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
     let c = cfg()?;
-    if !matches!(provider, "discord" | "google" | "github") {
-        return Err(AppError::Invalid("unknown sign-in provider".into()));
+    if provider != "discord" {
+        return Err(AppError::Invalid("Tunewire accounts sign in with Discord".into()));
     }
-    let listener = TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).map_err(|e| AppError::Unavailable(format!("sign-in port {REDIRECT_PORT} is busy: {e}")))?;
+    let (listener, port) = REDIRECT_PORTS
+        .iter()
+        .find_map(|&p| TcpListener::bind(("127.0.0.1", p)).ok().map(|l| (l, p)))
+        .ok_or_else(|| AppError::Unavailable(format!("sign-in ports {}–{} are all busy; close the program using them and try again", REDIRECT_PORTS[0], REDIRECT_PORTS[REDIRECT_PORTS.len() - 1])))?;
     let verifier = random_b64(48);
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
-    let redirect = format!("http://127.0.0.1:{REDIRECT_PORT}/callback");
+    let redirect = format!("http://127.0.0.1:{port}/callback");
     let url = format!(
-        "{}/auth/v1/authorize?provider={provider}&redirect_to={}&code_challenge={challenge}&code_challenge_method=s256",
+        "{}/auth/v1/authorize?provider=discord&redirect_to={}&code_challenge={challenge}&code_challenge_method=s256",
         c.url,
         crate::search::percent_encode(&redirect)
     );
@@ -202,10 +304,8 @@ pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
     adopt(&v)
 }
 
-/// A guest account (no sign-in): enough to join Listen Together or open shares.
-pub fn sign_in_guest_blocking() -> AppResult<CloudSession> {
-    let v = post("/auth/v1/signup", serde_json::json!({}), None)?;
-    adopt(&v)
+fn fresh_session() -> Option<CloudSession> {
+    SESSION.lock().unwrap().as_ref().map(|i| i.session.clone()).filter(|s| s.expires_at > now_ms() + 120_000)
 }
 
 /// A valid session (refreshed when close to expiry), if signed in.
@@ -213,25 +313,27 @@ pub fn session_blocking() -> AppResult<Option<CloudSession>> {
     if config().is_none() {
         return Ok(None);
     }
-    let current = SESSION.lock().unwrap().as_ref().map(|i| (i.session.clone(), i.refresh.clone()));
-    let (refresh, have) = match current {
-        Some((s, _)) if s.expires_at > now_ms() + 120_000 => return Ok(Some(s)),
-        Some((_, r)) if !r.is_empty() => (r, true),
-        _ => match load_refresh() {
-            Some(r) => (r, false),
-            None => return Ok(None),
-        },
-    };
+    if let Some(s) = fresh_session() {
+        return Ok(Some(s));
+    }
+    // One refresh at a time; whoever waited finds the new session ready.
+    let _r = REFRESHING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = fresh_session() {
+        return Ok(Some(s));
+    }
+    let current = SESSION.lock().unwrap().as_ref().map(|i| i.refresh.clone()).filter(|r| !r.is_empty());
+    let Some(refresh) = current.or_else(load_refresh) else { return Ok(None) };
     match post("/auth/v1/token?grant_type=refresh_token", serde_json::json!({ "refresh_token": refresh.trim() }), None) {
-        Ok(v) => Ok(Some(adopt(&v)?)),
-        Err(AppError::Unavailable(_)) => {
-            // Refresh token revoked/expired: signed out.
+        // A guest session is refused by `adopt` (and cleared).
+        Ok(v) => Ok(adopt(&v).ok()),
+        Err(AuthFail::Rejected(_)) => {
+            // The session really ended (revoked, expired, used elsewhere).
             clear_refresh();
             *SESSION.lock().unwrap() = None;
             Ok(None)
         }
-        Err(e) if have => Err(e),
-        Err(e) => Err(e),
+        // Offline or server trouble: keep the refresh token for next time.
+        Err(AuthFail::Other(e)) => Err(e),
     }
 }
 
@@ -247,22 +349,49 @@ pub fn sign_out_blocking() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_rejected_grants_sign_out() {
+        let rej = classify(400, serde_json::json!({ "error_code": "refresh_token_already_used", "msg": "Invalid Refresh Token: Already Used" }));
+        assert!(matches!(rej, Err(AuthFail::Rejected(_))));
+        let rej = classify(400, serde_json::json!({ "error": "invalid_grant", "error_description": "Invalid Refresh Token: Refresh Token Not Found" }));
+        assert!(matches!(rej, Err(AuthFail::Rejected(_))));
+        // Temporary trouble keeps the session.
+        assert!(matches!(classify(502, Value::Null), Err(AuthFail::Other(AppError::Network(_)))));
+        assert!(matches!(classify(429, Value::Null), Err(AuthFail::Other(AppError::Network(_)))));
+        assert!(matches!(classify(400, serde_json::json!({ "error_code": "validation_failed", "msg": "bad" })), Err(AuthFail::Other(_))));
+        assert!(classify(200, serde_json::json!({ "ok": true })).is_ok());
+    }
+
+    #[test]
+    fn callback_errors_are_explained() {
+        assert_eq!(parse_callback("code=abc-123&state=x"), Ok("abc-123".into()));
+        assert_eq!(parse_callback("error=server_error&error_description=Unable+to+exchange%20code"), Err(Some("Unable to exchange code".into())));
+        assert_eq!(parse_callback("error=access_denied&error_description=denied"), Err(Some("denied".into())));
+        assert_eq!(parse_callback("error=access_denied"), Err(None));
+        assert_eq!(parse_callback(""), Err(None));
+        assert_eq!(percent_decode("a%2Fb%zz%"), "a/b%zz%");
+    }
+
+    #[test]
+    fn guest_sessions_are_refused() {
+        let v = serde_json::json!({ "access_token": "t", "refresh_token": "", "user": { "id": "u", "is_anonymous": true } });
+        assert!(adopt(&v).is_err());
+    }
+
     /// Against the local stack: `supabase start` in the repo (see supabase/).
     #[test]
     #[ignore]
-    fn live_guest_session_and_refresh() {
+    fn live_refresh_is_single_flight() {
         let url = std::env::var("SB_URL").unwrap();
         let key = std::env::var("SB_ANON").unwrap();
-        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url, anon_key: key });
+        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url, anon_key: key, share_url: String::new() });
         *FALLBACK_FILE.lock().unwrap() = Some(std::env::temp_dir().join("tw-cloud-test"));
-        let s = sign_in_guest_blocking().unwrap();
-        assert!(s.anonymous && !s.user_id.is_empty());
-        // Force a refresh.
-        SESSION.lock().unwrap().as_mut().unwrap().session.expires_at = 0;
-        let r = session_blocking().unwrap().unwrap();
-        assert_eq!(r.user_id, s.user_id);
-        assert_ne!(r.access_token, s.access_token);
+        // Needs a Discord sign-in first (SB_REFRESH = a refresh token).
+        let refresh = std::env::var("SB_REFRESH").unwrap();
+        save_refresh(&refresh);
+        let handles: Vec<_> = (0..4).map(|_| std::thread::spawn(session_blocking)).collect();
+        let ids: Vec<_> = handles.into_iter().map(|h| h.join().unwrap().unwrap().unwrap().user_id).collect();
+        assert!(ids.windows(2).all(|w| w[0] == w[1]));
         sign_out_blocking();
-        assert!(session_blocking().unwrap().is_none());
     }
 }

@@ -25,11 +25,6 @@ pub async fn cloud_sign_in(provider: String) -> AppResult<CloudSession> {
 }
 
 #[tauri::command]
-pub async fn cloud_sign_in_guest() -> AppResult<CloudSession> {
-    blocking(cloud::sign_in_guest_blocking).await
-}
-
-#[tauri::command]
 pub async fn cloud_sign_out() -> AppResult<()> {
     blocking(|| {
         cloud::sign_out_blocking();

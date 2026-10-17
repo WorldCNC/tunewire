@@ -5,6 +5,8 @@
 // ===========================================================================
 
 const progressEl = $('#progress');
+const playedEl = $('#p-played');
+const knobWrapEl = $('#p-knobwrap');
 
 function renderPlayback() {
   const p = state.playback;
@@ -108,7 +110,11 @@ function renderProgress() {
   runSmoothProgress();
   if (fsp.el) paintFullscreen();
   $('#t-dur').textContent = fmtTime(dur);
-  $('#p-buffered').style.width = `${Math.min(1, p.buffered ?? 0) * 100}%`;
+  $('#p-buffered').style.transform = `scaleX(${Math.min(1, p.buffered ?? 0)})`;
+  // Screen readers: the slider's value (updated with each tick, not per frame).
+  progressEl.setAttribute('aria-valuemax', String(Math.round(dur || 0)));
+  progressEl.setAttribute('aria-valuenow', String(Math.round(p.position || 0)));
+  progressEl.setAttribute('aria-valuetext', `${fmtTime(p.position)} of ${fmtTime(dur)}`);
   progressEl.classList.toggle('disabled', !(p.status === 'playing' || p.status === 'paused') || !dur);
   progressEl.classList.toggle('stalled', !!p.stalled);
   const msg = $('#np-via');
@@ -136,8 +142,10 @@ function runSmoothProgress() {
 
 function setProgress(frac) {
   frac = Math.max(0, Math.min(1, frac || 0));
-  $('#p-played').style.width = `${frac * 100}%`;
-  $('#p-knob').style.left = `${frac * 100}%`;
+  // Transforms only: moving the bar never triggers layout, so the per-frame
+  // animation doesn't compete with scrolling.
+  playedEl.style.transform = `scaleX(${frac})`;
+  knobWrapEl.style.transform = `translateX(${frac * 100}%)`;
 }
 
 function fracFromEvent(e) {
@@ -177,7 +185,13 @@ progressEl.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     e.preventDefault();
     e.stopPropagation();
-    seekBy(e.key === 'ArrowLeft' ? -5 : 5);
+    seekBy((e.key === 'ArrowLeft' ? -5 : 5) * (e.shiftKey ? 3 : 1));
+  }
+  if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    e.stopPropagation();
+    const d = state.playback?.duration;
+    if (d) seekTo(e.key === 'Home' ? 0 : d - 1);
   }
 });
 
@@ -235,4 +249,16 @@ $('#btn-mute').addEventListener('click', () => {
 $('#np-artist').addEventListener('click', () => {
   const t = state.playback?.current?.track;
   if (t?.artist) openArtist(t.artist, t);
+});
+
+// Narrow windows: the controls that don't fit are in this menu.
+$('#btn-more')?.addEventListener('click', (e) => {
+  const click = (id) => () => $(id)?.click();
+  openMenu(e.currentTarget, [
+    { label: 'Now playing view', icon: 'npView', onClick: click('#btn-np') },
+    cloudOn() ? { label: jam.code ? 'Listening together' : 'Listen together', icon: 'friends', onClick: click('#btn-jam') } : null,
+    { label: 'Output device', icon: 'speaker', onClick: click('#btn-device') },
+    { label: 'Sleep timer', icon: 'moon', onClick: click('#btn-sleep') },
+    { label: 'Full screen', icon: 'expand', onClick: click('#btn-full') },
+  ].filter(Boolean));
 });

@@ -36,7 +36,7 @@ async function renderThemes() {
         h('span', { style: `background:${t.accent || '#888'}` })),
       h('div', { class: 'theme-info' },
         h('div', {}, h('div', { class: 'name' }, t.name), h('small', {}, `${t.builtin ? 'Built-in' : t.author || 'Custom'} · ${t.dark ? 'dark' : 'light'}`)),
-        state.settings?.theme === t.id ? h('span', { html: icon('check'), style: 'color:var(--accent)' }) : null));
+        state.settings?.theme === t.id ? h('span', { html: icon('check'), class: 'accent' }) : null));
     return card;
   }));
   if (!state.editingTheme || state.editingTheme.id !== state.settings.theme) {
@@ -105,10 +105,10 @@ function renderThemeEditor() {
         h('button', { class: 'btn', html: `${icon('download')}Export`, onclick: exportTheme }),
         !t.builtin ? h('button', { class: 'btn danger-ghost', html: `${icon('trash')}Delete`, onclick: del }) : null,
         h('button', { class: 'btn primary', html: `${icon('save')}${t.builtin ? 'Save as new theme' : 'Save'}`, onclick: save }))),
-    h('p', { class: 'muted', style: 'margin:0 0 10px;font-size:13px' }, 'Changes preview immediately. Saving a built-in theme creates a copy.'),
+    h('p', { class: 'muted mb-10 fs-13'}, 'Changes preview immediately. Saving a built-in theme creates a copy.'),
     h('div', { class: 'editor-head' }, nameIn, authorIn, h('label', { class: 'actions' }, h('span', { class: 'switch' }, darkIn, h('span')), 'Dark')),
     grid,
-    h('h3', { style: 'font-size:13px;margin:6px 0' }, 'Custom CSS'),
+    h('h3', { class: 'fs-13 my-6' }, 'Custom CSS'),
     css);
 }
 

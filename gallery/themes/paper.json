@@ -1,0 +1,32 @@
+{
+  "id": "paper",
+  "name": "Paper",
+  "author": "Tunewire",
+  "dark": false,
+  "vars": {
+    "--bg": "#f6f3ee",
+    "--bg-elev": "#fffdf9",
+    "--bg-elev-2": "#efe9e0",
+    "--surface-hover": "#ebe4d9",
+    "--selected": "#e4dccf",
+    "--border": "#ddd4c6",
+    "--text": "#2a2622",
+    "--text-dim": "#6e655b",
+    "--text-faint": "#9c9388",
+    "--accent": "#c2410c",
+    "--accent-contrast": "#ffffff",
+    "--accent-soft": "rgba(194, 65, 12, 0.10)",
+    "--danger": "#b42318",
+    "--warn": "#b54708",
+    "--ok": "#2f7d4f",
+    "--radius": "6px",
+    "--font": "system-ui, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", Cantarell, \"Noto Sans\", Ubuntu, sans-serif",
+    "--font-mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"JetBrains Mono\", Consolas, monospace",
+    "--shadow": "0 8px 24px rgba(60, 40, 20, 0.12)",
+    "--badge-soundcloud": "#ff5500",
+    "--badge-ytmusic": "#ff0033",
+    "--badge-youtube": "#ff0000",
+    "--badge-spotify": "#1ed760"
+  },
+  "css": ""
+}

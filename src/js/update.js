@@ -58,7 +58,7 @@ function promptRestart() {
   const update = updater.ready;
   if (!update) return;
   const notes = (update.body || '').trim();
-  const status = h('div', { class: 'meta', style: 'min-height:16px' });
+  const status = h('div', { class: 'meta min-h-16' });
   const restart = h('button', { class: 'btn primary' }, 'Restart now');
   const m = openModal({
     title: `Tunewire ${update.version} is ready`,
@@ -83,7 +83,7 @@ function promptRestart() {
 
 function promptUpdate(update) {
   const notes = (update.body || '').trim();
-  const progress = h('div', { class: 'meta', style: 'min-height:16px' });
+  const progress = h('div', { class: 'meta min-h-16' });
   const install = h('button', { class: 'btn primary' }, 'Install and restart');
   const m = openModal({
     title: `Tunewire ${update.version} is available`,

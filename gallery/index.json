@@ -1,0 +1,94 @@
+{
+  "themes": [
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "author": "Tunewire",
+      "description": "Night-sky navy with a glowing aurora green.",
+      "preview": [
+        "#0b1020",
+        "#7cf0c8",
+        "#e8ecff"
+      ],
+      "file": {
+        "path": "themes/aurora.json",
+        "sha256": "03c5ad6bceb128e22626aa12d9462906ab42e5c24a7fe971ccf33a0592ff6cdc"
+      }
+    },
+    {
+      "id": "ember",
+      "name": "Ember",
+      "author": "Tunewire",
+      "description": "Dark coal with a warm orange glow.",
+      "preview": [
+        "#150d0b",
+        "#ff7a45",
+        "#f6e7df"
+      ],
+      "file": {
+        "path": "themes/ember.json",
+        "sha256": "6e9955fdff38551f64ec6bd262577dec2fdcc81b9f9f8a92c68144ee05e987cd"
+      }
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "author": "Tunewire examples",
+      "description": "Deep greens and soft mint, easy on the eyes at night.",
+      "preview": [
+        "#0f1511",
+        "#7ed99b",
+        "#e6efe8"
+      ],
+      "file": {
+        "path": "themes/forest.json",
+        "sha256": "638531efb1ae816cfef66b72c690f3488d1cece8cabcb39dd6187d796aefa7b5"
+      }
+    },
+    {
+      "id": "paper",
+      "name": "Paper",
+      "author": "Tunewire",
+      "description": "A warm light theme, like a printed page.",
+      "preview": [
+        "#f6f3ee",
+        "#c2410c",
+        "#2a2622"
+      ],
+      "file": {
+        "path": "themes/paper.json",
+        "sha256": "2b4f31d2cee846d2c43e5319ccd752b32641116ddde825c38646c054344c49d1"
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "id": "now-playing-notes",
+      "name": "Now Playing Notes",
+      "author": "Tunewire",
+      "description": "Example plugin: a side panel with per-track notes, session stats and a “more by this artist” button, plus a player-bar button.",
+      "version": "1.0.0",
+      "permissions": [
+        "playback",
+        "queue",
+        "search",
+        "ui",
+        "storage"
+      ],
+      "files": [
+        {
+          "path": "plugins/now-playing-notes/main.js",
+          "sha256": "8eeebaaf98a4adb52832dbbf0ddd473fed6f2b5d88169c53c1be72f3888f5e29"
+        },
+        {
+          "path": "plugins/now-playing-notes/manifest.json",
+          "sha256": "304546c89ed3529506cfdd143124217548827786e131c0f24e10c8206c7e16da"
+        },
+        {
+          "path": "plugins/now-playing-notes/style.css",
+          "sha256": "273c3bb40714f72ea4a74593079b690ae0a604a5fd0cf13722dc7cd25ea56a84"
+        }
+      ]
+    }
+  ]
+}

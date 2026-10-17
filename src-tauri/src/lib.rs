@@ -18,10 +18,12 @@
 //!   themes, plugins, discord
 
 mod artist;
+mod backup;
 mod audio;
 mod cloud;
 mod commands;
 mod controller;
+mod css_guard;
 mod decoder;
 mod discord;
 mod downloads;
@@ -30,6 +32,7 @@ mod explore;
 mod imports;
 mod foryou;
 mod error;
+mod gallery;
 mod http;
 mod localfiles;
 mod lyrics;
@@ -39,6 +42,7 @@ mod models;
 mod plugins;
 mod radio;
 mod report;
+mod scrobble;
 mod search;
 mod secrets;
 mod soundcloud;
@@ -58,6 +62,8 @@ mod ytm;
 mod itests;
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod perfbench;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -203,6 +209,7 @@ pub fn run() {
                 let st = app.state::<AppState>();
                 let history = st.store.library.lock().unwrap().history.clone();
                 stats::init(&st.store.dir, &history);
+                scrobble::init(&st.store.dir);
                 matcher::init(&st.store.dir);
                 soundcloud::init(&st.store.dir);
                 let s = st.store.settings();
@@ -333,8 +340,21 @@ pub fn run() {
             commands::cloud::cloud_config,
             commands::cloud::cloud_session,
             commands::cloud::cloud_sign_in,
-            commands::cloud::cloud_sign_in_guest,
             commands::cloud::cloud_sign_out,
+            commands::extras::backup_file_name,
+            commands::extras::export_backup,
+            commands::extras::inspect_backup,
+            commands::extras::restore_backup,
+            commands::extras::list_snapshots,
+            commands::extras::restore_playlist,
+            commands::extras::restore_history,
+            commands::extras::scrobble_status,
+            commands::extras::set_lastfm_app,
+            commands::extras::lastfm_connect,
+            commands::extras::listenbrainz_connect,
+            commands::extras::scrobble_disconnect,
+            commands::extras::gallery_index,
+            commands::extras::gallery_install,
             commands::foryou::for_you,
             commands::foryou::refresh_for_you,
             commands::foryou::listening_stats,

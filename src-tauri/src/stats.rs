@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
@@ -48,7 +48,11 @@ struct Listen {
 }
 
 static LISTEN: Mutex<Option<Listen>> = Mutex::new(None);
-static PLAYS: Mutex<Option<Vec<Play>>> = Mutex::new(None);
+/// The log, parsed once. Readers get a cheap `Arc` clone; an append copies
+/// only when a reader still holds the previous snapshot.
+static PLAYS: Mutex<Option<Arc<Vec<Play>>>> = Mutex::new(None);
+/// Last summary per (range, year), valid while the log length is unchanged.
+static SUMMARIES: Mutex<Option<HashMap<(String, Option<i32>), (usize, Stats)>>> = Mutex::new(None);
 static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn log_path(dir: &Path) -> PathBuf {
@@ -69,7 +73,7 @@ pub fn init(dir: &Path, history: &[crate::store::HistoryEntry]) {
                 out.push('\n');
             }
         }
-        let _ = std::fs::write(&path, out);
+        let _ = crate::store::write_atomic(&path, out.as_bytes());
     }
 }
 
@@ -81,9 +85,15 @@ fn load() -> Vec<Play> {
 }
 
 /// All logged plays, oldest first.
-pub fn plays() -> Vec<Play> {
+pub fn plays() -> Arc<Vec<Play>> {
     let mut g = PLAYS.lock().unwrap();
-    g.get_or_insert_with(load).clone()
+    g.get_or_insert_with(|| Arc::new(load())).clone()
+}
+
+/// Forget the parsed log (after a restore replaced plays.jsonl).
+pub fn reload() {
+    *PLAYS.lock().unwrap() = None;
+    *SUMMARIES.lock().unwrap() = None;
 }
 
 /// Only the version that was played (keeps the log small).
@@ -112,8 +122,9 @@ fn append(l: Listen) {
             let _ = writeln!(f, "{line}");
         }
     }
+    crate::scrobble::on_play(&play);
     if let Some(v) = PLAYS.lock().unwrap().as_mut() {
-        v.push(play);
+        Arc::make_mut(v).push(play);
     }
 }
 
@@ -126,6 +137,7 @@ pub fn on_tick(ps: &PlaybackState) {
             append(old);
         }
         if let Some(c) = cur {
+            crate::scrobble::now_playing(&c.track);
             *g = Some(Listen { uid: c.uid, track: c.track.clone(), platform: ps.version.as_ref().map(|v| v.platform), started: now_ms(), secs: 0.0, last: Instant::now() });
         }
     }
@@ -217,8 +229,21 @@ fn start_of_day(d: NaiveDate) -> u64 {
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /// `range`: "4w", "6m", "year" (with `year`, default this one) or "all".
+/// Cached until a new play is logged (or the day changes).
 pub fn summarize(range: &str, year: Option<i32>) -> Stats {
     let all = plays();
+    let key = (format!("{range}|{}", Local::now().date_naive()), year);
+    if let Some((n, s)) = SUMMARIES.lock().unwrap().as_ref().and_then(|m| m.get(&key)) {
+        if *n == all.len() {
+            return s.clone();
+        }
+    }
+    let s = summarize_plays(&all, range, year);
+    SUMMARIES.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, (all.len(), s.clone()));
+    s
+}
+
+fn summarize_plays(all: &[Play], range: &str, year: Option<i32>) -> Stats {
     let now = Local::now();
     let today = now.date_naive();
     let (from, to) = match range {
@@ -397,7 +422,7 @@ mod tests {
             play(now - day, 15.0, "B1", "Beta"), // a skip
             play(now - 1000, 120.0, "B2", "Beta, Gamma"),
         ];
-        *PLAYS.lock().unwrap() = Some(v);
+        *PLAYS.lock().unwrap() = Some(Arc::new(v));
         let s = summarize("4w", None);
         assert_eq!(s.plays, 3);
         assert_eq!(s.skips, 1);

@@ -294,7 +294,7 @@ pub fn current(dir: &Path, plays: &[Play], has_taste: bool) -> ForYou {
 }
 
 /// Rebuild what's out of date (or everything with `force`).
-pub async fn refresh(dir: &Path, plays: Vec<Play>, favorites: Vec<Track>, playlist_tracks: Vec<Track>, force: bool, cache: &Arc<SearchCache>) -> AppResult<ForYou> {
+pub async fn refresh(dir: &Path, plays: Arc<Vec<Play>>, favorites: Vec<Track>, playlist_tracks: Vec<Track>, force: bool, cache: &Arc<SearchCache>) -> AppResult<ForYou> {
     let t = taste(&plays, &favorites, &playlist_tracks);
     if t.tracks.is_empty() {
         return Ok(ForYou { daily: vec![], discover: None, local: vec![], stale: false, empty: true });

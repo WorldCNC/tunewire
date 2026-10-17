@@ -22,6 +22,10 @@ SRC = ROOT / "src"
 DEV = ROOT / "dev"
 THEMES = ROOT / "src-tauri" / "themes"
 PORT = int(os.environ.get("TUNEWIRE_DEV_PORT", "1420"))
+# Benchmarks serve a different tree (an older checkout): TUNEWIRE_DEV_ROOT.
+if os.environ.get("TUNEWIRE_DEV_ROOT"):
+    ROOT = Path(os.environ["TUNEWIRE_DEV_ROOT"]).resolve()
+    SRC, DEV, THEMES = ROOT / "src", ROOT / "dev", ROOT / "src-tauri" / "themes"
 
 INJECT = """<script>
 /* Tunewire dev: live reload + mock backend when opened in a plain browser. */
@@ -74,6 +78,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             f = DEV / path[len("/__dev/"):]
             if f.is_file() and DEV in f.resolve().parents:
                 return self._send(f.read_bytes(), "text/javascript")
+        if path.startswith("/__gallery/"):
+            g = ROOT / "gallery"
+            f = (g / path[len("/__gallery/"):]).resolve()
+            if f.is_file() and g.resolve() in f.parents:
+                return self._send(f.read_bytes(), "application/json")
         if path.startswith("/__themes/"):
             f = THEMES / Path(path).name
             if f.is_file():

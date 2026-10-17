@@ -5,6 +5,7 @@ pub mod cloud;
 pub mod customize;
 pub mod discover;
 pub mod explore;
+pub mod extras;
 pub mod foryou;
 pub mod library;
 pub mod offline;

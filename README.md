@@ -5,24 +5,35 @@ A native music player for SoundCloud, YouTube Music, YouTube and Spotify links, 
 ```
 src/                       vanilla HTML/CSS/JS frontend (no framework, no bundler)
   index.html  styles.css  brands.js (platform logos, simple-icons CC0)
-  js/  core · tracks · search · player · queue · library · artist · offline · lyrics
-       themes · plugins · settings · shortcuts · boot   (ordered classic scripts)
+  js/  core · tracks · search · player · queue · library · artist · explore · offline · lyrics
+       themes · plugins · foryou · shell · cloud · social · update · settings · shortcuts · boot
+       (ordered classic scripts)
+  js/lazy/  imports · wrapped · gallery · backup   (loaded on first use)
 src-tauri/src/
   lib.rs         app setup, tray, command registration
   state.rs       shared state, playback snapshot, events
   controller.rs  resolve → stream → play, platform fallback, gapless preloading
-  commands/      playback · queue · library · discover · offline · customize · system
+  commands/      playback · queue · library · discover · offline · customize · system · cloud · extras …
   ytdlp.rs       yt-dlp runner (≤3 processes, retry/backoff, error mapping, bundled copy)
-  spotdl.rs      spotDL runner (Spotify search & playlists)
   search.rs      normalization, fuzzy dedup, cross-platform grouping, 5-min cache
-  spotify.rs     Spotify embed-page metadata     artist.rs  artist & album pages
-  lyrics.rs      LRCLIB lyrics                   secrets.rs OS keychain
+  spotify.rs     Spotify metadata             spotify_play.rs  Spotify Premium playback (librespot)
+  artist.rs      artist & album pages         lyrics.rs  LRCLIB lyrics
   stream.rs      disk-backed HTTP (ranged, random access) / HLS / local reader
   decoder.rs     symphonia decoder + Opus (libopus)
-  audio.rs       rodio engine: gapless, crossfade, loudness normalization
-  downloads.rs   offline downloads               localfiles.rs  local music library
-  store.rs  themes.rs  plugins.rs  discord.rs  error.rs  models.rs
+  audio.rs       rodio engine: gapless, crossfade, loudness normalization, EQ
+  media.rs       OS media controls (media keys, Windows overlay, MPRIS)
+  stats.rs       play log, stats and Wrapped   foryou.rs  Daily Mixes, Discover Weekly
+  cloud.rs       accounts (Discord sign-in, keychain refresh token)
+  scrobble.rs    Last.fm / ListenBrainz        backup.rs  backup & restore
+  gallery.rs     theme/plugin gallery (checksum-verified installs)
+  css_guard.rs   checks theme and plugin CSS for anything that loads from the internet
+  report.rs      opt-in error reports (through the `report` Edge Function)
+  store.rs       settings + library persistence (atomic, fsync'd, daily snapshots)
+  downloads.rs  localfiles.rs  themes.rs  plugins.rs  discord.rs  secrets.rs  error.rs  models.rs
   itests.rs      offline integration tests (fake yt-dlp + local HTTP server)
+supabase/        database migrations, row level security tests, Edge Functions (report, share)
+gallery/         themes and plugins offered in the in-app gallery (index.json is generated)
+docs/            the website (GitHub Pages): landing page and share-link pages
 ```
 
 ## Requirements
@@ -147,6 +158,34 @@ This relies on unofficial Spotify endpoints, so it can break when Spotify change
 - **Better YouTube Music results.** Missing artist and duration are borrowed from a parallel YouTube search, and anything still guessed is completed in the background.
 - **Spotify secret in the OS keychain** (Secret Service, Windows Credential Manager or macOS Keychain), not in `settings.json`.
 - **Bundled yt-dlp (optional).** Settings → Tools → "Install copy" downloads the official yt-dlp build from GitHub, verifies its SHA-256, and uses it. "Update copy" replaces it with the latest release.
+- **Scrobbling.** Settings → Scrobbling connects Last.fm (approve in the browser) or ListenBrainz (paste your token). A song is scrobbled after half of it (or 4 minutes) has played; "now playing" is sent when it starts. Listens that can't be sent wait in `scrobbles.json` and are retried. Credentials are kept in the OS keychain. Builds get a Last.fm API account from `TUNEWIRE_LASTFM_KEY`/`TUNEWIRE_LASTFM_SECRET`; users can also enter their own.
+- **Backup and restore.** Settings → Backup saves one `.tunewire-backup` file (playlists, Liked Songs, followed artists, history, the listening log, custom themes; never passwords or audio). Restoring saves the current library first. `library.json` also keeps 7 daily snapshots in `backups/`, and a damaged file is repaired from the newest one automatically.
+- **Gallery.** Themes → Gallery and Plugins → Gallery install curated items from `gallery/` in this repository. Every file is checked against the SHA-256 in `gallery/index.json`, and a plugin must ask for exactly the permissions the gallery shows. After changing `gallery/`, run `python3 scripts/build-gallery.py`.
+- **Undo.** Deleting a playlist, removing songs from one and clearing history happen at once, with an Undo button.
+
+## Online features (accounts, sharing, Listen Together, friends)
+
+Optional, built on Supabase. Audio never touches the server, only song info (titles, artists, links).
+
+- **Accounts are Discord only.** There are no guest accounts; the database refuses writes from anonymous sessions too.
+- **Sharing.** Song links carry the song in the link. Playlist, profile and session links open the landing page (or a link-preview server, below). Links that change something (join a collaborative playlist or a session, play a song) ask first.
+- **Collaborative playlists.** Invite codes are readable only by the owner (through `playlist_invite()`) and can be reset. Edits are sent as small operations, one at a time and in order; other people's edits arrive as numbered change rows (`playlist_changes`), and a gap means the playlist is fetched again. Each shared playlist shows its sync status, who's editing, and a Retry when something didn't sync.
+- **Listen Together.** A session is a `jams` row only the host can change; members are checked by the server; the host can hand over, remove people and approve suggested songs. Guests chat, suggest songs and vote to skip. Positions line up with the server's clock. A "room" keeps the same link every time.
+- **Friends.** Following needs approval. What you play and your Wrapped are only visible to approved followers, and sharing what you play is off until you turn it on. Notifications cover follow requests, accepted follows, playlist activity and friends' sessions.
+
+**Setting up a project**
+1. `supabase link`, then `supabase db push` (migrations in `supabase/migrations`).
+2. Auth → Providers: enable **Discord** (client ID and secret from discord.com/developers), turn **anonymous sign-ins off**, and allow the redirect URLs `http://127.0.0.1:5590/callback` … `http://127.0.0.1:5594/callback`.
+3. Error reports: `supabase secrets set DISCORD_WEBHOOK=<webhook url>` and `supabase functions deploy report`. The webhook never ships in the app.
+4. Link previews (optional): Supabase serves function HTML as plain text on `*.supabase.co`, so deploy `supabase/functions/share` on a custom domain (or any Deno host) with `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SHARE_PUBLIC_URL`, and build the app with `TUNEWIRE_SHARE_URL` set to the same address. Without it, share links go to the landing page.
+5. Build with `TUNEWIRE_SUPABASE_URL` and `TUNEWIRE_SUPABASE_ANON_KEY` (CI secrets).
+
+**Tests:** `scripts/test-db.sh` applies every migration to a throwaway Postgres (Docker) and runs the row level security tests in `supabase/tests`. `deno test supabase/functions` tests the Edge Functions.
+
+## Privacy
+
+- Error reports are **off** until you agree (a question on first start; Settings → Privacy). Reports contain the app version, operating system and the error, with folder names and stream links removed.
+- Your library stays on your computer. An account is only used for the online features above.
 
 ## Keyboard shortcuts
 
@@ -161,6 +200,9 @@ This relies on unofficial Spotify endpoints, so it can break when Spotify change
 | R | Cycle repeat (off / all / one) |
 | Q | Toggle queue panel |
 | / or Ctrl+K | Focus search (paste a URL there to play it) |
+| Tab, then ↑ / ↓ | Move into a song list and pick a song (Shift: select several; Home/End) |
+| Enter | Play the focused song |
+| Shift+F10 or Menu key | Song menu |
 | 1–7 | Switch view |
 | ? | Shortcut help |
 
@@ -171,7 +213,7 @@ All data lives in the Tauri app data dir for `app.tunewire.player`:
 - macOS: `~/Library/Application Support/app.tunewire.player/`
 - Windows: `%APPDATA%\app.tunewire.player\`
 
-Contents: `settings.json`, `library.json` (playlists, favorites, last 500 history entries), `themes/`, `plugins/`. Window size and position are saved by `tauri-plugin-window-state`. Volume, last source, theme, platform order and plugin state are saved in `settings.json`.
+Contents: `settings.json`, `library.json` (playlists, favorites, followed artists), `history.json`, `downloads.json`, `plays.jsonl` (listening log), `scrobbles.json` (waiting scrobbles), `backups/` (daily snapshots, pre-restore copies), `themes/`, `plugins/`. Window size and position are saved by `tauri-plugin-window-state`. Volume, last source, theme, platform order and plugin state are saved in `settings.json`.
 
 ## Themes
 
@@ -265,8 +307,7 @@ Events: `playback` (about 4 Hz while playing), `queue-changed`, `track-started`,
 
 ## Known limitations
 
-- **Spotify:** playback is always a matched upload, and a match can occasionally be wrong. Search uses unofficial web endpoints that Spotify may change.
+- **Spotify:** without Premium, playback is a matched upload, and a match can occasionally be wrong. With Premium (Settings → Spotify) Spotify's own audio plays through librespot, an unofficial client; Spotify's terms don't allow third-party clients, so use it knowing that. Search uses unofficial web endpoints that Spotify may change.
 - **YouTube Music search:** yt-dlp's flat results carry no artist or duration. They're borrowed from YouTube results when the same video appears there; otherwise the artist is inferred from your query words.
 - **Seeking ahead:** seeking past what has downloaded waits for the download to reach that point. Downloads usually finish within seconds.
-- **No Opus/WebM decoding:** symphonia lacks Opus, so the format selector avoids it. A source that only offers Opus fails over to the next platform.
-- **Media keys:** not wired to OS media controls; use the tray menu or keyboard shortcuts.
+- **macOS:** there's no ready-made download yet (CI builds Windows and Linux); build it from source.

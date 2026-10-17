@@ -821,8 +821,9 @@ h2 { font-size: 20px; font-weight: 750; letter-spacing: -.01em; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tb-right { justify-content: flex-end; }
 .tb-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; letter-spacing: -.01em; margin-right: 10px; white-space: nowrap; }
-.tb-wire { background: linear-gradient(100deg, #9b5cff, #4d7dff 50%, #18c8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.tb-logo { width: 44px; height: 20px; background: url(img/logo-mark.png) center / contain no-repeat; filter: drop-shadow(0 2px 8px rgba(80, 60, 255, .35)); }
+.tb-wire { color: var(--accent); }
+/* The logo's shape in the theme's colors (a mask), so it fits every theme. */
+.tb-logo { width: 44px; height: 20px; background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 70%, var(--text)), var(--accent)); -webkit-mask: url(img/logo-mark.png) center / contain no-repeat; mask: url(img/logo-mark.png) center / contain no-repeat; }
 .tb-nav, .tb-btn { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text-dim); background: color-mix(in srgb, var(--bg) 70%, transparent); position: relative; }
 .tb-nav:hover:not(:disabled), .tb-btn:hover { color: var(--text); transform: scale(1.05); }
 .tb-nav:disabled { opacity: .35; }

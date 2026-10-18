@@ -3,7 +3,7 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
-## Unreleased
+## v2.1.0
 
 **Your library on all your devices**
 - Turn on Settings → Account → Sync my library: your playlists and Liked Songs (with their covers, folders and pins) show up on every computer you sign in to. The online copies are private.

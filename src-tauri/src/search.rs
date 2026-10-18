@@ -19,18 +19,84 @@ use crate::ytdlp;
 /// Words that mark a *different recording/arrangement*. Two titles that differ
 /// in these are never merged ("Song" vs "Song (Remix)").
 const VARIANT_MARKERS: &[&str] = &[
-    "remix", "rmx", "edit", "mix", "acoustic", "instrumental", "cover", "extended", "vip", "slowed",
-    "sped", "nightcore", "bootleg", "flip", "rework", "karaoke", "reverb", "8d", "mashup", "unplugged",
-    "orchestral", "piano", "demo",
+    "remix",
+    "rmx",
+    "edit",
+    "mix",
+    "acoustic",
+    "instrumental",
+    "cover",
+    "extended",
+    "vip",
+    "slowed",
+    "sped",
+    "nightcore",
+    "bootleg",
+    "flip",
+    "rework",
+    "karaoke",
+    "reverb",
+    "8d",
+    "mashup",
+    "unplugged",
+    "orchestral",
+    "piano",
+    "demo",
 ];
 
 /// Words that carry no identity — packaging noise added by uploaders.
 const NOISE_WORDS: &[&str] = &[
-    "official", "video", "audio", "lyrics", "lyric", "visualizer", "visualiser", "remaster",
-    "remastered", "live", "hd", "hq", "4k", "1080p", "mv", "m", "v", "explicit", "clean", "version",
-    "music", "full", "song", "color", "coded", "free", "download", "out", "now", "premiere", "topic",
-    "original", "single", "album", "stereo", "mono", "ost", "soundtrack", "from", "the", "release",
-    "ncs", "copyright", "high", "quality", "new", "subtitulado", "letra", "legendado", "dir", "by",
+    "official",
+    "video",
+    "audio",
+    "lyrics",
+    "lyric",
+    "visualizer",
+    "visualiser",
+    "remaster",
+    "remastered",
+    "live",
+    "hd",
+    "hq",
+    "4k",
+    "1080p",
+    "mv",
+    "m",
+    "v",
+    "explicit",
+    "clean",
+    "version",
+    "music",
+    "full",
+    "song",
+    "color",
+    "coded",
+    "free",
+    "download",
+    "out",
+    "now",
+    "premiere",
+    "topic",
+    "original",
+    "single",
+    "album",
+    "stereo",
+    "mono",
+    "ost",
+    "soundtrack",
+    "from",
+    "the",
+    "release",
+    "ncs",
+    "copyright",
+    "high",
+    "quality",
+    "new",
+    "subtitulado",
+    "letra",
+    "legendado",
+    "dir",
+    "by",
 ];
 
 /// Lowercase, strip punctuation/diacritic-ish symbols and collapse spaces.
@@ -95,15 +161,8 @@ fn is_noise_segment(seg: &str, square: bool) -> bool {
     if has_marker(&toks) {
         return false;
     }
-    let all_noise = toks
-        .iter()
-        .all(|t| NOISE_WORDS.contains(&t.as_str()) || t.chars().all(|c| c.is_ascii_digit()));
-    let any_strong = toks.iter().any(|t| {
-        matches!(
-            t.as_str(),
-            "official" | "lyrics" | "lyric" | "video" | "audio" | "visualizer" | "remaster" | "remastered" | "live" | "hd" | "4k" | "mv"
-        )
-    });
+    let all_noise = toks.iter().all(|t| NOISE_WORDS.contains(&t.as_str()) || t.chars().all(|c| c.is_ascii_digit()));
+    let any_strong = toks.iter().any(|t| matches!(t.as_str(), "official" | "lyrics" | "lyric" | "video" | "audio" | "visualizer" | "remaster" | "remastered" | "live" | "hd" | "4k" | "mv"));
     // Square brackets are almost always label tags ("[NCS Release]", "[HZRX]").
     all_noise || any_strong || square
 }
@@ -209,10 +268,7 @@ pub fn split_artist_title(raw_title: &str, uploader: &str) -> (String, String) {
 }
 
 fn artist_tokens(artist: &str) -> HashSet<String> {
-    tokens(artist)
-        .into_iter()
-        .filter(|t| !matches!(t.as_str(), "x" | "and" | "feat" | "ft" | "featuring" | "vs" | "the" | "with" | "official"))
-        .collect()
+    tokens(artist).into_iter().filter(|t| !matches!(t.as_str(), "x" | "and" | "feat" | "ft" | "featuring" | "vs" | "the" | "with" | "official")).collect()
 }
 
 fn primary_artist(artist: &str) -> String {
@@ -284,20 +340,8 @@ impl Norm {
     fn of(v: &TrackVersion) -> Norm {
         let title = norm_text(&strip_noise(&v.title));
         let title_tokens: Vec<String> = title.split_whitespace().map(str::to_string).collect();
-        let markers = title_tokens
-            .iter()
-            .filter(|t| VARIANT_MARKERS.contains(&t.as_str()))
-            .cloned()
-            .collect();
-        Norm {
-            title,
-            title_tokens,
-            artist: artist_tokens(&v.artist),
-            markers,
-            variant: variant_words(&v.title),
-            duration: v.duration,
-            preview: v.preview,
-        }
+        let markers = title_tokens.iter().filter(|t| VARIANT_MARKERS.contains(&t.as_str())).cloned().collect();
+        Norm { title, title_tokens, artist: artist_tokens(&v.artist), markers, variant: variant_words(&v.title), duration: v.duration, preview: v.preview }
     }
 }
 
@@ -348,11 +392,7 @@ fn same_track(a: &Norm, b: &Norm) -> bool {
     if tsim < 0.8 {
         return false;
     }
-    let artist_ok = if a.artist.is_empty() || b.artist.is_empty() {
-        tsim >= 0.95
-    } else {
-        artists_match(a, b)
-    };
+    let artist_ok = if a.artist.is_empty() || b.artist.is_empty() { tsim >= 0.95 } else { artists_match(a, b) };
     if !artist_ok {
         return false;
     }
@@ -383,16 +423,7 @@ fn relevance(query: &[String], n: &Norm) -> f64 {
         return 0.0;
     }
     let hay: Vec<&String> = n.title_tokens.iter().chain(n.artist.iter()).collect();
-    let matched = query
-        .iter()
-        .filter(|q| {
-            hay.iter().any(|t| {
-                *t == *q
-                    || (q.len() >= 3 && t.starts_with(q.as_str()))
-                    || (q.len() > 3 && strsim::normalized_levenshtein(q, t) >= 0.8)
-            })
-        })
-        .count() as f64;
+    let matched = query.iter().filter(|q| hay.iter().any(|t| *t == *q || (q.len() >= 3 && t.starts_with(q.as_str())) || (q.len() > 3 && strsim::normalized_levenshtein(q, t) >= 0.8))).count() as f64;
     let mut score = matched / query.len() as f64;
     // Penalize remixes etc. the user did not ask for.
     let unasked = n.markers.iter().filter(|m| !query.contains(m)).count();
@@ -457,11 +488,7 @@ pub fn group_results(query: &str, mut all: Vec<TrackVersion>, pref: &[Platform])
             sort_versions(&mut g.versions, pref);
             let best_pref = g.versions.iter().map(|v| pref_index(pref, v.platform)).min().unwrap_or(pref.len());
             let all_preview = g.versions.iter().all(|v| v.preview);
-            let score = rel * 2.0
-                + 0.6 / (1.0 + g.best_rank as f64)
-                + 0.25 * (plen - best_pref as f64).max(0.0) / plen
-                + 0.08 * (g.versions.len() as f64 - 1.0)
-                - if all_preview { 0.5 } else { 0.0 };
+            let score = rel * 2.0 + 0.6 / (1.0 + g.best_rank as f64) + 0.25 * (plen - best_pref as f64).max(0.0) / plen + 0.08 * (g.versions.len() as f64 - 1.0) - if all_preview { 0.5 } else { 0.0 };
             build_track(g.versions, score)
         })
         .collect();
@@ -475,12 +502,7 @@ pub fn build_track(versions: Vec<TrackVersion>, score: f64) -> Track {
     // uploader names (YouTube Music flat results only have inferred artists).
     let title_order = [Platform::Spotify, Platform::Ytmusic, Platform::Soundcloud, Platform::Youtube];
     let artist_order = [Platform::Spotify, Platform::Soundcloud, Platform::Youtube, Platform::Ytmusic];
-    let pick = |order: &[Platform]| {
-        order
-            .iter()
-            .find_map(|p| versions.iter().find(|v| v.platform == *p && !v.artist.is_empty()))
-            .unwrap_or(&versions[0])
-    };
+    let pick = |order: &[Platform]| order.iter().find_map(|p| versions.iter().find(|v| v.platform == *p && !v.artist.is_empty())).unwrap_or(&versions[0]);
     let title = strip_noise(&pick(&title_order).title);
     let artist = pick(&artist_order).artist.clone();
     let duration = versions.iter().filter(|v| !v.preview).find_map(|v| v.duration).or(versions[0].duration);
@@ -517,9 +539,7 @@ pub fn pick_thumbnail(e: &Value) -> Option<String> {
         }
     }
     let fix = |u: String| u.replace("-original.", "-t500x500.");
-    sv(e, "thumbnail").map(fix).or_else(|| {
-        thumbs.and_then(|a| a.iter().rev().filter(|t| t.get("id").and_then(Value::as_str) != Some("original")).find_map(|t| sv(t, "url"))).map(fix)
-    })
+    sv(e, "thumbnail").map(fix).or_else(|| thumbs.and_then(|a| a.iter().rev().filter(|t| t.get("id").and_then(Value::as_str) != Some("original")).find_map(|t| sv(t, "url"))).map(fix))
 }
 
 /// Convert one flat-playlist entry into a TrackVersion for the given platform.
@@ -551,11 +571,7 @@ pub fn parse_entry(e: &Value, platform: Platform, rank: usize) -> Option<TrackVe
         .unwrap_or_default();
     // A real "artist" field (YouTube Music full extraction) is authoritative;
     // otherwise uploads often look like "Artist - Title".
-    let (artist, title) = if sv(e, "artist").is_some() {
-        (clean_uploader(&uploader), raw_title.clone())
-    } else {
-        split_artist_title(&raw_title, &uploader)
-    };
+    let (artist, title) = if sv(e, "artist").is_some() { (clean_uploader(&uploader), raw_title.clone()) } else { split_artist_title(&raw_title, &uploader) };
 
     let (url, thumbnail) = match platform {
         Platform::Soundcloud => {
@@ -598,10 +614,7 @@ fn search_target(platform: Platform, query: &str, limit: usize) -> (String, Opti
     match platform {
         Platform::Soundcloud => (format!("scsearch{limit}:{query}"), None),
         Platform::Youtube => (format!("ytsearch{limit}:{query}"), None),
-        Platform::Ytmusic => (
-            format!("https://music.youtube.com/search?q={}#songs", percent_encode(query)),
-            Some(limit),
-        ),
+        Platform::Ytmusic => (format!("https://music.youtube.com/search?q={}#songs", percent_encode(query)), Some(limit)),
         Platform::Spotify | Platform::Local => unreachable!("not a yt-dlp search"),
     }
 }
@@ -654,7 +667,7 @@ pub fn native_apis() -> bool {
     NATIVE_APIS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-async fn search_platform(platform: Platform, query: String, limit: usize, cache: &SearchCache) -> AppResult<(Vec<TrackVersion>, bool)> {
+pub(crate) async fn search_platform(platform: Platform, query: String, limit: usize, cache: &SearchCache) -> AppResult<(Vec<TrackVersion>, bool)> {
     let key = format!("{platform:?}|{}|{limit}", norm_text(&query));
     if let Some(hit) = cache.get(&key) {
         return Ok((hit, true));
@@ -685,22 +698,25 @@ async fn search_platform(platform: Platform, query: String, limit: usize, cache:
             v.truncate(limit);
             v
         }),
-        Platform::Youtube => crate::ytm::search_videos(&query, limit).await.map(|es| es.iter().enumerate().filter_map(|(i, e)| parse_entry(e, platform, i)).collect()),
+        Platform::Youtube => crate::ytm::search_videos(&query, limit).await.and_then(|es| {
+            let v: Vec<TrackVersion> = es.iter().enumerate().filter_map(|(i, e)| parse_entry(e, platform, i)).collect();
+            if v.is_empty() && !es.is_empty() {
+                return Err(AppError::EmptyResults); // entries we couldn't read: try yt-dlp
+            }
+            Ok(v)
+        }),
         Platform::Soundcloud => crate::soundcloud::search(&query, limit).await,
         _ => Err(AppError::Unsupported("no native search".into())),
     };
-    if let Some(versions) = native.ok().filter(|v| !v.is_empty()) {
+    // An empty YouTube answer is final (see `search_videos`).
+    if let Some(versions) = native.ok().filter(|v| !v.is_empty() || platform == Platform::Youtube) {
         cache.put(key, versions.clone());
         return Ok((versions, false));
     }
     let (target, end) = search_target(platform, &query, limit);
     let json = ytdlp::flat(&target, end).await?;
     let entries = json.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
-    let versions: Vec<TrackVersion> = entries
-        .iter()
-        .enumerate()
-        .filter_map(|(i, e)| parse_entry(e, platform, i))
-        .collect();
+    let versions: Vec<TrackVersion> = entries.iter().enumerate().filter_map(|(i, e)| parse_entry(e, platform, i)).collect();
     cache.put(key, versions.clone());
     Ok((versions, false))
 }
@@ -750,7 +766,10 @@ fn single_platform(source: &str, spotify: bool) -> AppResult<Platform> {
     }
 }
 
-fn collect_results(query: &str, results: Vec<(Platform, AppResult<(Vec<TrackVersion>, bool)>)>, pref: &[Platform], hidden: Option<Platform>) -> AppResult<SearchResponse> {
+/// One platform's search outcome: its versions and whether it came from cache.
+type PlatformResult = (Platform, AppResult<(Vec<TrackVersion>, bool)>);
+
+fn collect_results(query: &str, results: Vec<PlatformResult>, pref: &[Platform], hidden: Option<Platform>) -> AppResult<SearchResponse> {
     let mut warnings = Vec::new();
     let mut first_err = None;
     let mut cached = true;
@@ -795,15 +814,7 @@ fn title_case(w: &str) -> String {
     }
 }
 
-pub async fn search(
-    query: String,
-    source: String,
-    limit: usize,
-    pref: Vec<Platform>,
-    cache: std::sync::Arc<SearchCache>,
-    include_youtube: bool,
-    spotify: bool,
-) -> AppResult<SearchResponse> {
+pub async fn search(query: String, source: String, limit: usize, pref: Vec<Platform>, cache: std::sync::Arc<SearchCache>, include_youtube: bool, spotify: bool) -> AppResult<SearchResponse> {
     let q = query.trim().to_string();
     if q.is_empty() {
         return Err(AppError::Invalid("type something to search".into()));
@@ -838,20 +849,43 @@ pub async fn search(
     for p in platforms {
         let (q, cache) = (q.clone(), cache.clone());
         let all = platforms_len > 1;
-        tasks.push((p, tauri::async_runtime::spawn(async move {
-            if p == Platform::Spotify && all {
-                // Never let a slow (rate-limited) Spotify lookup hold up the other sources.
-                tokio::time::timeout(std::time::Duration::from_secs(15), search_platform(p, q, limit, &cache))
-                    .await
-                    .unwrap_or_else(|_| Err(AppError::Timeout("Spotify (spotDL) is slow right now — add your own Spotify app credentials in Settings".into())))
-            } else {
-                search_platform(p, q, limit, &cache).await
-            }
-        })));
+        tasks.push((
+            p,
+            tauri::async_runtime::spawn(async move {
+                if p == Platform::Spotify && all {
+                    // Never let a slow (rate-limited) Spotify lookup hold up the other sources.
+                    tokio::time::timeout(std::time::Duration::from_secs(15), search_platform(p, q, limit, &cache))
+                        .await
+                        .unwrap_or_else(|_| Err(AppError::Timeout("Spotify (spotDL) is slow right now — add your own Spotify app credentials in Settings".into())))
+                } else {
+                    search_platform(p, q, limit, &cache).await
+                }
+            }),
+        ));
     }
+    // "All": once the preferred source has answered, the others get until
+    // OTHERS_WAIT after the start; a slow one is left out (with a warning)
+    // instead of holding up every result. It keeps running and fills the cache.
+    const OTHERS_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + OTHERS_WAIT;
+    let primary = pref.iter().copied().find(|p| tasks.iter().any(|(t, _)| t == p)).unwrap_or(tasks[0].0);
     let mut results = Vec::new();
-    for (p, t) in tasks {
+    let mut primary_ok = false;
+    if let Some(i) = tasks.iter().position(|(p, _)| *p == primary) {
+        let (p, t) = tasks.remove(i);
         let r = t.await.unwrap_or_else(|e| Err(AppError::YtDlp(e.to_string())));
+        primary_ok = r.as_ref().is_ok_and(|(v, _)| !v.is_empty());
+        results.push((p, r));
+    }
+    for (p, t) in tasks {
+        let r = if primary_ok && platforms_len > 1 {
+            match tokio::time::timeout_at(deadline, t).await {
+                Ok(r) => r.unwrap_or_else(|e| Err(AppError::YtDlp(e.to_string()))),
+                Err(_) => Err(AppError::Timeout("took too long; showing the other results".into())),
+            }
+        } else {
+            t.await.unwrap_or_else(|e| Err(AppError::YtDlp(e.to_string())))
+        };
         results.push((p, r));
     }
     collect_results(&q, results, &pref, hidden)
@@ -859,13 +893,7 @@ pub async fn search(
 
 /// Versions whose metadata was guessed (YouTube Music) and should be completed.
 pub fn needs_completion(tracks: &[Track]) -> Vec<String> {
-    tracks
-        .iter()
-        .flat_map(|t| t.versions.iter())
-        .filter(|v| v.partial && v.platform == Platform::Ytmusic)
-        .map(|v| v.url.clone())
-        .take(8)
-        .collect()
+    tracks.iter().flat_map(|t| t.versions.iter()).filter(|v| v.partial && v.platform == Platform::Ytmusic).map(|v| v.url.clone()).take(8).collect()
 }
 
 /// Patch cached search results with completed metadata.
@@ -883,14 +911,7 @@ pub fn apply_metadata(cache: &SearchCache, metas: &[crate::ytdlp::Meta]) {
 /// Find a playable equivalent of `artist - title` on non-Spotify platforms,
 /// trying them in preference order. Used for Spotify and as a last-resort
 /// fallback when every known version fails.
-pub async fn resolve_equivalent(
-    artist: &str,
-    title: &str,
-    duration: Option<f64>,
-    pref: &[Platform],
-    exclude: &[Platform],
-    cache: &std::sync::Arc<SearchCache>,
-) -> AppResult<TrackVersion> {
+pub async fn resolve_equivalent(artist: &str, title: &str, duration: Option<f64>, pref: &[Platform], exclude: &[Platform], cache: &std::sync::Arc<SearchCache>) -> AppResult<TrackVersion> {
     let target = TrackVersion {
         platform: Platform::Spotify,
         url: String::new(),
@@ -909,11 +930,7 @@ pub async fn resolve_equivalent(
     };
     let tn = Norm::of(&target);
     let query = format!("{artist} {}", strip_noise(title)).trim().to_string();
-    let mut order: Vec<Platform> = pref
-        .iter()
-        .copied()
-        .filter(|p| !matches!(p, Platform::Spotify | Platform::Local) && !exclude.contains(p))
-        .collect();
+    let mut order: Vec<Platform> = pref.iter().copied().filter(|p| !matches!(p, Platform::Spotify | Platform::Local) && !exclude.contains(p)).collect();
     for p in [Platform::Ytmusic, Platform::Soundcloud, Platform::Youtube] {
         if !order.contains(&p) && !exclude.contains(&p) {
             order.push(p);
@@ -958,7 +975,22 @@ mod tests {
     use super::*;
 
     fn v(p: Platform, title: &str, artist: &str, d: Option<f64>, rank: usize) -> TrackVersion {
-        TrackVersion { platform: p, url: format!("u{rank}{title}"), id: String::new(), title: title.into(), artist: artist.into(), duration: d, thumbnail: None, preview: false, partial: false, artist_url: None, album: None, rank, matched_for: None, isrc_match: false }
+        TrackVersion {
+            platform: p,
+            url: format!("u{rank}{title}"),
+            id: String::new(),
+            title: title.into(),
+            artist: artist.into(),
+            duration: d,
+            thumbnail: None,
+            preview: false,
+            partial: false,
+            artist_url: None,
+            album: None,
+            rank,
+            matched_for: None,
+            isrc_match: false,
+        }
     }
 
     #[test]
@@ -1022,10 +1054,7 @@ mod tests {
 
     #[test]
     fn different_artists_not_merged() {
-        let all = vec![
-            v(Platform::Youtube, "Hello", "Adele", Some(295.0), 0),
-            v(Platform::Soundcloud, "Hello", "Lionel Richie", Some(250.0), 0),
-        ];
+        let all = vec![v(Platform::Youtube, "Hello", "Adele", Some(295.0), 0), v(Platform::Soundcloud, "Hello", "Lionel Richie", Some(250.0), 0)];
         assert_eq!(group_results("hello", all, &Platform::ALL).len(), 2);
     }
 }

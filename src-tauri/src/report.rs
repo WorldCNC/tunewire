@@ -73,7 +73,7 @@ fn clip(s: &str, n: usize) -> String {
 fn payload(kind: &str, message: &str, details: &str) -> serde_json::Value {
     serde_json::json!({
         "kind": clip(kind, 20),
-        "title": clip(&scrub(message).lines().next().unwrap_or("").to_string(), 240),
+        "title": clip(scrub(message).lines().next().unwrap_or(""), 240),
         "details": clip(scrub(&format!("{message}\n{details}")).trim(), 3500),
         "version": env!("CARGO_PKG_VERSION"),
         "os": format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
@@ -99,7 +99,9 @@ fn should_send(kind: &str, message: &str) -> bool {
 }
 
 fn send_blocking(body: serde_json::Value) {
-    let Some(c) = crate::cloud::config() else { return };
+    let Some(c) = crate::cloud::config() else {
+        return;
+    };
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(4))).build().into();
     let _ = agent
         .post(&format!("{}/functions/v1/report", c.url))

@@ -1,7 +1,9 @@
 # Every push and pull request: build and test on Windows, Linux and macOS
-# (the platforms releases ship for), lint the Rust code, check the frontend
-# scripts parse, test the Edge Functions, and run the database migrations
-# plus their row level security tests on a real Postgres.
+# (the platforms releases ship for), check formatting and lint the Rust code,
+# check the frontend scripts (they parse, no clashing global names), test
+# the sync operations and the Edge Functions, run the database migrations
+# plus their row level security tests on a real Postgres, and run library
+# sync end to end on a local Supabase.
 name: Check
 
 on:
@@ -36,10 +38,14 @@ jobs:
       - name: Offline tests
         working-directory: src-tauri
         run: cargo test --locked
+      - name: Formatting
+        if: matrix.platform == 'ubuntu-22.04'
+        working-directory: src-tauri
+        run: cargo fmt --check
       - name: Clippy
         if: matrix.platform == 'ubuntu-22.04'
         working-directory: src-tauri
-        run: cargo clippy --locked --all-targets -- -D clippy::correctness -D clippy::suspicious
+        run: cargo clippy --locked --all-targets -- -D warnings
 
   web:
     runs-on: ubuntu-22.04
@@ -50,6 +56,8 @@ jobs:
           deno-version: v2.x
       - name: Frontend scripts parse
         run: deno run --allow-read scripts/check-frontend.ts
+      - name: Playlist sync arithmetic
+        run: deno test --allow-read scripts/syncops_test.ts
       - name: Edge Functions
         run: |
           deno check supabase/functions/report/index.ts supabase/functions/share/index.ts
@@ -65,3 +73,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Migrations and row level security tests
         run: scripts/test-db.sh
+
+  # Two devices, one account, a local Supabase: library sync end to end.
+  sync:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Library sync, end to end
+        run: scripts/test-sync.sh

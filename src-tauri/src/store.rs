@@ -1,15 +1,18 @@
 //! JSON persistence for settings and the local library. Writes are atomic
-//! and durable (unique temp file, fsync, rename), serialized per file, and
-//! library.json keeps 7 daily snapshots in backups/ that a corrupt file is
-//! restored from. The library is split so frequent writes stay small:
+//! (unique temp file, fsync, rename), serialized per file, and library.json
+//! keeps 7 daily snapshots in backups/ that a corrupt file is restored from.
+//! The library is split so frequent writes stay small:
 //!   library.json   playlists + favorites
-//!   history.json   playback history (written on every track start)
+//!   history.json   playback history (changes on every track start)
 //!   downloads.json offline downloads
+//! Library changes are written by a background thread ~0.5 s after the last
+//! one (a burst of edits is one write, and no command waits for the disk);
+//! `Store::flush` writes what's pending right away (exit, restart).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -98,6 +101,8 @@ pub struct Settings {
     pub privacy_asked: bool,
     /// The after-sign-in question (what friends see) was answered.
     pub cloud_privacy_asked: bool,
+    /// The "why sign in" intro was shown (once, to anyone not signed in).
+    pub signin_intro_shown: bool,
     /// Scrobbling (credentials are in the keychain).
     pub scrobble_lastfm: bool,
     pub scrobble_listenbrainz: bool,
@@ -111,6 +116,11 @@ pub struct Settings {
     pub supabase_anon_key: String,
     /// Followers can see what you're playing.
     pub share_activity: bool,
+    /// Keep playlists and Liked Songs in sync on every device signed in to
+    /// the account (private online copies).
+    pub sync_library: bool,
+    /// The "sync your library?" question was answered.
+    pub sync_asked: bool,
     /// Interface updates from the beta channel.
     pub beta_updates: bool,
 }
@@ -158,6 +168,7 @@ impl Default for Settings {
             error_reports: false,
             privacy_asked: false,
             cloud_privacy_asked: false,
+            signin_intro_shown: false,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
             lastfm_user: String::new(),
@@ -166,6 +177,8 @@ impl Default for Settings {
             supabase_url: String::new(),
             supabase_anon_key: String::new(),
             share_activity: false,
+            sync_library: false,
+            sync_asked: false,
             beta_updates: false,
         }
     }
@@ -276,7 +289,94 @@ pub struct Library {
 pub struct Store {
     pub dir: PathBuf,
     pub settings: Mutex<Settings>,
-    pub library: Mutex<Library>,
+    pub library: Arc<Mutex<Library>>,
+    writer: Arc<Writer>,
+}
+
+/// Files with changes not on disk yet (bit set), and the background writer.
+#[derive(Default)]
+struct Writer {
+    dirty: Mutex<u8>,
+    wake: Condvar,
+    /// Held while writing, so `flush` waits for a write in progress.
+    io: Mutex<()>,
+}
+
+const LIBRARY_FILE: u8 = 1;
+const HISTORY_FILE: u8 = 2;
+const DOWNLOADS_FILE: u8 = 4;
+/// Quiet time before pending changes are written.
+const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+/// Wait after a failed write before trying again.
+const SAVE_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl Writer {
+    fn mark(&self, file: u8) {
+        *self.dirty.lock().unwrap() |= file;
+        self.wake.notify_one();
+    }
+
+    /// Write every file marked dirty (and wait for a write in progress).
+    /// Files that failed stay marked; returns whether any did.
+    fn write_pending(&self, dir: &Path, library: &Mutex<Library>) -> bool {
+        let _io = self.io.lock().unwrap_or_else(|e| e.into_inner());
+        let files = std::mem::take(&mut *self.dirty.lock().unwrap());
+        let failed = std::cell::Cell::new(0u8);
+        let save = |bit: u8, name: &str, data: serde_json::Result<Vec<u8>>, snapshot: bool| {
+            let path = dir.join(name);
+            if snapshot {
+                snapshot_daily(&path);
+            }
+            if let Err(e) = data.map_err(AppError::from).and_then(|d| write_replace(&path, &d)) {
+                eprintln!("tunewire: saving {name} failed: {e}");
+                failed.set(failed.get() | bit);
+            }
+        };
+        if files & LIBRARY_FILE != 0 {
+            #[derive(Serialize)]
+            struct Main<'a> {
+                playlists: &'a [Playlist],
+                favorites: &'a [Track],
+                followed: &'a [FollowedArtist],
+            }
+            let data = {
+                let lib = library.lock().unwrap();
+                serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites, followed: &lib.followed })
+            };
+            save(LIBRARY_FILE, "library.json", data, true);
+        }
+        if files & HISTORY_FILE != 0 {
+            let data = serde_json::to_vec(&library.lock().unwrap().history);
+            save(HISTORY_FILE, "history.json", data, false);
+        }
+        if files & DOWNLOADS_FILE != 0 {
+            let data = serde_json::to_vec(&library.lock().unwrap().downloads);
+            save(DOWNLOADS_FILE, "downloads.json", data, false);
+        }
+        let failed = failed.get();
+        if failed != 0 {
+            *self.dirty.lock().unwrap() |= failed;
+        }
+        failed != 0
+    }
+
+    fn spawn(self: &Arc<Self>, dir: PathBuf, library: Arc<Mutex<Library>>) {
+        let w = self.clone();
+        let _ = std::thread::Builder::new().name("store-writer".into()).spawn(move || loop {
+            {
+                let mut d = w.dirty.lock().unwrap();
+                while *d == 0 {
+                    d = w.wake.wait(d).unwrap();
+                }
+            }
+            // Let a burst of changes settle into one write.
+            std::thread::sleep(SAVE_DELAY);
+            if w.write_pending(&dir, &library) {
+                // Kept for the next try (or the flush at exit); don't spin on a full disk.
+                std::thread::sleep(SAVE_RETRY);
+            }
+        });
+    }
 }
 
 pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
@@ -300,7 +400,9 @@ pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
 
 /// Snapshots of `path` in <dir>/backups, newest first.
 fn backups_of(path: &Path) -> Vec<PathBuf> {
-    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return Vec::new() };
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else {
+        return Vec::new();
+    };
     let prefix = format!("{stem}-");
     let mut v: Vec<PathBuf> = std::fs::read_dir(dir.join("backups"))
         .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".json"))).collect())
@@ -314,7 +416,9 @@ const BACKUPS_KEPT: usize = 7;
 
 /// Once a day, keep a copy of `path` before it's replaced (7 days kept).
 fn snapshot_daily(path: &Path) {
-    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return };
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else {
+        return;
+    };
     if !path.exists() {
         return;
     }
@@ -324,7 +428,9 @@ fn snapshot_daily(path: &Path) {
         return;
     }
     // Only snapshot a file that parses: a broken one would push out good copies.
-    let Ok(data) = std::fs::read(path) else { return };
+    let Ok(data) = std::fs::read(path) else {
+        return;
+    };
     if serde_json::from_slice::<serde::de::IgnoredAny>(&data).is_err() {
         return;
     }
@@ -340,6 +446,15 @@ fn snapshot_daily(path: &Path) {
 /// never share one), flushed to disk before the rename, then the directory
 /// entry flushed too.
 pub fn write_atomic(path: &Path, data: &[u8]) -> AppResult<()> {
+    write_replace(path, data)?;
+    sync_dir(path);
+    Ok(())
+}
+
+/// `write_atomic` without flushing the directory entry: the file is always
+/// either the old or the new version, but a power cut right after may keep
+/// the old one. For frequent saves; `sync_dir` once at exit.
+pub fn write_replace(path: &Path, data: &[u8]) -> AppResult<()> {
     use std::io::Write;
     static N: AtomicU64 = AtomicU64::new(0);
     let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
@@ -348,14 +463,7 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> AppResult<()> {
         f.write_all(data)?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&tmp, path)?;
-        #[cfg(unix)]
-        if let Some(dir) = path.parent() {
-            if let Ok(d) = std::fs::File::open(dir) {
-                let _ = d.sync_all();
-            }
-        }
-        Ok(())
+        std::fs::rename(&tmp, path)
     })();
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -363,12 +471,21 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> AppResult<()> {
     Ok(res?)
 }
 
-/// One lock per file kind: serializing and writing happen in the same order,
-/// so an older snapshot can never land on top of a newer one.
+/// Flush the directory entry of `path` (a rename in it) to disk.
+pub fn sync_dir(path: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        if let Ok(d) = std::fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Serializing and writing happen in the same order, so an older snapshot can
+/// never land on top of a newer one (the library files: one writer, `io`).
 static SAVE_SETTINGS: Mutex<()> = Mutex::new(());
-static SAVE_LIBRARY: Mutex<()> = Mutex::new(());
-static SAVE_HISTORY: Mutex<()> = Mutex::new(());
-static SAVE_DOWNLOADS: Mutex<()> = Mutex::new(());
 
 impl Store {
     pub fn open(dir: PathBuf) -> AppResult<Store> {
@@ -383,7 +500,17 @@ impl Store {
         if dir.join("downloads.json").exists() {
             library.downloads = load_json(&dir.join("downloads.json"));
         }
-        Ok(Store { dir, settings: Mutex::new(settings), library: Mutex::new(library) })
+        let library = Arc::new(Mutex::new(library));
+        let writer = Arc::new(Writer::default());
+        writer.spawn(dir.clone(), library.clone());
+        Ok(Store { dir, settings: Mutex::new(settings), library, writer })
+    }
+
+    /// Write pending library changes now and make them durable (exit, restart).
+    pub fn flush(&self) {
+        // One try: a file that still fails stays marked for the background writer.
+        self.writer.write_pending(&self.dir, &self.library);
+        sync_dir(&self.dir.join("library.json"));
     }
 
     pub fn save_settings(&self) -> AppResult<()> {
@@ -392,44 +519,20 @@ impl Store {
         write_atomic(&self.dir.join("settings.json"), &data)
     }
 
-    /// Playlists + favorites.
-    pub fn save_library(&self) -> AppResult<()> {
-        #[derive(Serialize)]
-        struct Main<'a> {
-            playlists: &'a [Playlist],
-            favorites: &'a [Track],
-            followed: &'a [FollowedArtist],
-        }
-        let _w = SAVE_LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
-        let lib = self.library.lock().unwrap();
-        let data = serde_json::to_vec(&Main { playlists: &lib.playlists, favorites: &lib.favorites, followed: &lib.followed })?;
-        drop(lib);
-        let path = self.dir.join("library.json");
-        snapshot_daily(&path);
-        write_atomic(&path, &data)
-    }
-
-    fn save_history(&self) -> AppResult<()> {
-        let _w = SAVE_HISTORY.lock().unwrap_or_else(|e| e.into_inner());
-        let data = serde_json::to_vec(&self.library.lock().unwrap().history)?;
-        write_atomic(&self.dir.join("history.json"), &data)
-    }
-
-    fn save_downloads(&self) -> AppResult<()> {
-        let _w = SAVE_DOWNLOADS.lock().unwrap_or_else(|e| e.into_inner());
-        let data = serde_json::to_vec(&self.library.lock().unwrap().downloads)?;
-        write_atomic(&self.dir.join("downloads.json"), &data)
+    /// Playlists + favorites (written shortly, in the background).
+    pub fn save_library(&self) {
+        self.writer.mark(LIBRARY_FILE);
     }
 
     pub fn update_history<T>(&self, f: impl FnOnce(&mut Vec<HistoryEntry>) -> AppResult<T>) -> AppResult<T> {
         let r = f(&mut self.library.lock().unwrap().history)?;
-        self.save_history()?;
+        self.writer.mark(HISTORY_FILE);
         Ok(r)
     }
 
     pub fn update_downloads<T>(&self, f: impl FnOnce(&mut Vec<crate::downloads::Download>) -> AppResult<T>) -> AppResult<T> {
         let r = f(&mut self.library.lock().unwrap().downloads)?;
-        self.save_downloads()?;
+        self.writer.mark(DOWNLOADS_FILE);
         Ok(r)
     }
 
@@ -457,7 +560,7 @@ impl Store {
 
     pub fn update_library<T>(&self, f: impl FnOnce(&mut Library) -> AppResult<T>) -> AppResult<T> {
         let r = f(&mut self.library.lock().unwrap())?;
-        self.save_library()?;
+        self.save_library();
         Ok(r)
     }
 
@@ -465,7 +568,7 @@ impl Store {
     pub fn update_library_if<T>(&self, f: impl FnOnce(&mut Library) -> AppResult<(T, bool)>) -> AppResult<(T, bool)> {
         let (r, changed) = f(&mut self.library.lock().unwrap())?;
         if changed {
-            self.save_library()?;
+            self.save_library();
         }
         Ok((r, changed))
     }
@@ -516,6 +619,7 @@ mod save_tests {
         for t in threads {
             t.join().unwrap();
         }
+        store.flush();
         let on_disk: Library = load_json(&dir.join("library.json"));
         assert_eq!(on_disk.followed.len(), 320, "the last write must hold every change");
         // No temp files left behind.
@@ -524,12 +628,46 @@ mod save_tests {
     }
 
     #[test]
+    fn changes_reach_the_disk_without_a_flush() {
+        let dir = tmp("later");
+        let store = Store::open(dir.clone()).unwrap();
+        let t = Track { key: "k".into(), title: "t".into(), artist: String::new(), duration: None, thumbnail: None, versions: vec![], score: 0.0 };
+        store.push_history(&t, None).unwrap();
+        store
+            .update_library(|lib| {
+                lib.followed.push(FollowedArtist { name: "a".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 });
+                Ok(())
+            })
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !(dir.join("library.json").exists() && dir.join("history.json").exists()) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let lib: Library = load_json(&dir.join("library.json"));
+        assert_eq!(lib.followed.len(), 1);
+        assert_eq!(load_json::<Vec<HistoryEntry>>(&dir.join("history.json")).len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_corrupt_library_comes_back_from_the_daily_snapshot() {
         let dir = tmp("corrupt");
         let store = Store::open(dir.clone()).unwrap();
-        store.update_library(|lib| { lib.followed.push(FollowedArtist { name: "kept".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 }); Ok(()) }).unwrap();
+        store
+            .update_library(|lib| {
+                lib.followed.push(FollowedArtist { name: "kept".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 });
+                Ok(())
+            })
+            .unwrap();
+        store.flush();
         // Second save snapshots the first version.
-        store.update_library(|lib| { lib.followed.push(FollowedArtist { name: "newer".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 }); Ok(()) }).unwrap();
+        store
+            .update_library(|lib| {
+                lib.followed.push(FollowedArtist { name: "newer".into(), url: None, thumbnail: None, seen: vec![], followed_at: 0 });
+                Ok(())
+            })
+            .unwrap();
+        store.flush();
         std::fs::write(dir.join("library.json"), "").unwrap(); // power loss
         let lib: Library = load_json(&dir.join("library.json"));
         assert_eq!(lib.followed.len(), 1);

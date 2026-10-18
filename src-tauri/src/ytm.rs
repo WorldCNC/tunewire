@@ -51,7 +51,9 @@ fn post_blocking_to(origin: &str, client: &str, version: &str, endpoint: &str, e
 
 /// Responses kept as compact JSON text (a parsed `Value` is several times
 /// bigger), at most CACHE_MAX of them.
-static CACHE: Mutex<Option<HashMap<String, (Instant, std::sync::Arc<str>)>>> = Mutex::new(None);
+/// Request -> (fetched at, response body).
+type ResponseCache = HashMap<String, (Instant, std::sync::Arc<str>)>;
+static CACHE: Mutex<Option<ResponseCache>> = Mutex::new(None);
 const TTL: Duration = Duration::from_secs(20 * 60);
 const CACHE_MAX: usize = 40;
 
@@ -226,7 +228,11 @@ fn list_item(m: &Value, album_artist: Option<(&str, Option<&str>)>, album: Optio
         if artist.is_empty() {
             // Plain-text byline: "Song • Artist • Album • 3:21" or "Artist • ..."
             let parts: Vec<&str> = sub.split(" • ").collect();
-            artist = parts.iter().find(|p| !matches!(p.trim().to_lowercase().as_str(), "song" | "video" | "episode") && parse_duration(p).is_none() && !p.contains(" plays") && !p.contains(" views")).map(|s| s.trim().to_string()).unwrap_or_default();
+            artist = parts
+                .iter()
+                .find(|p| !matches!(p.trim().to_lowercase().as_str(), "song" | "video" | "episode") && parse_duration(p).is_none() && !p.contains(" plays") && !p.contains(" views"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             if artist.is_empty() {
                 if let Some((a, b)) = album_artist {
                     artist = a.to_string();
@@ -234,7 +240,13 @@ fn list_item(m: &Value, album_artist: Option<(&str, Option<&str>)>, album: Optio
                 }
             }
         }
-        let album_run = byline.iter().chain(runs(col(m, 2)).iter()).chain(runs(col(m, 3)).iter()).find(|r| page_type(r) == "MUSIC_PAGE_TYPE_ALBUM").and_then(|r| r.get("text").and_then(Value::as_str)).map(str::to_string);
+        let album_run = byline
+            .iter()
+            .chain(runs(col(m, 2)).iter())
+            .chain(runs(col(m, 3)).iter())
+            .find(|r| page_type(r) == "MUSIC_PAGE_TYPE_ALBUM")
+            .and_then(|r| r.get("text").and_then(Value::as_str))
+            .map(str::to_string);
         let duration = parse_duration(&fixed(m)).or_else(|| sub.split(" • ").filter_map(parse_duration).last());
         let album_name = album_run.or_else(|| album.map(|a| a.0.to_string()));
         let thumbnail = thumb.clone().or_else(|| album.and_then(|a| a.1.map(str::to_string))).or_else(|| Some(format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg")));
@@ -268,15 +280,7 @@ fn shelf_items(shelf: &Value) -> Vec<Card> {
         .or_else(|| shelf.get("items"))
         .and_then(Value::as_array)
         .map(|a| {
-            a.iter()
-                .filter_map(|i| {
-                    if let Some(t) = i.get("musicTwoRowItemRenderer") {
-                        two_row(t)
-                    } else {
-                        i.get("musicResponsiveListItemRenderer").and_then(|m| list_item(m, None, None))
-                    }
-                })
-                .collect()
+            a.iter().filter_map(|i| if let Some(t) = i.get("musicTwoRowItemRenderer") { two_row(t) } else { i.get("musicResponsiveListItemRenderer").and_then(|m| list_item(m, None, None)) }).collect()
         })
         .unwrap_or_default()
 }
@@ -297,20 +301,71 @@ async fn search_filtered(query: &str, filter: &str) -> AppResult<Vec<Card>> {
 /// Songs only (used to match Spotify tracks).
 pub async fn search_songs(query: &str) -> AppResult<Vec<TrackVersion>> {
     let cards = search_filtered(query, F_SONGS).await?;
-    Ok(cards.into_iter().filter_map(|c| c.track).filter_map(|t| t.versions.into_iter().next()).enumerate().map(|(i, mut v)| {
-        v.rank = i;
-        v
-    }).collect())
+    Ok(cards
+        .into_iter()
+        .filter_map(|c| c.track)
+        .filter_map(|t| t.versions.into_iter().next())
+        .enumerate()
+        .map(|(i, mut v)| {
+            v.rank = i;
+            v
+        })
+        .collect())
+}
+
+/// What the search box shows while typing, from one request: text
+/// suggestions, plus songs, videos, artists and albums with their pictures.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct Suggestions {
+    pub queries: Vec<String>,
+    pub items: Vec<Card>,
+}
+
+pub async fn suggestions(input: &str) -> AppResult<Suggestions> {
+    let q = input.to_string();
+    // Not through the page cache: one request per pause in typing would evict it.
+    let v = tauri::async_runtime::spawn_blocking(move || post_blocking("music/get_search_suggestions", serde_json::json!({ "input": q }))).await.map_err(|e| AppError::Network(e.to_string()))??;
+    Ok(parse_suggestions(&v))
+}
+
+fn parse_suggestions(v: &Value) -> Suggestions {
+    let mut out = Suggestions::default();
+    let items = v.get("contents").and_then(Value::as_array).into_iter().flatten().filter_map(|s| s.pointer("/searchSuggestionsSectionRenderer/contents").and_then(Value::as_array)).flatten();
+    for item in items {
+        if let Some(s) = item.get("searchSuggestionRenderer") {
+            let q = text(s.get("suggestion"));
+            if !q.is_empty() {
+                out.queries.push(q);
+            }
+        } else if let Some(mut card) = item.get("musicResponsiveListItemRenderer").and_then(|m| list_item(m, None, None)) {
+            // Videos listed as "Video • 58M views": the artist is in the title.
+            if let Some(t) = card.track.take() {
+                card.track = Some(match t.versions.into_iter().next() {
+                    Some(mut v) if v.artist.is_empty() => {
+                        (v.artist, v.title) = crate::search::split_artist_title(&v.title, "");
+                        Track::from_version(v)
+                    }
+                    Some(v) => Track::from_version(v),
+                    None => continue,
+                });
+            }
+            out.items.push(card);
+        }
+    }
+    out
 }
 
 /// YouTube (not Music) video search, as yt-dlp-style entries for `parse_entry`.
 pub async fn search_videos(query: &str, limit: usize) -> AppResult<Vec<Value>> {
     let q = query.to_string();
-    let v = tauri::async_runtime::spawn_blocking(move || {
-        post_blocking_to("https://www.youtube.com", "WEB", "2.20250101.00.00", "search", serde_json::json!({ "query": q, "params": "EgIQAQ%3D%3D" }))
-    })
-    .await
-    .map_err(|e| AppError::Network(e.to_string()))??;
+    let v = tauri::async_runtime::spawn_blocking(move || post_blocking_to("https://www.youtube.com", "WEB", "2.20250101.00.00", "search", serde_json::json!({ "query": q, "params": "EgIQAQ%3D%3D" })))
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))??;
+    video_results(&v, limit)
+}
+
+/// The videos of a search response (see `search_videos`).
+fn video_results(v: &Value, limit: usize) -> AppResult<Vec<Value>> {
     let sections = v.pointer("/contents/twoColumnSearchResultsRenderer/primaryContents/sectionListRenderer/contents").and_then(Value::as_array).cloned().unwrap_or_default();
     let out: Vec<Value> = sections
         .iter()
@@ -321,7 +376,11 @@ pub async fn search_videos(query: &str, limit: usize) -> AppResult<Vec<Value>> {
             let id = r.get("videoId")?.as_str()?;
             let owner = r.pointer("/ownerText/runs/0")?;
             let channel_path = owner.pointer("/navigationEndpoint/browseEndpoint/canonicalBaseUrl").and_then(Value::as_str).unwrap_or("");
-            let verified = r.get("ownerBadges").and_then(Value::as_array).map(|b| b.iter().any(|x| x.pointer("/metadataBadgeRenderer/style").and_then(Value::as_str).is_some_and(|s| s.contains("VERIFIED")))).unwrap_or(false);
+            let verified = r
+                .get("ownerBadges")
+                .and_then(Value::as_array)
+                .map(|b| b.iter().any(|x| x.pointer("/metadataBadgeRenderer/style").and_then(Value::as_str).is_some_and(|s| s.contains("VERIFIED"))))
+                .unwrap_or(false);
             Some(serde_json::json!({
                 "id": id,
                 "url": format!("https://www.youtube.com/watch?v={id}"),
@@ -335,7 +394,12 @@ pub async fn search_videos(query: &str, limit: usize) -> AppResult<Vec<Value>> {
         .take(limit)
         .collect();
     if out.is_empty() {
-        return Err(AppError::EmptyResults);
+        // YouTube answered with a message instead of results ("No results",
+        // or "Confirm your age" for some songs when signed out): yt-dlp gets
+        // the same answer, so that's final. Anything else may be a page
+        // format we don't read: the caller tries yt-dlp.
+        let said_nothing = sections.iter().filter_map(|s| s.pointer("/itemSectionRenderer/contents").and_then(Value::as_array)).flatten().any(|i| i.get("backgroundPromoRenderer").is_some());
+        return if said_nothing { Ok(out) } else { Err(AppError::EmptyResults) };
     }
     Ok(out)
 }
@@ -371,22 +435,12 @@ pub async fn search_extras(query: &str) -> AppResult<SearchExtras> {
             Some(Card { kind, title, subtitle, browse_id: nav_browse(&title_run), video_id, thumbnail, track })
         }))
     };
-    let (top, artists, albums, featured, community) = tokio::join!(
-        top,
-        search_filtered(query, F_ARTISTS),
-        search_filtered(query, F_ALBUMS),
-        search_filtered(query, F_FEATURED_PLAYLISTS),
-        search_filtered(query, F_COMMUNITY_PLAYLISTS)
-    );
+    let (top, artists, albums, featured, community) =
+        tokio::join!(top, search_filtered(query, F_ARTISTS), search_filtered(query, F_ALBUMS), search_filtered(query, F_FEATURED_PLAYLISTS), search_filtered(query, F_COMMUNITY_PLAYLISTS));
     let mut playlists = featured.unwrap_or_default();
     playlists.truncate(6);
     playlists.extend(community.unwrap_or_default().into_iter().take(10 - playlists.len().min(10)));
-    Ok(SearchExtras {
-        top: top.ok().flatten(),
-        artists: artists.unwrap_or_default().into_iter().take(10).collect(),
-        albums: albums.unwrap_or_default().into_iter().take(10).collect(),
-        playlists,
-    })
+    Ok(SearchExtras { top: top.ok().flatten(), artists: artists.unwrap_or_default().into_iter().take(10).collect(), albums: albums.unwrap_or_default().into_iter().take(10).collect(), playlists })
 }
 
 // ---------------------------------------------------------------------------
@@ -443,7 +497,12 @@ pub async fn artist(browse_id: &str) -> AppResult<ArtistInfo> {
     let v = post("browse", serde_json::json!({ "browseId": browse_id })).await?;
     let header = v.pointer("/header/musicImmersiveHeaderRenderer").or_else(|| v.pointer("/header/musicVisualHeaderRenderer")).ok_or_else(|| AppError::NotFound("not an artist page".into()))?;
     let name = text(header.get("title"));
-    let banner = header.pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails").and_then(Value::as_array).and_then(|a| a.iter().find(|t| t.get("width").and_then(Value::as_u64).unwrap_or(0) >= 1400).or(a.last())).and_then(|t| t.get("url").and_then(Value::as_str)).map(str::to_string);
+    let banner = header
+        .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().find(|t| t.get("width").and_then(Value::as_u64).unwrap_or(0) >= 1400).or(a.last()))
+        .and_then(|t| t.get("url").and_then(Value::as_str))
+        .map(str::to_string);
     let mut info = ArtistInfo {
         name: name.clone(),
         browse_id: browse_id.to_string(),
@@ -537,11 +596,7 @@ pub async fn collection(browse_id: &str) -> AppResult<Collection> {
         tracks.extend(items.iter().filter_map(|i| i.get("musicResponsiveListItemRenderer")).filter_map(|m| list_item(m, artist_ctx, album_ctx)).filter_map(|c| c.track));
         let Some(token) = cont else { break };
         let next = post("browse", serde_json::json!({ "continuation": token })).await?;
-        items = next
-            .pointer("/onResponseReceivedActions/0/appendContinuationItemsAction/continuationItems")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        items = next.pointer("/onResponseReceivedActions/0/appendContinuationItemsAction/continuationItems").and_then(Value::as_array).cloned().unwrap_or_default();
         if items.is_empty() {
             break;
         }
@@ -657,6 +712,66 @@ mod tests {
     }
 
     #[test]
+    fn suggestions_with_results() {
+        let item = |title: &str, sub: &str, nav: Value| {
+            serde_json::json!({ "musicResponsiveListItemRenderer": {
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": title }] } } },
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": sub }] } } }],
+            "thumbnail": { "musicThumbnailRenderer": { "thumbnail": { "thumbnails": [{ "url": "https://lh3.googleusercontent.com/x=w60-h60", "width": 60, "height": 60 }] } } },
+            "navigationEndpoint": nav } })
+        };
+        let v = serde_json::json!({ "contents": [
+            { "searchSuggestionsSectionRenderer": { "contents": [{ "searchSuggestionRenderer": { "suggestion": { "runs": [{ "text": "daft pu" }, { "text": "nk" }] } } }] } },
+            { "searchSuggestionsSectionRenderer": { "contents": [
+                item("Daft Punk", "72M monthly audience", serde_json::json!({ "browseEndpoint": { "browseId": "UCabc", "browseEndpointContextSupportedConfigs": { "browseEndpointContextMusicConfig": { "pageType": "MUSIC_PAGE_TYPE_ARTIST" } } } })),
+                item("Aerodynamic", "Song • Daft Punk • 76M plays", serde_json::json!({ "watchEndpoint": { "videoId": "vid1" } }))] } }] });
+        // The song's id sits on its title run in real responses.
+        let mut v = v;
+        v["contents"][1]["searchSuggestionsSectionRenderer"]["contents"][1]["musicResponsiveListItemRenderer"]["flexColumns"][0]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"][0]
+            ["navigationEndpoint"] = serde_json::json!({ "watchEndpoint": { "videoId": "vid1" } });
+        let s = parse_suggestions(&v);
+        assert_eq!(s.queries, ["daft punk"]);
+        assert_eq!((s.items[0].kind.as_str(), s.items[0].browse_id.as_deref()), ("artist", Some("UCabc")));
+        let song = s.items[1].track.as_ref().expect("a playable song");
+        assert_eq!((s.items[1].kind.as_str(), song.artist.as_str(), song.versions[0].id.as_str()), ("song", "Daft Punk", "vid1"));
+        assert!(s.items[1].thumbnail.is_some());
+    }
+
+    #[test]
+    #[ignore]
+    fn live_suggestions() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _g = rt.enter();
+        let s = rt.block_on(suggestions("daft pu")).unwrap();
+        println!("{:?}", s.queries);
+        for c in &s.items {
+            println!(
+                "{:<7} {} | {} | track={} thumb={:?}",
+                c.kind,
+                c.title,
+                c.subtitle,
+                c.track.as_ref().map(|t| t.artist.as_str()).unwrap_or("-"),
+                c.thumbnail.as_deref().map(|t| &t[..t.len().min(50)])
+            );
+        }
+        assert!(!s.queries.is_empty() && !s.items.is_empty());
+    }
+
+    /// "No results"/"Confirm your age" is a final empty answer; a page we
+    /// can't read is an error (the caller then tries yt-dlp).
+    #[test]
+    fn video_search_answers() {
+        let page = |items: Value| serde_json::json!({ "contents": { "twoColumnSearchResultsRenderer": { "primaryContents": { "sectionListRenderer": { "contents": [{ "itemSectionRenderer": { "contents": items } }] } } } } });
+        let video = serde_json::json!({ "videoRenderer": { "videoId": "abc", "title": { "runs": [{ "text": "Gosh" }] }, "ownerText": { "runs": [{ "text": "Jamie xx" }] }, "lengthText": { "simpleText": "4:51" } } });
+        let found = video_results(&page(serde_json::json!([video])), 10).unwrap();
+        assert_eq!((found[0]["id"].as_str(), found[0]["duration"].as_f64()), (Some("abc"), Some(291.0)));
+        let gate = serde_json::json!({ "backgroundPromoRenderer": { "title": { "runs": [{ "text": "Confirm your age" }] } } });
+        assert!(video_results(&page(serde_json::json!([gate])), 10).unwrap().is_empty());
+        assert!(matches!(video_results(&page(serde_json::json!([{ "someNewRenderer": {} }])), 10), Err(AppError::EmptyResults)));
+    }
+
+    #[test]
     #[ignore]
     fn live_ytm() {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -668,7 +783,17 @@ mod tests {
         let t1 = Instant::now();
         let (bid, _) = rt.block_on(find_artist("Tame Impala")).unwrap();
         let a = rt.block_on(artist(&bid)).unwrap();
-        println!("artist in {:?}: {} · {} · top {} · albums {} · singles {} · related {} · banner {}", t1.elapsed(), a.name, a.audience, a.top_songs.len(), a.albums.len(), a.singles.len(), a.related.len(), a.banner.is_some());
+        println!(
+            "artist in {:?}: {} · {} · top {} · albums {} · singles {} · related {} · banner {}",
+            t1.elapsed(),
+            a.name,
+            a.audience,
+            a.top_songs.len(),
+            a.albums.len(),
+            a.singles.len(),
+            a.related.len(),
+            a.banner.is_some()
+        );
         for t in a.top_songs.iter().take(3) {
             println!("   {} — {} [{:?}] {:?}", t.title, t.artist, t.versions[0].album, t.duration);
         }

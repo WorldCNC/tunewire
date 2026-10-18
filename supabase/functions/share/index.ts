@@ -43,6 +43,12 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 
 /** Only web images can be preview images. */
 const httpsImage = (u: unknown) => (typeof u === "string" && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : "");
+// A profile picture or banner: Discord's address, or "media:<user id>/<file>"
+// (an upload in the public profile-media bucket).
+const profileImage = (u: unknown, env: Env) => {
+  const m = typeof u === "string" && u.match(/^media:([0-9a-f-]{36}\/[0-9a-f]{16,64}\.(png|jpg|webp|gif))$/);
+  return m ? `${env.supabaseUrl}/storage/v1/object/public/profile-media/${m[1]}` : httpsImage(u);
+};
 
 function b64urlJson(code: string): Record<string, unknown> | null {
   try {
@@ -91,10 +97,11 @@ export async function preview(kind: string, code: string, env: Env, f: typeof fe
     return { kind, title: clip(o.t, 100), description: clip(`Song${typeof o.a === "string" && o.a ? ` · ${o.a}` : ""} · Listen on Tunewire`, 200), image: httpsImage(o.i) || DEFAULT_IMAGE, target, large: false };
   }
   if (kind === "u" && UUID.test(code)) {
-    const [p] = await rest(env, `profiles?id=eq.${code}&select=*`, f).catch(() => []);
+    // Signed out, profiles are readable only through this (a few public fields).
+    const [p] = await rest(env, "rpc/profile_preview", f, { uid: code }).catch(() => []);
     if (!p) return generic;
-    const banner = httpsImage(p.banner);
-    return { kind, title: clip(`${p.name} on Tunewire`, 100), description: "See their public playlists, followers and who they follow.", image: banner || httpsImage(p.avatar) || DEFAULT_IMAGE, target, large: !!banner };
+    const banner = profileImage(p.banner, env);
+    return { kind, title: clip(`${p.name} on Tunewire`, 100), description: "See their public playlists, followers and who they follow.", image: banner || profileImage(p.avatar, env) || DEFAULT_IMAGE, target, large: !!banner };
   }
   if (kind === "j") return { ...generic, title: "Listen together on Tunewire", description: "You're invited to a listening session: everyone hears the same song at the same moment." };
   if (kind === "c") return { ...generic, title: "Join a collaborative playlist", description: "You're invited to add songs to a playlist together on Tunewire." };
@@ -148,7 +155,13 @@ export async function handle(req: Request, env: Env, f: typeof fetch = fetch): P
   const [kind, a, b] = route(url.pathname);
   if (kind === "img" && a === "p" && b) return cover(b, env, f);
   if (!kind || !"pscju".includes(kind) || kind.length !== 1 || !a) return Response.redirect(LANDING, 302);
-  const p = await preview(kind, decodeURIComponent(a), env, f);
+  let code: string;
+  try {
+    code = decodeURIComponent(a);
+  } catch {
+    return Response.redirect(LANDING, 302); // malformed %-escape
+  }
+  const p = await preview(kind, code, env, f);
   return new Response(page(p, url.toString()), {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" },
   });

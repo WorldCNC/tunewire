@@ -70,12 +70,7 @@ pub fn prepare(opened: OpenedStream, fallback_duration: Option<f64>, token: u64)
             Ok((AudioDecoder::new(reader, hint.as_deref())?, start))
         }) as Reopen
     });
-    let duration = decoder
-        .total_duration()
-        .map(|d| d.as_secs_f64())
-        .filter(|d| *d > 0.5)
-        .or(fallback_duration)
-        .or(hls_duration);
+    let duration = decoder.total_duration().map(|d| d.as_secs_f64()).filter(|d| *d > 0.5).or(fallback_duration).or(hls_duration);
     Ok(LoadedTrack { decoder, shared, duration, reopen, token })
 }
 
@@ -91,8 +86,11 @@ struct Chunk {
 
 struct FeedCtl {
     epoch: AtomicU64,
-    /// Seek target in seconds, set by the engine, consumed by the decoder thread.
-    seek_req: Mutex<Option<f64>>,
+    /// Seek (target seconds, epoch it starts), set by the engine, consumed by
+    /// the decoder thread. The engine bumps `epoch` right away, so audio
+    /// buffered before the seek is dropped at once instead of playing on
+    /// while the decoder repositions (an HLS seek may need the network).
+    seek_req: Mutex<Option<(f64, u64)>>,
     stop: AtomicBool,
     /// Samples played since the current epoch began.
     played: AtomicU64,
@@ -106,11 +104,23 @@ struct FeedCtl {
     /// Normalization gain (f32 bits) computed by the decode thread.
     gain: AtomicU32,
     normalize: Arc<AtomicBool>,
+    /// Samples the output device has pulled (silence included), published in
+    /// steps: it stops moving when the device has gone away.
+    pulled: AtomicU64,
     channels: u16,
     rate: u32,
 }
 
 impl FeedCtl {
+    /// Ask the decoder thread to continue from `target` seconds.
+    fn request_seek(&self, target: f64) {
+        let mut req = self.seek_req.lock().unwrap();
+        let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        *req = Some((target, epoch));
+        *self.base_pos.lock().unwrap() = target;
+        self.playing_epoch.store(u64::MAX, Ordering::Release);
+    }
+
     fn position(&self) -> f64 {
         let base = *self.base_pos.lock().unwrap();
         if self.playing_epoch.load(Ordering::Acquire) != self.epoch.load(Ordering::Acquire) {
@@ -178,27 +188,39 @@ fn decode_loop(mut dec: AudioDecoder, reopen: Option<Reopen>, ctl: Arc<FeedCtl>,
     let ch = ctl.channels as usize;
     let mut finished = false;
     let mut loud = Loudness { sum_sq: 0.0, frames: 0, frozen: false };
+    // Epoch the chunks we produce belong to, and where decoding is (seconds).
+    let mut epoch = ctl.epoch.load(Ordering::Acquire);
+    let mut dec_pos = 0.0f64;
     'outer: loop {
         if ctl.stop.load(Ordering::Relaxed) {
             return;
         }
         let req = ctl.seek_req.lock().unwrap().take();
-        if let Some(t) = req {
-            match &reopen {
-                Some(reopen) => {
-                    if let Ok((d, start)) = reopen(t) {
+        if let Some((t, e)) = req {
+            let ok = match &reopen {
+                Some(reopen) => match reopen(t) {
+                    Ok((d, start)) => {
                         dec = d;
                         // Decode and drop audio up to the exact target.
                         let skip = ((t - start).max(0.0) * ctl.rate as f64) as usize * ch;
                         dec.by_ref().take(skip).for_each(drop);
+                        true
                     }
-                }
-                None => {
-                    let _ = dec.try_seek(Duration::from_secs_f64(t));
+                    Err(_) => false,
+                },
+                None => dec.try_seek(Duration::from_secs_f64(t)).is_ok(),
+            };
+            epoch = e;
+            if ok {
+                dec_pos = t;
+            } else {
+                // The decoder carries on where it was: show that, not the target
+                // (unless a newer seek already replaced this one).
+                let base = ctl.base_pos.lock();
+                if ctl.epoch.load(Ordering::Acquire) == e {
+                    *base.unwrap() = dec_pos;
                 }
             }
-            *ctl.base_pos.lock().unwrap() = t;
-            ctl.epoch.fetch_add(1, Ordering::AcqRel);
             finished = false;
             ctl.finished.store(false, Ordering::Release);
         }
@@ -207,7 +229,6 @@ fn decode_loop(mut dec: AudioDecoder, reopen: Option<Reopen>, ctl: Arc<FeedCtl>,
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
-        let epoch = ctl.epoch.load(Ordering::Acquire);
         let mut samples = Vec::with_capacity(CHUNK_FRAMES * ch);
         for s in dec.by_ref() {
             samples.push(s);
@@ -218,6 +239,7 @@ fn decode_loop(mut dec: AudioDecoder, reopen: Option<Reopen>, ctl: Arc<FeedCtl>,
         let end = samples.len() < CHUNK_FRAMES * ch;
         // Keep chunks frame-aligned so channels never get swapped.
         samples.truncate(samples.len() / ch * ch);
+        dec_pos += (samples.len() / ch) as f64 / ctl.rate as f64;
         loud.feed(&samples, ch, ctl.rate, &ctl);
         let mut out = Vec::with_capacity(2);
         if !samples.is_empty() {
@@ -246,6 +268,8 @@ fn decode_loop(mut dec: AudioDecoder, reopen: Option<Reopen>, ctl: Arc<FeedCtl>,
 struct FeedSource {
     rx: Receiver<Chunk>,
     cur: Vec<f32>,
+    /// Epoch of `cur`: a seek drops the rest of it right away.
+    cur_epoch: u64,
     idx: usize,
     out_count: u64,
     ctl: Arc<FeedCtl>,
@@ -256,6 +280,8 @@ struct FeedSource {
     target: f32,
     /// Samples played but not yet published to `ctl.played`.
     pending: u64,
+    /// Samples handed to the device but not yet added to `ctl.pulled`.
+    pull_pending: u64,
     drained: Arc<AtomicBool>,
     eq: Equalizer,
     eq_params: Arc<EqParams>,
@@ -291,7 +317,15 @@ impl Iterator for FeedSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
+        self.pull_pending += 1;
+        if self.pull_pending >= 4096 {
+            self.ctl.pulled.fetch_add(self.pull_pending, Ordering::Relaxed);
+            self.pull_pending = 0;
+        }
         loop {
+            if self.idx < self.cur.len() && self.cur_epoch != self.ctl.epoch.load(Ordering::Relaxed) {
+                self.idx = self.cur.len();
+            }
             if self.idx < self.cur.len() {
                 let mut s = self.cur[self.idx];
                 let ch = (self.out_count % self.ctl.channels as u64) as usize;
@@ -331,6 +365,7 @@ impl Iterator for FeedSource {
                     }
                     self.ctl.underrun.store(false, Ordering::Relaxed);
                     self.cur = c.samples;
+                    self.cur_epoch = c.epoch;
                     self.idx = 0;
                     self.refresh_target();
                 }
@@ -389,11 +424,29 @@ pub struct EngineStatus {
 
 pub enum EngineEvent {
     Tick,
-    Ended { token: u64 },
-    Error { token: u64, error: AppError },
+    Ended {
+        token: u64,
+    },
+    Error {
+        token: u64,
+        error: AppError,
+    },
     /// The engine switched to the preloaded track by itself (gapless/crossfade).
-    Advanced { token: u64 },
+    Advanced {
+        token: u64,
+    },
+    /// The output device stopped taking audio (unplugged, Bluetooth gone):
+    /// everything was stopped and the device closed; play `token` again from
+    /// `position` to continue on the current default output.
+    DeviceLost {
+        token: u64,
+        position: f64,
+    },
 }
+
+/// How long the device may take no audio at all while playing before it
+/// counts as gone.
+const DEVICE_STALL: Duration = Duration::from_secs(3);
 
 enum Cmd {
     Play(Box<LoadedTrack>),
@@ -404,7 +457,10 @@ enum Cmd {
     Stop,
     Volume(f32),
     Seek(f64),
-    Config { crossfade: f32, normalize: bool },
+    Config {
+        crossfade: f32,
+        normalize: bool,
+    },
     /// Switch output device (stops playback; the controller restarts it).
     Device(String),
 }
@@ -419,22 +475,11 @@ pub struct AudioHandle {
 impl AudioHandle {
     pub fn spawn(volume: f32, on_event: impl Fn(EngineEvent) + Send + 'static) -> AudioHandle {
         let (tx, rx) = mpsc::channel();
-        let status = Arc::new(Mutex::new(EngineStatus {
-            state: EngineState::Idle,
-            position: 0.0,
-            duration: None,
-            buffered: None,
-            stalled: false,
-            token: 0,
-            preloaded: None,
-        }));
+        let status = Arc::new(Mutex::new(EngineStatus { state: EngineState::Idle, position: 0.0, duration: None, buffered: None, stalled: false, token: 0, preloaded: None }));
         let st = status.clone();
         let eq = Arc::new(EqParams::default());
         let eq2 = eq.clone();
-        std::thread::Builder::new()
-            .name("audio-engine".into())
-            .spawn(move || engine(rx, st, volume, eq2, on_event))
-            .expect("spawn audio thread");
+        std::thread::Builder::new().name("audio-engine".into()).spawn(move || engine(rx, st, volume, eq2, on_event)).expect("spawn audio thread");
         AudioHandle { tx, status, eq }
     }
 
@@ -503,19 +548,18 @@ fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>, eq_params: Arc<EqP
         finished: AtomicBool::new(false),
         gain: AtomicU32::new(1.0f32.to_bits()),
         normalize,
+        pulled: AtomicU64::new(0),
         channels,
         rate,
     });
     let (ctx, crx) = mpsc::sync_channel(CHANNEL_CHUNKS);
     let c2 = ctl.clone();
-    std::thread::Builder::new()
-        .name("audio-decode".into())
-        .spawn(move || decode_loop(decoder, reopen, c2, ctx))
-        .expect("spawn decode thread");
+    std::thread::Builder::new().name("audio-decode".into()).spawn(move || decode_loop(decoder, reopen, c2, ctx)).expect("spawn decode thread");
     let drained = Arc::new(AtomicBool::new(false));
     let feed = FeedSource {
         rx: crx,
         cur: Vec::new(),
+        cur_epoch: 0,
         idx: 0,
         out_count: 0,
         ctl: ctl.clone(),
@@ -524,6 +568,7 @@ fn start_decoding(t: LoadedTrack, normalize: Arc<AtomicBool>, eq_params: Arc<EqP
         gain: 1.0,
         target: 1.0,
         pending: 0,
+        pull_pending: 0,
         drained: drained.clone(),
         eq: Equalizer::new(rate, channels),
         eq_params,
@@ -562,10 +607,7 @@ fn perceptual(v: f32) -> f32 {
 /// Open the chosen output (cpal device id), falling back to the default.
 fn open_device(id: &str) -> AppResult<MixerDeviceSink> {
     use rodio::cpal::traits::HostTrait;
-    let chosen = (!id.is_empty())
-        .then(|| id.parse::<rodio::cpal::DeviceId>().ok())
-        .flatten()
-        .and_then(|id| rodio::cpal::default_host().device_by_id(&id));
+    let chosen = (!id.is_empty()).then(|| id.parse::<rodio::cpal::DeviceId>().ok()).flatten().and_then(|id| rodio::cpal::default_host().device_by_id(&id));
     let opened = match chosen {
         Some(dev) => DeviceSinkBuilder::from_device(dev).and_then(|b| b.open_stream()).or_else(|_| DeviceSinkBuilder::open_default_sink()),
         None => DeviceSinkBuilder::open_default_sink(),
@@ -587,7 +629,9 @@ pub fn output_devices() -> Vec<OutputDevice> {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
     let host = rodio::cpal::default_host();
     let default = host.default_output_device().and_then(|d| d.id().ok());
-    let Ok(devs) = host.output_devices() else { return Vec::new() };
+    let Ok(devs) = host.output_devices() else {
+        return Vec::new();
+    };
     // ALSA also lists every plugin PCM (resamplers, "discard all samples",
     // up/downmixers) and the same card several times; keep real outputs once.
     const NOISE: [&str; 6] = ["Plugin", "Discard all samples", "Rate Converter", "Open Sound System", "JACK Audio", "Speex"];
@@ -636,6 +680,8 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
     let mut crossfade = 0.0f32;
     let normalize = Arc::new(AtomicBool::new(true));
     let mut last_tick = Instant::now();
+    // (token, samples pulled, since when) for noticing a dead output device.
+    let mut watch: (u64, u64, Instant) = (0, 0, Instant::now());
 
     let shutdown_next = |n: &mut Option<Prepared>| {
         if let Some(p) = n.take() {
@@ -717,9 +763,7 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
             Ok(Cmd::Seek(s)) => {
                 if let Some(c) = &cur {
                     let target = c.duration.map(|d| s.min((d - 0.5).max(0.0))).unwrap_or(s);
-                    *c.ctl.seek_req.lock().unwrap() = Some(target);
-                    *c.ctl.base_pos.lock().unwrap() = target;
-                    c.ctl.playing_epoch.store(u64::MAX, Ordering::Release);
+                    c.ctl.request_seek(target);
                 }
             }
             Ok(Cmd::Device(id)) => {
@@ -770,10 +814,7 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
         // Track transitions.
         if let Some(c) = &cur {
             let ended = c.player.empty() || c.drained.load(Ordering::Acquire);
-            let start_crossfade = crossfade > 0.0
-                && state == EngineState::Playing
-                && next.is_some()
-                && c.remaining().map(|r| r <= crossfade as f64 && r > 0.2).unwrap_or(false);
+            let start_crossfade = crossfade > 0.0 && state == EngineState::Playing && next.is_some() && c.remaining().map(|r| r <= crossfade as f64 && r > 0.2).unwrap_or(false);
             if (ended || start_crossfade) && next.is_some() {
                 let old = cur.take().unwrap();
                 let err = old.shared.error();
@@ -809,13 +850,35 @@ fn engine(rx: Receiver<Cmd>, status: Arc<Mutex<EngineStatus>>, mut volume: f32, 
                 old.shutdown();
                 state = EngineState::Idle;
                 match err {
-                    Some(e) if early => on_event(EngineEvent::Error {
-                        token,
-                        error: AppError::Network(format!("stream interrupted at {}s: {e}", pos as u64)),
-                    }),
+                    Some(e) if early => on_event(EngineEvent::Error { token, error: AppError::Network(format!("stream interrupted at {}s: {e}", pos as u64)) }),
                     _ => on_event(EngineEvent::Ended { token }),
                 }
             }
+        }
+
+        // A device that stopped pulling audio (unplugged) never errors out by
+        // itself: playback would sit "playing" in silence forever.
+        match &cur {
+            Some(c) if state == EngineState::Playing => {
+                let pulled = c.ctl.pulled.load(Ordering::Relaxed);
+                if watch.0 != c.token || watch.1 != pulled {
+                    watch = (c.token, pulled, Instant::now());
+                } else if watch.2.elapsed() >= DEVICE_STALL {
+                    let (token, position) = (c.token, c.ctl.position());
+                    if let Some(c) = cur.take() {
+                        c.shutdown();
+                    }
+                    for f in fading.drain(..) {
+                        f.out.shutdown();
+                    }
+                    shutdown_next(&mut next);
+                    device = None;
+                    state = EngineState::Idle;
+                    watch = (0, 0, Instant::now());
+                    on_event(EngineEvent::DeviceLost { token, position });
+                }
+            }
+            _ => watch = (0, 0, Instant::now()),
         }
 
         {
@@ -855,6 +918,60 @@ mod tests {
         for d in super::output_devices() {
             println!("{}{} [{}]", d.name, if d.default { " (default)" } else { "" }, d.id);
         }
+    }
+
+    /// Audio buffered before a seek must not play after it: the very next
+    /// sound is from the new position (each second here has its own level).
+    #[test]
+    fn seek_drops_buffered_audio_at_once() {
+        use super::*;
+        let (rate, secs) = (8000u32, 10u32);
+        let data_len = rate * secs * 4;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        for x in [
+            16u32.to_le_bytes().to_vec(),
+            1u16.to_le_bytes().to_vec(),
+            2u16.to_le_bytes().to_vec(),
+            rate.to_le_bytes().to_vec(),
+            (rate * 4).to_le_bytes().to_vec(),
+            4u16.to_le_bytes().to_vec(),
+            16u16.to_le_bytes().to_vec(),
+        ] {
+            wav.extend_from_slice(&x);
+        }
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for i in 0..rate * secs {
+            let level = ((i / rate + 1) * 1000) as i16;
+            wav.extend_from_slice(&level.to_le_bytes());
+            wav.extend_from_slice(&level.to_le_bytes());
+        }
+        let path = std::env::temp_dir().join(format!("tunewire-seek-{}.wav", std::process::id()));
+        std::fs::write(&path, &wav).unwrap();
+        let t = prepare(crate::stream::open_local(&path).unwrap(), None, 1).unwrap();
+        let p = start_decoding(t, Arc::new(AtomicBool::new(false)), Arc::new(EqParams::default()));
+        let mut feed = p.feed;
+        let second = |s: f32| (s * 32768.0 / 1000.0).round() as i32 - 1;
+        let next_sound = |feed: &mut FeedSource| loop {
+            match feed.next() {
+                Some(s) if s != 0.0 => return s,
+                Some(_) => std::thread::sleep(Duration::from_millis(1)),
+                None => panic!("ended"),
+            }
+        };
+        std::thread::sleep(Duration::from_millis(300)); // let the channel fill up
+        assert_eq!(second(next_sound(&mut feed)), 0);
+        for _ in 0..rate {
+            feed.next();
+        }
+        p.ctl.request_seek(7.0);
+        assert_eq!(second(next_sound(&mut feed)), 7, "old audio played after the seek");
+        assert!((p.ctl.position() - 7.0).abs() < 0.05);
+        p.ctl.stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -952,9 +1069,7 @@ mod live_tests {
     fn search_all() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cache = std::sync::Arc::new(crate::search::SearchCache::default());
-        let r = rt
-            .block_on(crate::search::search("daft punk one more time".into(), "all".into(), 8, Platform::ALL.to_vec(), cache, true, false))
-            .unwrap();
+        let r = rt.block_on(crate::search::search("daft punk one more time".into(), "all".into(), 8, Platform::ALL.to_vec(), cache, true, false)).unwrap();
         for t in &r.tracks {
             let p: Vec<_> = t.versions.iter().map(|v| format!("{:?}", v.platform)).collect();
             println!("{:5.2} {} — {} {:?} [{}]", t.score, t.artist, t.title, t.duration, p.join(","));

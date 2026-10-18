@@ -71,6 +71,7 @@
     playlists.push({ id: 'pbig', name: `Big library (${big})`, created: 0, updated: 0, added: {}, tracks: Array.from({ length: big }, (_, i) => T(`Song number ${i + 1}`, `Artist ${i % 97}`, 120 + (i % 200), [V('ytmusic', `Song number ${i + 1}`, `Artist ${i % 97}`, 120 + (i % 200), ids[i % ids.length], { album: `Album ${i % 41}` }), V('soundcloud', `Song ${i + 1}`, `Artist ${i % 97}`, 121, `sc${i}`)])) });
   }
   let favorites = tracks.slice(0, 2);
+  let plSeq = 0;
   const listeners = {};
   const emit = (name, payload) => (listeners[name] || []).forEach((cb) => cb({ payload }));
   const snap = () => ({ items: queue.items, current: queue.current });
@@ -104,6 +105,19 @@
     spotify_logout: () => { mockSpotifyUser = null; },
     list_output_devices: () => [{ id: 'alsa:default', name: 'Built-in Audio', default: true }, { id: 'alsa:hdmi', name: 'HDMI Output', default: false }],
     search_suggestions: ({ query }) => ['', ' remix', ' live', ' lyrics', ' acoustic'].map((x) => query + x),
+    search_preview: async ({ query }) => {
+      await new Promise((r) => setTimeout(r, 120));
+      const q = query.toLowerCase();
+      const songs = tracks.filter((t) => `${t.title} ${t.artist}`.toLowerCase().includes(q.split(' ')[0])).slice(0, 3);
+      return {
+        queries: ['', ' remix', ' live', ' lyrics'].map((x) => query + x),
+        items: [
+          { kind: 'artist', title: songs[0]?.artist || 'Daft Punk', subtitle: '72.5M monthly audience', browse_id: 'UCmock', video_id: null, thumbnail: yt('fa5IWHDbftI'), track: null },
+          ...songs.map((t) => ({ kind: 'song', title: t.title, subtitle: `Song • ${t.artist} • 76M plays`, browse_id: null, video_id: t.versions[0].id, thumbnail: t.thumbnail, track: t })),
+          { kind: 'album', title: 'Discovery', subtitle: `Album • ${songs[0]?.artist || 'Daft Punk'} • 2001`, browse_id: 'MPREmock', video_id: null, thumbnail: yt('fa5IWHDbftI'), track: null },
+        ],
+      };
+    },
     search_history: () => settings.search_history,
     clear_search_history: ({ query }) => { settings.search_history = query ? settings.search_history.filter((q) => q !== query) : []; },
     chart_countries: () => [{ code: 'ZZ', name: 'Global' }, { code: 'US', name: 'United States' }, { code: 'IL', name: 'Israel' }],
@@ -124,7 +138,7 @@
     cover_color: () => '#3d7bd9',
     spotify_user_playlists: () => [{ name: 'Mock mix', url: 'https://open.spotify.com/playlist/mock1', tracks: 3, thumbnail: null, owner: 'dev' }],
     sync_playlist: ({ id }) => playlists.find((p) => p.id === id)?.tracks.length || 0,
-    prefetch_track: () => {},
+    prefetch_track: () => true,
     recommend_for_playlist: ({ tracks: seeds, nonce }) => tracks.filter((t) => !seeds.some((s) => s.key === t.key)).map((t, i) => ({ track: t, because: seeds[(i + (nonce || 0)) % seeds.length].title, seeds: 1 + (i % 2) })),
     background_image_data: () => 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=',
     start_radio: ({ track }) => { queue.items = [{ uid: ++uid, track, platform: null }, ...tracks.filter((t) => t.key !== track.key).map((t) => ({ uid: ++uid, track: t, platform: null }))]; startItem(0); },
@@ -154,11 +168,11 @@
     shuffle_queue: () => snap(),
     set_item_platform: () => null,
     list_playlists: () => playlists,
-    create_playlist: ({ name, tracks: ts }) => { const p = { id: `p${Date.now()}`, name, tracks: ts || [], created: 0, updated: 0 }; playlists.push(p); emit('library-changed', 'playlists'); return p; },
+    create_playlist: ({ name, tracks: ts }) => { const p = { id: `p${Date.now()}${++plSeq}`, name, tracks: ts || [], created: 0, updated: 0, added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return p; },
     rename_playlist: ({ id, name }) => { playlists.find((p) => p.id === id).name = name; emit('library-changed', 'playlists'); },
     delete_playlist: ({ id }) => { playlists.splice(playlists.findIndex((p) => p.id === id), 1); emit('library-changed', 'playlists'); },
-    add_to_playlist: ({ id, tracks: ts }) => { playlists.find((p) => p.id === id).tracks.push(...ts); emit('library-changed', 'playlists'); return ts.length; },
-    remove_from_playlist: () => emit('library-changed', 'playlists'),
+    add_to_playlist: ({ id, tracks: ts }) => { const p = playlists.find((x) => x.id === id); const fresh = ts.filter((t) => !p.tracks.some((x) => x.key === t.key)); p.tracks.push(...fresh); emit('library-changed', 'playlists'); return fresh.length; },
+    remove_from_playlist: ({ id, index, key }) => { const p = playlists.find((x) => x.id === id); const i = key ? p.tracks.findIndex((t) => t.key === key) : index; p.tracks.splice(i, 1); emit('library-changed', 'playlists'); },
     move_in_playlist: () => emit('library-changed', 'playlists'),
     list_favorites: () => favorites,
     toggle_favorite: ({ track }) => { const has = favorites.some((t) => t.key === track.key); favorites = has ? favorites.filter((t) => t.key !== track.key) : [track, ...favorites]; emit('library-changed', 'favorites'); return !has; },
@@ -234,14 +248,25 @@
     cloud_sign_in: () => { throw { kind: 'unavailable', message: 'not in the preview' }; },
     cloud_sign_out: () => { window.__SBsession = null; },
     set_playlist_cloud: ({ id, cloudId, role }) => { const p = playlists.find((x) => x.id === id); p.cloud_id = cloudId; p.cloud_role = role; emit('library-changed', 'playlists'); },
-    replace_playlist_tracks: ({ id, tracks: ts }) => { playlists.find((x) => x.id === id).tracks = ts; emit('library-changed', 'playlists'); },
+    replace_playlist_tracks: ({ id, tracks: ts, expect }) => {
+      const p = playlists.find((x) => x.id === id);
+      if (expect && expect.join('\n') !== p.tracks.map((t) => t.key).join('\n')) throw { kind: 'conflict', message: 'the songs changed' };
+      p.tracks = ts; emit('library-changed', 'playlists');
+    },
+    replace_favorites: ({ tracks: ts, expect }) => {
+      if (expect && expect.join('\n') !== favorites.map((t) => t.key).join('\n')) throw { kind: 'conflict', message: 'the songs changed' };
+      favorites = ts; emit('library-changed', 'favorites');
+    },
+    // Kept per tab (a test can give two tabs different "devices").
+    load_sync_state: () => sessionStorage.getItem('tw-sync') || '',
+    save_sync_state: ({ data }) => { sessionStorage.setItem('tw-sync', data); },
     spotify_profile_playlists: () => ({ name: 'Friend', playlists: [{ id: 'fp1', name: 'Friend mix', owner: 'Friend', total: 2, thumbnail: null }] }),
     report_error: () => null, reports_available: () => false, cover_wash: () => (DEMO ? null : 'data:image/png;base64,iVBORw0KGgo='),
     import_apple_music: () => { const p = { id: `pam${Date.now()}`, name: 'Apple Mix', tracks: tracks.slice(1, 4), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return { playlist: p, missing: 1 }; },
     import_rows: ({ name, rows }) => { const p = { id: `pcsv${Date.now()}`, name, tracks: tracks.slice(0, Math.min(rows.length, 5)), created: Date.now(), updated: Date.now(), added: {} }; playlists.push(p); emit('library-changed', 'playlists'); return { playlist: p, missing: 0 }; },
     apply_matches: ({ tracks: ts }) => ts,
-    remove_many_from_playlist: ({ id, indices }) => { const p = playlists.find((x) => x.id === id); p.tracks = p.tracks.filter((_, i) => !indices.includes(i)); emit('library-changed', 'playlists'); return indices.length; },
-    move_many_in_playlist: ({ id, indices, to }) => { const p = playlists.find((x) => x.id === id); const mv = indices.map((i) => p.tracks[i]); p.tracks = p.tracks.filter((_, i) => !indices.includes(i)); p.tracks.splice(to, 0, ...mv); emit('library-changed', 'playlists'); },
+    remove_many_from_playlist: ({ id, indices, keys }) => { const p = playlists.find((x) => x.id === id); const n = p.tracks.length; p.tracks = keys ? p.tracks.filter((t) => !keys.includes(t.key)) : p.tracks.filter((_, i) => !indices.includes(i)); emit('library-changed', 'playlists'); return n - p.tracks.length; },
+    move_many_in_playlist: ({ id, indices, to, keys }) => { const p = playlists.find((x) => x.id === id); const idx = keys ? p.tracks.map((t, i) => (keys.includes(t.key) ? i : -1)).filter((i) => i >= 0) : indices; const mv = idx.map((i) => p.tracks[i]); p.tracks = p.tracks.filter((_, i) => !idx.includes(i)); p.tracks.splice(to, 0, ...mv); emit('library-changed', 'playlists'); },
     update_playlist_meta: ({ id, patch }) => { const p = playlists.find((x) => x.id === id); if (patch.name) p.name = patch.name; if (patch.description != null) p.description = patch.description; if (patch.pinned != null) p.pinned = patch.pinned; if (patch.folder != null) p.folder = patch.folder || null; if (patch.cover != null) p.cover = patch.cover || null; emit('library-changed', 'playlists'); },
     set_sleep_timer: ({ minutes, endOfTrack }) => { playback.sleep_at = endOfTrack ? 0 : minutes ? Date.now() + minutes * 60000 : null; emit('playback', playback); return playback.sleep_at; },
     set_shuffle: ({ on }) => { settings.shuffle = on; playback.shuffle = on; emit('playback', playback); return queue; },

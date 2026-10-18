@@ -28,10 +28,8 @@ fn bench_extract() {
     std::thread::sleep(Duration::from_secs(2));
     let format = crate::ytdlp::AUDIO_FORMAT;
     let yt = ["4NRXx6U8ABQ", "JGwWNGJdvx8", "kJQP7kiw5Fk", "fJ9rUzIMcZQ", "hTWKbfoikeg", "YQHsXMglC9A", "09R8_2nJtjg", "RgKAFK5djSk", "lp-EO5I60KA", "60ItHLz5WEA", "OPf0YbXqDm0", "pRpeEdMmmQ0"];
-    let variants: Vec<(&str, serde_json::Value)> = vec![
-        ("default (skip hls,dash)", serde_json::json!({ "youtube": { "skip": ["hls", "dash"] } })),
-        ("default (2)", serde_json::json!({ "youtube": { "skip": ["hls", "dash"] } })),
-    ];
+    let variants: Vec<(&str, serde_json::Value)> =
+        vec![("default (skip hls,dash)", serde_json::json!({ "youtube": { "skip": ["hls", "dash"] } })), ("default (2)", serde_json::json!({ "youtube": { "skip": ["hls", "dash"] } }))];
     let mut i = 0;
     for (name, args) in variants {
         let mut times = Vec::new();
@@ -52,10 +50,28 @@ fn bench_extract() {
         }
         println!("YT extract  {name:<34} {} {}  ({ok}/2 ok)", ms(times[0]), ms(times[1]));
     }
-    for url in ["https://soundcloud.com/daft-punk-id/daft-punk-one-more-time", "https://soundcloud.com/odesza/say-my-name-feat-zyra"] {
+    for url in ["https://soundcloud.com/daft-punk-id/daft-punk-one-more-time", "https://soundcloud.com/daft-punk-id/daft-punk-one-more-time"] {
         let t0 = Instant::now();
         let r = rt.block_on(crate::ytdlp_worker::extract(&bin, url, serde_json::json!({ "format": format, "noplaylist": true })));
         println!("SC extract  {:<34} {}  ok={}", url.rsplit('/').next().unwrap(), ms(t0.elapsed()), matches!(r, Ok(Some(_))));
+    }
+}
+
+/// A song click's whole lookup (`stream_info`: visitor id, worker, fallbacks).
+#[test]
+#[ignore]
+fn bench_stream_info() {
+    let rt = rt();
+    let _g = rt.enter();
+    rt.block_on(crate::ytdlp_worker::warm(crate::ytdlp::binary()));
+    let t0 = Instant::now();
+    rt.block_on(crate::ytdlp::warm_youtube());
+    println!("warm (visitor id + first lookup)        {}", ms(t0.elapsed()));
+    for id in ["4NRXx6U8ABQ", "JGwWNGJdvx8", "kJQP7kiw5Fk", "fJ9rUzIMcZQ", "hTWKbfoikeg"] {
+        let url = format!("https://music.youtube.com/watch?v={id}");
+        let t0 = Instant::now();
+        let r = rt.block_on(crate::ytdlp::stream_info(&url));
+        println!("stream_info {id:<28} {}  {:?}", ms(t0.elapsed()), r.map(|i| (i.acodec, i.title)).map_err(|e| e.to_string()));
     }
 }
 
@@ -68,7 +84,9 @@ fn bench_search() {
     rt.block_on(crate::ytdlp_worker::warm(crate::ytdlp::binary()));
     std::thread::sleep(Duration::from_secs(2));
     let queries = ["radiohead nude", "frank ocean nights", "fleetwood mac dreams", "phoebe bridgers motion sickness", "kaytranada glowed up"];
-    for (src, plats) in [("ytmusic", vec![Platform::Ytmusic]), ("youtube", vec![Platform::Youtube]), ("soundcloud", vec![Platform::Soundcloud]), ("spotify", vec![Platform::Spotify]), ("all", Platform::ALL.to_vec())] {
+    for (src, plats) in
+        [("ytmusic", vec![Platform::Ytmusic]), ("youtube", vec![Platform::Youtube]), ("soundcloud", vec![Platform::Soundcloud]), ("spotify", vec![Platform::Spotify]), ("all", Platform::ALL.to_vec())]
+    {
         let mut row = Vec::new();
         for q in queries.iter().take(3) {
             let cache = Arc::new(SearchCache::default());
@@ -90,7 +108,7 @@ fn bench_open() {
     let rt = rt();
     let _g = rt.enter();
     rt.block_on(crate::ytdlp_worker::warm(crate::ytdlp::binary()));
-    for url in ["https://music.youtube.com/watch?v=hTWKbfoikeg", "https://www.youtube.com/watch?v=YQHsXMglC9A", "https://soundcloud.com/odesza/say-my-name-feat-zyra"] {
+    for url in ["https://music.youtube.com/watch?v=hTWKbfoikeg", "https://www.youtube.com/watch?v=YQHsXMglC9A", "https://soundcloud.com/daft-punk-id/daft-punk-one-more-time"] {
         let t0 = Instant::now();
         let info = rt.block_on(crate::ytdlp::extract_stream(url)).expect("extract");
         let t1 = t0.elapsed();
@@ -117,13 +135,30 @@ fn bench_pages() {
         let r = f();
         println!("{name:<34} {}  {r}", ms(t0.elapsed()));
     };
-    time("YT playlist (yt-dlp flat)", &|| rt.block_on(crate::ytdlp::flat("https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI", Some(1000))).map(|v| format!("{} entries", v.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0))).unwrap_or_else(|e| e.to_string()));
+    time("YT playlist (yt-dlp flat)", &|| {
+        rt.block_on(crate::ytdlp::flat("https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI", Some(1000)))
+            .map(|v| format!("{} entries", v.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0)))
+            .unwrap_or_else(|e| e.to_string())
+    });
     time("YTM playlist (api)", &|| rt.block_on(crate::ytm::collection("VLPLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI")).map(|c| format!("{} tracks", c.tracks.len())).unwrap_or_else(|e| e.to_string()));
-    time("SC set (yt-dlp flat)", &|| rt.block_on(crate::ytdlp::flat("https://soundcloud.com/odesza/sets/a-moment-apart-1", Some(1000))).map(|v| format!("{} entries", v.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0))).unwrap_or_else(|e| e.to_string()));
+    time("SC set (yt-dlp flat)", &|| {
+        rt.block_on(crate::ytdlp::flat("https://soundcloud.com/odesza/sets/a-moment-apart-1", Some(1000)))
+            .map(|v| format!("{} entries", v.get("entries").and_then(|e| e.as_array()).map(|a| a.len()).unwrap_or(0)))
+            .unwrap_or_else(|e| e.to_string())
+    });
     time("Spotify playlist (pathfinder)", &|| crate::spotify::fetch_playlist_full("37i9dQZF1DX4o1oenSJRJd").map(|(_, t)| format!("{} tracks", t.len())).unwrap_or_else(|e| e.to_string()));
-    time("lyrics (LRCLIB)", &|| rt.block_on(crate::lyrics::get("Daft Punk".into(), "Digital Love".into(), None, Some(301.0))).map(|l| format!("found={}", l.is_some())).unwrap_or_else(|e| e.to_string()));
+    time("lyrics (LRCLIB)", &|| {
+        rt.block_on(crate::lyrics::get("Daft Punk".into(), "Digital Love".into(), None, Some(301.0))).map(|l| format!("found={}", l.is_some())).unwrap_or_else(|e| e.to_string())
+    });
     let cache = Arc::new(SearchCache::default());
-    time("artist page (api)", &|| rt.block_on(async { let (b, _) = crate::ytm::find_artist("Radiohead").await?; crate::ytm::artist(&b).await }).map(|a| format!("{} top", a.top_songs.len())).unwrap_or_else(|e| e.to_string()));
+    time("artist page (api)", &|| {
+        rt.block_on(async {
+            let (b, _) = crate::ytm::find_artist("Radiohead").await?;
+            crate::ytm::artist(&b).await
+        })
+        .map(|a| format!("{} top", a.top_songs.len()))
+        .unwrap_or_else(|e| e.to_string())
+    });
     time("search extras (api)", &|| rt.block_on(crate::ytm::search_extras("radiohead")).map(|x| format!("{} albums", x.albums.len())).unwrap_or_else(|e| e.to_string()));
     let seed = rt.block_on(crate::search::search("tame impala let it happen".into(), "ytmusic".into(), 3, vec![Platform::Ytmusic], cache.clone(), false, false)).unwrap().tracks.remove(0);
     time("radio (related)", &|| rt.block_on(crate::radio::related(&seed, &Default::default(), 30, &cache)).map(|v| format!("{} songs", v.len())).unwrap_or_else(|e| e.to_string()));
@@ -191,10 +226,52 @@ fn dump_big_library() {
                 }
             }
         }
-        if all.len() > 1100 { break; }
+        if all.len() > 1100 {
+            break;
+        }
     }
     all.truncate(1000);
     let path = std::env::var("BIG_OUT").unwrap();
     std::fs::write(&path, format!("window.__BIG = {};", serde_json::to_string(&all).unwrap())).unwrap();
     println!("wrote {} tracks, {} distinct covers", all.len(), all.iter().filter_map(|t| t.thumbnail.clone()).collect::<std::collections::HashSet<_>>().len());
+}
+
+/// Each source's part of an "All" search (it waits for the slowest).
+#[test]
+#[ignore]
+fn bench_search_all_parts() {
+    let rt = rt();
+    let _g = rt.enter();
+    for q in [
+        "massive attack teardrop",
+        "lorde royals",
+        "the strokes reptilia",
+        "bonobo kerala",
+        "fred again delilah",
+        "burial archangel",
+        "tame impala let it happen",
+        "jamie xx gosh",
+        "radiohead reckoner",
+        "portishead roads",
+    ] {
+        let t0 = Instant::now();
+        let mut hs = Vec::new();
+        for p in [Platform::Ytmusic, Platform::Soundcloud, Platform::Youtube, Platform::Spotify] {
+            let q = q.to_string();
+            hs.push((
+                p,
+                tauri::async_runtime::spawn(async move {
+                    let t = Instant::now();
+                    let r = crate::search::search_platform(p, q, 12, &SearchCache::default()).await;
+                    (t.elapsed(), r.map(|r| r.0.len()).map_err(|e| e.to_string()))
+                }),
+            ));
+        }
+        let mut line = Vec::new();
+        for (p, h) in hs {
+            let (d, r) = rt.block_on(h).unwrap();
+            line.push(format!("{p:?} {} {:?}", ms(d), r));
+        }
+        println!("{q:<28} total {} | {}", ms(t0.elapsed()), line.join(" | "));
+    }
 }

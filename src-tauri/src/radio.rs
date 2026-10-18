@@ -14,11 +14,7 @@ use crate::ytdlp;
 
 /// A YouTube video id for the seed song (searching YouTube Music if needed).
 async fn seed_id(track: &Track, cache: &Arc<SearchCache>) -> AppResult<String> {
-    let known = track
-        .versions
-        .iter()
-        .find(|v| matches!(v.platform, Platform::Ytmusic | Platform::Youtube) && v.id.len() == 11)
-        .map(|v| v.id.clone());
+    let known = track.versions.iter().find(|v| matches!(v.platform, Platform::Ytmusic | Platform::Youtube) && v.id.len() == 11).map(|v| v.id.clone());
     if let Some(id) = known {
         return Ok(id);
     }
@@ -59,7 +55,9 @@ fn ytm_radio_blocking(id: &str) -> AppResult<Vec<crate::models::TrackVersion>> {
     let text = r.body_mut().with_config().limit(16 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
     let v: Value = serde_json::from_str(&text)?;
     let items = v
-        .pointer("/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer/contents")
+        .pointer(
+            "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer/contents",
+        )
         .and_then(Value::as_array)
         .ok_or_else(|| AppError::Extraction("YouTube Music radio format changed".into()))?;
     Ok(items
@@ -116,9 +114,7 @@ pub async fn related(track: &Track, exclude: &HashSet<String>, limit: usize, cac
     }
     // Fallback: the same mix through yt-dlp (less metadata).
     let url = format!("https://www.youtube.com/watch?v={id}&list=RDAMVM{id}");
-    let json = tokio::time::timeout(Duration::from_secs(60), ytdlp::flat(&url, Some(limit + 10)))
-        .await
-        .map_err(|_| AppError::Timeout("radio took too long".into()))??;
+    let json = tokio::time::timeout(Duration::from_secs(60), ytdlp::flat(&url, Some(limit + 10))).await.map_err(|_| AppError::Timeout("radio took too long".into()))??;
     let entries = json.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut seen: HashSet<String> = exclude.clone();
     seen.insert(track.key.clone());
@@ -127,7 +123,9 @@ pub async fn related(track: &Track, exclude: &HashSet<String>, limit: usize, cac
         if e.get("id").and_then(Value::as_str) == Some(id.as_str()) {
             continue;
         }
-        let Some(v) = search::parse_entry(e, Platform::Ytmusic, i) else { continue };
+        let Some(v) = search::parse_entry(e, Platform::Ytmusic, i) else {
+            continue;
+        };
         // Skip long mixes/compilations.
         if v.duration.map(|d| d > 15.0 * 60.0).unwrap_or(false) {
             continue;
@@ -156,7 +154,9 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-static MIXES: Mutex<Option<HashMap<String, (Instant, Vec<Track>)>>> = Mutex::new(None);
+/// Seed key -> (fetched at, related songs).
+type MixCache = HashMap<String, (Instant, Vec<Track>)>;
+static MIXES: Mutex<Option<MixCache>> = Mutex::new(None);
 const MIX_TTL_SECS: u64 = 30 * 60;
 
 /// A seed's whole mix (cached), in YouTube Music's order.
@@ -314,8 +314,20 @@ mod rec_tests {
     fn t(title: &str, artist: &str) -> Track {
         crate::search::build_track(
             vec![TrackVersion {
-                platform: Platform::Ytmusic, url: format!("u/{title}"), id: String::new(), title: title.into(), artist: artist.into(),
-                duration: Some(200.0), thumbnail: None, preview: false, partial: false, artist_url: None, album: None, rank: 0, matched_for: None, isrc_match: false,
+                platform: Platform::Ytmusic,
+                url: format!("u/{title}"),
+                id: String::new(),
+                title: title.into(),
+                artist: artist.into(),
+                duration: Some(200.0),
+                thumbnail: None,
+                preview: false,
+                partial: false,
+                artist_url: None,
+                album: None,
+                rank: 0,
+                matched_for: None,
+                isrc_match: false,
             }],
             0.0,
         )
@@ -329,7 +341,10 @@ mod rec_tests {
         assert_eq!(seeds[0].title, "Song 19", "latest addition first");
         let artists: HashSet<String> = seeds.iter().map(|s| s.artist.clone()).collect();
         assert!(artists.len() >= 4, "seeds spread over artists: {artists:?}");
-        assert_ne!(pick_seeds(&list, 1, 5).iter().map(|s| s.key.clone()).collect::<Vec<_>>(), pick_seeds(&(0..40).map(|i| t(&format!("X{i}"), &format!("Art{i}"))).collect::<Vec<_>>(), 2, 5).iter().map(|s| s.key.clone()).collect::<Vec<_>>());
+        assert_ne!(
+            pick_seeds(&list, 1, 5).iter().map(|s| s.key.clone()).collect::<Vec<_>>(),
+            pick_seeds(&(0..40).map(|i| t(&format!("X{i}"), &format!("Art{i}"))).collect::<Vec<_>>(), 2, 5).iter().map(|s| s.key.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

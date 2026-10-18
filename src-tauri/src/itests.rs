@@ -99,9 +99,7 @@ fn serve(body: Arc<Vec<u8>>) -> u16 {
 
 /// Fake yt-dlp: answers by looking at its arguments.
 fn fake_ytdlp(dir: &std::path::Path, port: u16) -> PathBuf {
-    let entry = |id: &str, title: &str, chan: &str, dur: f64, url: &str| {
-        serde_json::json!({ "_type": "url", "id": id, "title": title, "channel": chan, "uploader": chan, "duration": dur, "url": url, "webpage_url": url })
-    };
+    let entry = |id: &str, title: &str, chan: &str, dur: f64, url: &str| serde_json::json!({ "_type": "url", "id": id, "title": title, "channel": chan, "uploader": chan, "duration": dur, "url": url, "webpage_url": url });
     let sc = serde_json::json!({ "title": "q", "entries": [
         { "_type": "url", "id": "1", "title": "One More Time", "uploader": "Daft Punk", "duration": 321.5, "webpage_url": "https://soundcloud.com/daftpunk/one-more-time", "url": "https://api.soundcloud.com/tracks/1" },
         { "_type": "url", "id": "2", "title": "Daft Punk - One More Time (Valmer Edit) [HZRX]", "uploader": "HOUZ", "duration": 313.0, "webpage_url": "https://soundcloud.com/houz/omt-edit", "url": "https://api.soundcloud.com/tracks/2" },
@@ -304,6 +302,7 @@ fn engine_gapless_and_crossfade() {
             EngineEvent::Advanced { token } => format!("advanced {token}"),
             EngineEvent::Ended { token } => format!("ended {token}"),
             EngineEvent::Error { token, error } => format!("error {token} {error}"),
+            EngineEvent::DeviceLost { token, .. } => format!("device lost {token}"),
         };
         let _ = tx.send(s);
     });
@@ -339,4 +338,104 @@ fn engine_gapless_and_crossfade() {
     let ev = rx.recv_timeout(Duration::from_secs(10)).unwrap();
     assert_eq!(ev, "ended 3");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Serves `files` by path; every response is delayed by `delay`, like a slow
+/// HLS server where each segment costs a round trip.
+fn serve_files(files: Arc<std::collections::HashMap<String, Vec<u8>>>, delay: Duration) -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for conn in l.incoming().flatten() {
+            let files = files.clone();
+            std::thread::spawn(move || {
+                let mut r = BufReader::new(conn.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = r.read_line(&mut first);
+                let mut line = String::new();
+                while r.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" {
+                    line.clear();
+                }
+                let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+                std::thread::sleep(delay);
+                let mut w = conn;
+                match files.get(&path) {
+                    Some(body) => {
+                        let head = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                        let _ = w.write_all(head.as_bytes());
+                        let _ = w.write_all(body);
+                    }
+                    None => {
+                        let _ = w.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+/// A WAV split into an HLS playlist: the header is the init segment, then
+/// one segment per second of audio.
+fn hls_files() -> (std::collections::HashMap<String, Vec<u8>>, Vec<u8>) {
+    let wav = tone_wav();
+    let mut files = std::collections::HashMap::new();
+    files.insert("/init.wav".to_string(), wav[..44].to_vec());
+    let mut m3u = String::from("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n#EXT-X-MAP:URI=\"init.wav\"\n");
+    for (i, seg) in wav[44..].chunks((RATE * 4) as usize).enumerate() {
+        files.insert(format!("/s{i}.bin"), seg.to_vec());
+        m3u.push_str(&format!("#EXTINF:1.000,\ns{i}.bin\n"));
+    }
+    m3u.push_str("#EXT-X-ENDLIST\n");
+    files.insert("/p.m3u8".to_string(), m3u.into_bytes());
+    (files, wav)
+}
+
+fn hls_info(port: u16) -> ytdlp::StreamInfo {
+    ytdlp::StreamInfo {
+        url: format!("http://127.0.0.1:{port}/p.m3u8"),
+        ext: Some("wav".into()),
+        acodec: None,
+        protocol: Some("m3u8_native".into()),
+        duration: Some(SECS as f64),
+        title: None,
+        artist: None,
+        thumbnail: None,
+        filesize: None,
+        headers: Default::default(),
+    }
+}
+
+/// Seeking near the end of an HLS song fetches that segment next instead of
+/// waiting for every segment before it; the saved file is still in order.
+#[test]
+fn hls_seek_ahead_jumps_the_queue() {
+    let (files, wav) = hls_files();
+    let delay = Duration::from_millis(250);
+    let port = serve_files(Arc::new(files), delay);
+    let opened = stream::open(&hls_info(port)).unwrap();
+    let idx = opened.hls.clone().unwrap();
+    assert!((idx.total_duration - SECS as f64).abs() < 0.01);
+
+    // Sequentially, segment 5 would arrive after 5 more round trips.
+    let t0 = std::time::Instant::now();
+    let (mut r, start) = idx.reader_at(&opened.shared, 5.5).unwrap();
+    assert_eq!(start, 5.0);
+    let mut got = Vec::new();
+    r.read_to_end(&mut got).unwrap();
+    let waited = t0.elapsed();
+    let mut want = wav[..44].to_vec();
+    want.extend_from_slice(&wav[44 + 5 * (RATE * 4) as usize..]);
+    assert!(got == want, "init + last segment, byte for byte");
+    assert!(waited < delay * 3, "seek ahead waited {waited:?}");
+
+    // It still decodes from there, and the whole song can be saved in order.
+    let (r, _) = idx.reader_at(&opened.shared, 2.2).unwrap();
+    let mut dec = AudioDecoder::new(r, Some("wav")).unwrap();
+    assert!(audible(&mut dec, 0.5).1 > 0);
+    opened.shared.wait_complete(Duration::from_secs(20)).unwrap();
+    let dest = std::env::temp_dir().join(format!("tunewire-hls-{}.wav", std::process::id()));
+    idx.write_ordered(&opened.shared, &dest).unwrap();
+    assert!(std::fs::read(&dest).unwrap() == wav, "saved file equals the source");
+    let _ = std::fs::remove_file(dest);
 }

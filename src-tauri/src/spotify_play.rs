@@ -113,19 +113,13 @@ fn oauth_blocking(scopes: &[&str]) -> AppResult<String> {
         .map(|(k, v)| format!("{k}={}", enc(v)))
         .collect::<Vec<_>>()
         .join("&");
-    let mut r = crate::http::agent()
-        .post("https://accounts.spotify.com/api/token")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .send(form)
-        .map_err(|e| AppError::Network(e.to_string()))?;
+    let mut r =
+        crate::http::agent().post("https://accounts.spotify.com/api/token").header("Content-Type", "application/x-www-form-urlencoded").send(form).map_err(|e| AppError::Network(e.to_string()))?;
     let status = r.status().as_u16();
     let v: serde_json::Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap_or_default()).unwrap_or_default();
     match v.get("access_token").and_then(|t| t.as_str()) {
         Some(t) if status == 200 => Ok(t.to_string()),
-        _ => Err(AppError::Unavailable(format!(
-            "Spotify sign-in failed: {}",
-            v.get("error_description").or_else(|| v.get("error")).and_then(|e| e.as_str()).unwrap_or("no token")
-        ))),
+        _ => Err(AppError::Unavailable(format!("Spotify sign-in failed: {}", v.get("error_description").or_else(|| v.get("error")).and_then(|e| e.as_str()).unwrap_or("no token")))),
     }
 }
 

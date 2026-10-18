@@ -46,7 +46,7 @@ async function enqueue(tracks, next = false) {
 
 async function toggleFavorite(track) {
   try {
-    const liked = await call('toggle_favorite', { track });
+    const liked = await callInOrder(`fav:${track.key}`, 'toggle_favorite', { track });
     toast(liked ? `Liked “${track.title}”` : `Removed “${track.title}” from favorites`, 'ok', 2000);
   } catch (e) {
     toast(errMsg(e), 'error');
@@ -92,7 +92,10 @@ function prefetchTrack(track) {
   const now = Date.now();
   if (now - (prefetched.get(track.key) || 0) < 10 * 60 * 1000) return;
   prefetched.set(track.key, now);
-  call('prefetch_track', { track, platform: null }).catch(() => {});
+  // Skipped (the backend was busy): the next hover may ask again.
+  call('prefetch_track', { track, platform: null })
+    .then((ran) => { if (ran === false) prefetched.delete(track.key); })
+    .catch(() => prefetched.delete(track.key));
 }
 
 function trackAlbum(track) {
@@ -530,6 +533,14 @@ function markPlaying() {
     if (!loading && sp) sp.remove();
   }
   markedRows = rows;
+}
+
+/** After rows were added: re-mark only if one of them is the playing/loading song. */
+function markPlayingIn(rows) {
+  const keys = [playingKey(), state.loadingKey].filter(Boolean);
+  if (!keys.length) return;
+  const sel = keys.map((k) => `.track[data-key="${CSS.escape(k)}"]`).join(',');
+  if (rows.some((r) => (r.matches?.(sel)) || r.querySelector?.(sel))) markPlaying();
 }
 
 async function copyText(text) {

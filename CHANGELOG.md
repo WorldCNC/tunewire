@@ -3,6 +3,36 @@
 Each release's section is used as its GitHub release notes and shown in the
 app's update and "What's new" dialogs. Keep entries short and user-facing.
 
+## Unreleased
+
+**Your library on all your devices**
+- Turn on Settings → Account → Sync my library: your playlists and Liked Songs (with their covers, folders and pins) show up on every computer you sign in to. The online copies are private.
+- Changes made offline go out when you're back, even after closing the app
+- Playlists you share or collaborate on now stay in sync between your own computers too
+- New: a quick tour of what an account adds (Listen Together, friends, your library everywhere), shown once if you're not signed in
+
+**Playback**
+- Seeking in SoundCloud songs no longer waits for everything before that point
+- After a seek, the old audio stops right away instead of playing on for a moment
+- The progress bar stays right when a seek fails
+- When headphones or a USB/Bluetooth device disappear, playback continues on the current output instead of sitting silent
+- Songs keep starting fast if yt-dlp's helper process crashes
+- YouTube songs start about a second sooner: Tunewire's own yt-dlp copy runs on Python when it's installed (Linux, macOS; switched automatically), and looking up a song skips loading its web page
+- Songs no longer break off on slow connections
+
+**Search and profiles**
+- Search suggestions now show songs, artists and albums with their pictures while you type; Enter plays a song (Ctrl+Enter adds it to the queue)
+- Set your own profile picture and banner, GIFs included. Your Discord picture and banner are only used when you join; after that they change only when you change them
+- Songs whose YouTube picture is gone show a clean placeholder instead of a gray box
+
+**Faster and sturdier**
+- Searching All no longer waits about 2 seconds extra when YouTube has nothing to show for a song
+- Searches with Spotify stay fast after the app sat idle for an hour
+- Listen Together, listening along and notifications catch up on anything they missed while the connection was down
+- Searching All shows its results within about 5 seconds even when one source is slow
+- Liking songs, editing playlists and starting songs no longer wait for the disk
+- Signed out, only names and pictures are visible: bios, pronouns and what you share need a signed-in account (share links still work)
+
 ## v2.0.1
 
 A big one: a new social side, a safer online service, a Mac version, and a smoother, sturdier app.

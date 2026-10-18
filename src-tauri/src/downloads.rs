@@ -31,10 +31,7 @@ fn semaphore() -> &'static Semaphore {
 
 /// Downloaded file for a track, if any version of it was saved and still exists.
 pub fn find<'a>(downloads: &'a [Download], track: &Track) -> Option<&'a Download> {
-    downloads
-        .iter()
-        .filter(|d| d.key == track.key || track.versions.iter().any(|v| v.url == d.version.url))
-        .find(|d| Path::new(&d.path).exists())
+    downloads.iter().filter(|d| d.key == track.key || track.versions.iter().any(|v| v.url == d.version.url)).find(|d| Path::new(&d.path).exists())
 }
 
 fn safe_name(s: &str) -> String {
@@ -62,7 +59,13 @@ pub async fn fetch(version: &TrackVersion, dir: &Path) -> AppResult<PathBuf> {
     tauri::async_runtime::spawn_blocking(move || {
         let opened = crate::stream::open(&info)?;
         let tmp = opened.shared.wait_complete(Duration::from_secs(30 * 60))?;
-        std::fs::copy(&tmp, &dest)?;
+        match &opened.hls {
+            // HLS segments may sit out of order in the buffer file.
+            Some(idx) => idx.write_ordered(&opened.shared, &dest)?,
+            None => {
+                std::fs::copy(&tmp, &dest)?;
+            }
+        }
         Ok(dest)
     })
     .await

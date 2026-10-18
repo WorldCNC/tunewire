@@ -113,7 +113,7 @@ select tests.act(:A);
 select tests.check(tests.count($$select 1 from notifications where kind = 'playlist_activity'$$) = 1, 'owner told once, not per edit');
 update playlists set title = 'Road trip 2026' where id = '11111111-1111-1111-1111-111111111111';
 select tests.check(tests.count($$select 1 from playlist_changes where op->'meta'->>'title' = 'Road trip 2026'$$) = 1, 'renames reach followers');
-select tests.check((select op->'meta' ? 'cover' from playlist_changes where op ? 'meta') = false, 'covers are not pushed in change rows');
+select tests.check((select op->'meta' ? 'cover' from playlist_changes where op ? 'meta' and op->'meta' ? 'title') = false, 'covers are not pushed in change rows');
 
 -- Link previews follow the same visibility.
 select tests.act(null);
@@ -325,4 +325,30 @@ insert into now_playing (track, playing, position, duration, online_at) values (
   on conflict (user_id) do update set position = 42, duration = 200, online_at = now();
 select tests.act(:B);
 select tests.check(tests.count('select 1 from now_playing where position = 42') = 1, 'followers see live position when sharing');
+reset role;
+
+-- Signed out, profiles show only their public fields ---------------------------------------
+select tests.act(null);
+select tests.fails($$select * from profiles$$, 'permission denied');
+select tests.fails($$select bio from profiles$$, 'permission denied');
+select tests.fails($$select share_activity, share_stats, share_wrapped from profiles$$, 'permission denied');
+select tests.fails($$select pronouns from profiles$$, 'permission denied');
+select tests.check((select name || coalesce(avatar, '') from profiles where id = '00000000-0000-0000-0000-00000000000a') = 'Alex', 'share pages read name and avatar');
+select tests.check(tests.count($$select id, name, avatar, banner, accent_color, decoration from profiles$$) = 4, 'public fields of everyone (friends lists embed them)');
+-- A shared playlist embeds its owner's name (PostgREST: playlists?select=title,profiles(name)).
+select tests.check((select pr.name from playlists p join profiles pr on pr.id = p.owner where p.id = '11111111-1111-1111-1111-111111111111') = 'Alex', 'shared playlists name their owner');
+select tests.check((select name from profile_preview('00000000-0000-0000-0000-00000000000a')) = 'Alex', 'a profile''s public fields');
+select tests.fails($$select share_activity from profile_preview('00000000-0000-0000-0000-00000000000a')$$, 'share_activity');
+select tests.check(tests.count($$select 1 from profile_preview('00000000-0000-0000-0000-0000000000ff')$$) = 0, 'unknown people: nothing');
+select tests.check((select owner_name from playlist_preview('11111111-1111-1111-1111-111111111111')) = 'Alex', 'previews still name the owner');
+select tests.check(tests.count('select 1 from now_playing') = 0, 'signed out: no activity (and no error)');
+select tests.check(tests.count('select 1 from wrapped') = 0, 'signed out: no Wrapped');
+select tests.check(tests.count('select 1 from profile_stats') = 0, 'signed out: no stats');
+select tests.fails($$select * from search_profiles('Al')$$);
+-- Signed in (guests too), profiles stay visible: lists embed them.
+select tests.act(:B);
+select tests.check(tests.count('select 1 from profiles') = 4, 'signed in: profiles visible');
+select tests.check(tests.count('select 1 from now_playing') = 1, 'sharing rules unchanged for followers');
+select tests.act(:G, true);
+select tests.check(tests.count($$select 1 from profiles where id = '00000000-0000-0000-0000-00000000000a'$$) = 1, 'guests see owner names');
 reset role;

@@ -91,7 +91,7 @@ pub struct AppState {
     pub consecutive_failures: AtomicU32,
     pub data_dir: PathBuf,
     /// Signature of the last full playback event (see `emit_tick`).
-    pub last_full: Mutex<String>,
+    pub last_full: AtomicU64,
     /// Bumped per search; stale background work compares against it.
     pub search_gen: AtomicU64,
     /// Debounces settings.json writes while the volume slider moves.
@@ -104,6 +104,8 @@ pub struct AppState {
 }
 
 /// The queue as saved in queue.json (restored paused at the next start).
+/// `current`/`position` there date from the last change to the songs; the
+/// newer ones are in queue-pos.json (see `SavedPosition`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedQueue {
@@ -112,32 +114,100 @@ pub struct SavedQueue {
     pub position: f64,
 }
 
+/// queue-pos.json: which entry was playing and where (a few bytes, saved
+/// every few seconds instead of the whole queue).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedPosition {
+    pub uid: Option<u64>,
+    pub position: f64,
+}
+
+impl SavedQueue {
+    /// Load queue.json plus the newer position (older versions: queue.json only).
+    pub fn load(dir: &std::path::Path) -> SavedQueue {
+        let mut q: SavedQueue = crate::store::load_json(&dir.join("queue.json"));
+        if let Ok(text) = std::fs::read_to_string(dir.join("queue-pos.json")) {
+            match serde_json::from_str::<SavedPosition>(&text) {
+                Ok(SavedPosition { uid: None, .. }) => {
+                    q.current = None;
+                    q.position = 0.0;
+                }
+                Ok(SavedPosition { uid: Some(uid), position }) => {
+                    if let Some(i) = q.items.iter().position(|i| i.uid == uid) {
+                        q.current = Some(i);
+                        q.position = position;
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        q
+    }
+}
+
+/// queue.json has changes not written yet.
+static QUEUE_DIRTY: AtomicBool = AtomicBool::new(false);
+static POSITION_SAVE_GEN: AtomicU64 = AtomicU64::new(0);
+
 impl AppState {
-    fn saved_queue(&self) -> SavedQueue {
-        let q = self.queue.lock().unwrap();
+    fn saved_position(&self, q: &QueueState) -> (Option<usize>, SavedPosition) {
         let active = self.now.lock().unwrap().phase == Phase::Active;
+        let uid = q.current.and_then(|i| q.items.get(i)).map(|i| i.uid);
         let position = if active {
             self.audio.status().position
         } else {
             // Not started since launch: keep the position we restored.
-            let uid = q.current.and_then(|i| q.items.get(i)).map(|i| i.uid);
             self.resume_position.lock().unwrap().filter(|(u, _)| Some(*u) == uid).map(|(_, p)| p).unwrap_or(0.0)
         };
-        SavedQueue { items: q.items.clone(), current: q.current, position }
+        (q.current.filter(|_| uid.is_some()), SavedPosition { uid, position })
     }
 
+    fn write_position(&self, pos: &SavedPosition) {
+        if let Ok(bytes) = serde_json::to_vec(pos) {
+            let _ = crate::store::write_replace(&self.data_dir.join("queue-pos.json"), &bytes);
+        }
+    }
+
+    /// The whole queue (songs changed) and the position.
     pub fn save_queue_now(&self) {
-        let data = self.saved_queue();
+        QUEUE_DIRTY.store(false, std::sync::atomic::Ordering::SeqCst);
+        let (data, pos) = {
+            let q = self.queue.lock().unwrap();
+            let (current, pos) = self.saved_position(&q);
+            (SavedQueue { items: q.items.clone(), current, position: pos.position }, pos)
+        };
         *self.queue_saved_at.lock().unwrap() = std::time::Instant::now();
         if let Ok(bytes) = serde_json::to_vec(&data) {
-            let _ = crate::store::write_atomic(&self.data_dir.join("queue.json"), &bytes);
+            let _ = crate::store::write_replace(&self.data_dir.join("queue.json"), &bytes);
         }
+        self.write_position(&pos);
+    }
+
+    /// Just which entry plays and where.
+    pub fn save_position_now(&self) {
+        let pos = self.saved_position(&self.queue.lock().unwrap()).1;
+        *self.queue_saved_at.lock().unwrap() = std::time::Instant::now();
+        self.write_position(&pos);
+    }
+
+    /// Everything pending, durably (the app is closing or restarting).
+    pub fn save_all_now(&self) {
+        if QUEUE_DIRTY.load(std::sync::atomic::Ordering::SeqCst) {
+            self.save_queue_now();
+        } else {
+            self.save_position_now();
+        }
+        self.store.flush();
     }
 }
 
 /// Write queue.json shortly after the last change (batches rapid edits).
 pub fn save_queue_soon(app: &AppHandle) {
-    let Some(st) = app.try_state::<AppState>() else { return };
+    let Some(st) = app.try_state::<AppState>() else {
+        return;
+    };
+    QUEUE_DIRTY.store(true, std::sync::atomic::Ordering::SeqCst);
     let gen = st.queue_save_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -146,6 +216,24 @@ pub fn save_queue_soon(app: &AppHandle) {
         if st.queue_save_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
             let st2 = app.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || st2.state::<AppState>().save_queue_now()).await;
+        }
+    });
+}
+
+/// Write queue-pos.json shortly (the playing entry or its position changed).
+pub fn save_position_soon(app: &AppHandle) {
+    let gen = POSITION_SAVE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        if POSITION_SAVE_GEN.load(std::sync::atomic::Ordering::SeqCst) == gen {
+            let st2 = app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                if let Some(st) = st2.try_state::<AppState>() {
+                    st.save_position_now();
+                }
+            })
+            .await;
         }
     });
 }
@@ -202,9 +290,7 @@ impl AppState {
         PlaybackState {
             status,
             position: if active { eng.position } else { 0.0 },
-            duration: if active { eng.duration } else { None }
-                .or(now.version.as_ref().and_then(|v| v.duration))
-                .or(now.item.as_ref().and_then(|i| i.track.duration)),
+            duration: if active { eng.duration } else { None }.or(now.version.as_ref().and_then(|v| v.duration)).or(now.item.as_ref().and_then(|i| i.track.duration)),
             buffered: if active { eng.buffered } else { None },
             stalled: active && eng.stalled,
             volume: settings.volume,
@@ -246,28 +332,21 @@ pub fn emit_playback(app: &AppHandle) {
     if let Some(st) = app.try_state::<AppState>() {
         let ps = st.playback_state();
         st.discord.update(presence(&ps));
-        *st.last_full.lock().unwrap() = signature(&ps);
+        st.last_full.store(signature(&ps), std::sync::atomic::Ordering::Relaxed);
         crate::media::update(app, &ps);
         let _ = app.emit("playback", ps);
     }
 }
 
-/// Everything except progress: if this is unchanged, a tick is enough.
-fn signature(ps: &PlaybackState) -> String {
-    format!(
-        "{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{:?}",
-        ps.shuffle,
-        ps.sleep_at.unwrap_or(1),
-        ps.status,
-        ps.current.as_ref().map(|c| c.uid),
-        ps.version.as_ref().map(|v| &v.url),
-        ps.message,
-        ps.index,
-        ps.repeat,
-        ps.volume,
-        ps.preloaded,
-        ps.duration.map(|d| d as i64)
-    )
+/// Everything except progress, hashed (no allocation 4 times a second):
+/// if this is unchanged, a tick is enough.
+fn signature(ps: &PlaybackState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (ps.shuffle, ps.sleep_at.unwrap_or(1), ps.status, ps.current.as_ref().map(|c| c.uid)).hash(&mut h);
+    (ps.version.as_ref().map(|v| &v.url), &ps.message, ps.index, &ps.repeat, ps.volume.to_bits()).hash(&mut h);
+    (ps.preloaded, ps.duration.map(|d| d as i64)).hash(&mut h);
+    h.finish()
 }
 
 #[derive(Clone, Serialize)]
@@ -282,23 +361,24 @@ struct Tick {
 /// Periodic progress update: a full event only when the state changed,
 /// otherwise just position/buffering (a few bytes instead of the whole track).
 pub fn emit_tick(app: &AppHandle) {
-    let Some(st) = app.try_state::<AppState>() else { return };
+    let Some(st) = app.try_state::<AppState>() else {
+        return;
+    };
     let ps = st.playback_state();
     crate::stats::on_tick(&ps);
     // Remember the position now and then, so a restart resumes close to it.
     if ps.status == "playing" && st.queue_saved_at.lock().unwrap().elapsed().as_secs() >= 10 {
         *st.queue_saved_at.lock().unwrap() = std::time::Instant::now();
-        save_queue_soon(app);
+        save_position_soon(app);
     }
     st.discord.update(presence(&ps));
-    if ps.status == "playing" {
+    let sig = signature(&ps);
+    let changed = st.last_full.load(std::sync::atomic::Ordering::Relaxed) != sig;
+    if changed || ps.status == "playing" {
         crate::media::update(app, &ps);
     }
-    let sig = signature(&ps);
-    let changed = *st.last_full.lock().unwrap() != sig;
     if changed {
-        *st.last_full.lock().unwrap() = sig;
-        crate::media::update(app, &ps);
+        st.last_full.store(sig, std::sync::atomic::Ordering::Relaxed);
         let _ = app.emit("playback", ps);
     } else {
         let _ = app.emit("playback-tick", Tick { status: ps.status, position: ps.position, duration: ps.duration, buffered: ps.buffered, stalled: ps.stalled });
@@ -325,10 +405,30 @@ fn presence(ps: &PlaybackState) -> Option<discord::Presence> {
     })
 }
 
+/// The songs in the queue changed (the whole list goes to the page).
 pub fn emit_queue(app: &AppHandle) {
     if let Some(st) = app.try_state::<AppState>() {
         let _ = app.emit("queue-changed", st.queue_snapshot());
         save_queue_soon(app);
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct QueueCurrent {
+    current: Option<usize>,
+    /// Queue uid at `current`: the page checks it against its own copy.
+    uid: Option<u64>,
+}
+
+/// Only the playing entry changed: a few bytes instead of the whole queue.
+pub fn emit_queue_current(app: &AppHandle) {
+    if let Some(st) = app.try_state::<AppState>() {
+        let ev = {
+            let q = st.queue.lock().unwrap();
+            QueueCurrent { current: q.current, uid: q.current.and_then(|i| q.items.get(i)).map(|i| i.uid) }
+        };
+        let _ = app.emit("queue-current", ev);
+        save_position_soon(app);
     }
 }
 

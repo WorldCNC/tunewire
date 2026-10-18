@@ -41,7 +41,7 @@ fn cache_dir() -> PathBuf {
     d
 }
 
-use crate::http::agent;
+use crate::http::stream_agent as agent;
 
 // ---------------------------------------------------------------------------
 // Shared buffer (file + downloaded ranges)
@@ -133,14 +133,7 @@ impl Shared {
         static N: AtomicU64 = AtomicU64::new(0);
         let path = cache_dir().join(format!("{}-{}.part", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let file = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path)?;
-        Ok(Arc::new(Shared {
-            state: Mutex::new(State::default()),
-            cond: Condvar::new(),
-            cancel: AtomicBool::new(false),
-            file: Mutex::new(file),
-            path,
-            temporary: true,
-        }))
+        Ok(Arc::new(Shared { state: Mutex::new(State::default()), cond: Condvar::new(), cancel: AtomicBool::new(false), file: Mutex::new(file), path, temporary: true }))
     }
 
     /// A finished local file.
@@ -149,14 +142,7 @@ impl Shared {
         let len = file.metadata()?.len();
         let mut st = State { total: Some(len), done: true, ..Default::default() };
         st.add(0, len);
-        Ok(Arc::new(Shared {
-            state: Mutex::new(st),
-            cond: Condvar::new(),
-            cancel: AtomicBool::new(false),
-            file: Mutex::new(file),
-            path: path.to_path_buf(),
-            temporary: false,
-        }))
+        Ok(Arc::new(Shared { state: Mutex::new(st), cond: Condvar::new(), cancel: AtomicBool::new(false), file: Mutex::new(file), path: path.to_path_buf(), temporary: false }))
     }
 
     fn write_at(&self, offset: u64, data: &[u8]) -> AppResult<()> {
@@ -253,6 +239,9 @@ pub struct StreamReader {
     /// (one network round trip each) before playback can start.
     probing: Arc<AtomicBool>,
     byte_len: Option<u64>,
+    /// HLS: the stream is `init + segments[first..]`, wherever each segment
+    /// landed in the file (they're downloaded in whatever order is needed).
+    hls: Option<(Arc<Mutex<HlsMap>>, usize)>,
 }
 
 impl StreamReader {
@@ -263,7 +252,65 @@ impl StreamReader {
 
     fn new(shared: Arc<Shared>, random_access: bool) -> StreamReader {
         let byte_len = shared.state.lock().unwrap().total;
-        StreamReader { shared, pos: 0, head: 0, jump: 0, random_access, seekable: byte_len.is_some(), byte_len, probing: Arc::new(AtomicBool::new(false)) }
+        StreamReader { shared, pos: 0, head: 0, jump: 0, random_access, seekable: byte_len.is_some(), byte_len, probing: Arc::new(AtomicBool::new(false)), hls: None }
+    }
+
+    /// HLS: physical range holding virtual offset `pos`, or `Ok(None)` at the end.
+    /// Waits (and asks the downloader for it) while the segment isn't there yet.
+    fn hls_locate(&self, map: &Mutex<HlsMap>, first: usize, pos: u64) -> io::Result<Option<(u64, u64)>> {
+        let mut st = self.shared.state.lock().unwrap();
+        loop {
+            {
+                let mut m = map.lock().unwrap();
+                if pos < m.init_len {
+                    return Ok(Some((pos, m.init_len)));
+                }
+                let mut off = m.init_len;
+                let mut missing = None;
+                for i in first..m.segs.len() {
+                    match m.segs[i] {
+                        Some((a, b)) => {
+                            if pos < off + (b - a) {
+                                return Ok(Some((a + (pos - off), b)));
+                            }
+                            off += b - a;
+                        }
+                        None => {
+                            missing = Some(i);
+                            break;
+                        }
+                    }
+                }
+                let Some(i) = missing else { return Ok(None) };
+                if m.want != Some(i) {
+                    m.want = Some(i);
+                    self.shared.cond.notify_all();
+                }
+            }
+            if st.done {
+                return match &st.error {
+                    Some(e) => Err(io::Error::other(e.clone())),
+                    None => Err(io::Error::other("segment not available")),
+                };
+            }
+            if self.shared.cancelled() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
+            }
+            st = self.shared.cond.wait_timeout(st, Duration::from_millis(200)).unwrap().0;
+        }
+    }
+
+    fn read_hls(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let (map, first) = self.hls.clone().unwrap();
+        let Some((phys, until)) = self.hls_locate(&map, first, self.pos)? else {
+            return Ok(0);
+        };
+        let n = (out.len() as u64).min(until - phys) as usize;
+        let mut f = self.shared.file.lock().unwrap();
+        f.seek(SeekFrom::Start(phys))?;
+        let got = f.read(&mut out[..n])?;
+        self.pos += got as u64;
+        Ok(got)
     }
 
     fn phys(&self, v: u64) -> u64 {
@@ -279,6 +326,9 @@ impl Read for StreamReader {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if out.is_empty() {
             return Ok(0);
+        }
+        if self.hls.is_some() {
+            return self.read_hls(out);
         }
         let phys = self.phys(self.pos);
         let mut st = self.shared.state.lock().unwrap();
@@ -367,37 +417,63 @@ pub struct OpenedStream {
     pub hls: Option<HlsIndex>,
 }
 
-/// Where each HLS media segment starts, in time and in the byte buffer.
+/// Where each HLS segment ended up in the file, and which one a reader waits for.
+pub struct HlsMap {
+    init_len: u64,
+    /// (start, end) in the file, once downloaded.
+    segs: Vec<Option<(u64, u64)>>,
+    /// Segment a reader is blocked on: downloaded next (seeking ahead).
+    want: Option<usize>,
+}
+
+/// Where each HLS media segment starts in time, and where it is on disk.
 #[derive(Clone)]
 pub struct HlsIndex {
-    init_len: u64,
     starts: Vec<f64>,
-    offsets: Arc<Mutex<Vec<Option<u64>>>>,
+    map: Arc<Mutex<HlsMap>>,
     pub total_duration: f64,
 }
 
 impl HlsIndex {
     /// A reader that presents `init + segments[k..]` where segment k contains
-    /// time `t`. Blocks until that segment has started downloading.
+    /// time `t`. Segment k is downloaded next if it isn't there yet, so a seek
+    /// far ahead doesn't wait for everything before it.
     pub fn reader_at(&self, shared: &Arc<Shared>, t: f64) -> AppResult<(StreamReader, f64)> {
         let k = self.starts.iter().rposition(|s| *s <= t).unwrap_or(0);
-        let mut st = shared.state.lock().unwrap();
-        let offset = loop {
-            if let Some(o) = self.offsets.lock().unwrap()[k] {
-                break o;
+        {
+            let mut m = self.map.lock().unwrap();
+            if m.segs[k].is_none() {
+                m.want = Some(k);
             }
-            if st.done || shared.cancelled() {
-                return Err(AppError::Extraction("segment not available".into()));
-            }
-            st = shared.cond.wait_timeout(st, Duration::from_millis(200)).unwrap().0;
-        };
-        drop(st);
+        }
+        shared.cond.notify_all();
+        Ok((self.reader_from(shared, k), self.starts[k]))
+    }
+
+    fn reader_from(&self, shared: &Arc<Shared>, k: usize) -> StreamReader {
         let mut reader = StreamReader::new(shared.clone(), false);
-        reader.head = self.init_len;
-        reader.jump = offset - self.init_len;
         reader.seekable = false;
         reader.byte_len = None;
-        Ok((reader, self.starts[k]))
+        reader.hls = Some((self.map.clone(), k));
+        reader
+    }
+
+    /// Write `init + every segment` in order (offline downloads).
+    pub fn write_ordered(&self, shared: &Shared, dest: &Path) -> AppResult<()> {
+        let m = self.map.lock().unwrap();
+        let mut ranges = vec![(0, m.init_len)];
+        for s in &m.segs {
+            ranges.push(s.ok_or_else(|| AppError::Network("stream ended early".into()))?);
+        }
+        drop(m);
+        let mut out = File::create(dest)?;
+        let mut f = shared.file.lock().unwrap();
+        for (a, b) in ranges {
+            f.seek(SeekFrom::Start(a))?;
+            io::copy(&mut (&mut *f).take(b - a), &mut out)?;
+        }
+        out.sync_all()?;
+        Ok(())
     }
 }
 
@@ -476,7 +552,42 @@ pub fn open_source<R: Read + Seek + Send + 'static>(mut src: R, base: u64, total
 // HTTP
 // ---------------------------------------------------------------------------
 
+/// Whether `url` points into this computer or the local network (by name or
+/// address). Stream URLs come from sites (via yt-dlp); none of them has a
+/// reason to make Tunewire fetch from the user's router or localhost.
+fn is_local_address(url: &str) -> bool {
+    use std::net::IpAddr;
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.split(':').next().unwrap_or(""),
+    }
+    .trim_end_matches('.')
+    .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") || host.is_empty() {
+        return true;
+    }
+    let v4_local = |v4: std::net::Ipv4Addr| {
+        let o = v4.octets();
+        v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast() || (o[0] == 100 && (64..128).contains(&o[1]))
+    };
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => v4_local(v4),
+        Ok(IpAddr::V6(v6)) => {
+            let seg = v6.segments();
+            v6.is_loopback() || v6.is_unspecified() || (seg[0] & 0xfe00) == 0xfc00 || (seg[0] & 0xffc0) == 0xfe80 || v6.to_ipv4_mapped().is_some_and(v4_local)
+        }
+        Err(_) => false,
+    }
+}
+
 fn request(url: &str, headers: &HashMap<String, String>, range: Option<(u64, u64)>) -> AppResult<ureq::http::Response<ureq::Body>> {
+    // Offline tests serve their streams from 127.0.0.1.
+    if !cfg!(test) && is_local_address(url) {
+        return Err(AppError::Unavailable("stream points to a local network address".into()));
+    }
     let mut req = agent().get(url);
     for (k, v) in headers {
         if k.eq_ignore_ascii_case("accept-encoding") {
@@ -563,10 +674,7 @@ fn check_content_type(resp: &ureq::http::Response<ureq::Body>) -> AppResult<()> 
 fn total_from_headers(resp: &ureq::http::Response<ureq::Body>) -> Option<u64> {
     let h = resp.headers();
     if resp.status().as_u16() == 206 {
-        h.get("content-range")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.rsplit('/').next())
-            .and_then(|s| s.trim().parse().ok())
+        h.get("content-range").and_then(|v| v.to_str().ok()).and_then(|s| s.rsplit('/').next()).and_then(|s| s.trim().parse().ok())
     } else {
         h.get("content-length").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok())
     }
@@ -625,10 +733,14 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
     }
 
     let total = total.unwrap();
-    write_body(first, &shared, 0, false)?;
     let s2 = shared.clone();
     std::thread::spawn(move || {
         let result = (|| -> AppResult<()> {
+            // The first chunk is already on its way; if it breaks off, the
+            // rest of it is fetched below like any other gap.
+            if let Err(AppError::Cancelled) = write_body(first, &s2, 0, false) {
+                return Err(AppError::Cancelled);
+            }
             let mut cursor = 0u64;
             let mut chunk = CHUNK;
             loop {
@@ -658,9 +770,14 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
                     let next_have = st.ranges.iter().map(|r| r.0).filter(|s| *s > start).min().unwrap_or(total);
                     (start + chunk).min(next_have).min(total) - 1
                 };
+                // A retry continues after the bytes that already arrived.
                 let got = with_retry(Some(&s2), || {
-                    let resp = request(&url, &headers, Some((start, end)))?;
-                    write_body(resp, &s2, start, true)
+                    let from = s2.state.lock().unwrap().available_until(start).unwrap_or(start);
+                    if from > end {
+                        return Ok(from - start);
+                    }
+                    let resp = request(&url, &headers, Some((from, end)))?;
+                    Ok(from - start + write_body(resp, &s2, from, true)?)
                 });
                 match got {
                     Ok(n) => {
@@ -675,6 +792,11 @@ pub fn open_progressive(url: &str, headers: &HashMap<String, String>, filesize: 
         s2.finish(result.err().filter(|e| !matches!(e, AppError::Cancelled)).map(|e| e.to_string()));
     });
 
+    // Give the decoder something to probe (the download continues meanwhile).
+    wait_for(&shared, (64 * 1024).min(total));
+    if let Some(e) = shared.error() {
+        return Err(AppError::Network(e));
+    }
     let reader = StreamReader::new(shared.clone(), true);
     Ok(OpenedStream { reader, shared, hint, hls: None })
 }
@@ -715,11 +837,7 @@ fn attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 fn fetch_text(url: &str, headers: &HashMap<String, String>) -> AppResult<String> {
     with_retry(None, || {
         let mut resp = request(url, headers, None)?;
-        resp.body_mut()
-            .with_config()
-            .limit(4 * 1024 * 1024)
-            .read_to_string()
-            .map_err(|e| AppError::Network(e.to_string()))
+        resp.body_mut().with_config().limit(4 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))
     })
 }
 
@@ -793,40 +911,50 @@ fn open_hls(info: &StreamInfo) -> AppResult<OpenedStream> {
         fetch_segment(&shared, i, &headers)?;
     }
     let init_len = shared.state.lock().unwrap().seq_len();
-    let offsets = Arc::new(Mutex::new(vec![None; segments.len()]));
-    offsets.lock().unwrap()[0] = Some(init_len);
-    fetch_segment(&shared, &segments[0], &headers)?;
+    let first_end = init_len + fetch_segment(&shared, &segments[0], &headers)?;
+    let mut segs = vec![None; segments.len()];
+    segs[0] = Some((init_len, first_end));
+    let map = Arc::new(Mutex::new(HlsMap { init_len, segs, want: None }));
 
     let s2 = shared.clone();
-    let rest: Vec<String> = segments[1..].to_vec();
-    let offs = offsets.clone();
+    let m2 = map.clone();
     std::thread::spawn(move || {
         let mut err = None;
-        for (i, seg) in rest.into_iter().enumerate() {
+        let mut cursor = 1;
+        loop {
             if s2.cancelled() {
                 break;
             }
+            let next = {
+                let mut m = m2.lock().unwrap();
+                let wanted = m.want.take().filter(|&w| m.segs[w].is_none());
+                let n = m.segs.len();
+                wanted.or_else(|| (cursor..n).chain(0..cursor).find(|&i| m.segs[i].is_none()))
+            };
+            let Some(i) = next else { break };
             let start = s2.state.lock().unwrap().seq_len();
-            offs.lock().unwrap()[i + 1] = Some(start);
-            s2.cond.notify_all();
-            if let Err(e) = fetch_segment(&s2, &seg, &headers) {
-                if !matches!(e, AppError::Cancelled) {
-                    err = Some(e.to_string());
+            match fetch_segment(&s2, &segments[i], &headers) {
+                Ok(len) => {
+                    // Published under the state lock: a waiting reader can't miss it.
+                    let _st = s2.state.lock().unwrap();
+                    m2.lock().unwrap().segs[i] = Some((start, start + len));
+                    drop(_st);
+                    s2.cond.notify_all();
+                    cursor = i + 1;
                 }
-                break;
+                Err(e) => {
+                    if !matches!(e, AppError::Cancelled) {
+                        err = Some(e.to_string());
+                    }
+                    break;
+                }
             }
         }
         s2.finish(err);
     });
 
-    let mut reader = StreamReader::new(shared.clone(), false);
-    reader.seekable = false;
-    Ok(OpenedStream {
-        reader,
-        shared,
-        hint: info.ext.clone().or(Some("mp4".into())),
-        hls: Some(HlsIndex { init_len, starts, offsets, total_duration: t }),
-    })
+    let index = HlsIndex { starts, map, total_duration: t };
+    Ok(OpenedStream { reader: index.reader_from(&shared, 0), shared, hint: info.ext.clone().or(Some("mp4".into())), hls: Some(index) })
 }
 
 #[cfg(test)]
@@ -838,6 +966,28 @@ mod tests {
         assert_eq!(resolve("https://a.com/x/y/p.m3u8?t=1", "s1.m4s"), "https://a.com/x/y/s1.m4s");
         assert_eq!(resolve("https://a.com/x/y/p.m3u8", "/z/s1.m4s"), "https://a.com/z/s1.m4s");
         assert_eq!(resolve("https://a.com/p.m3u8", "https://b.com/s"), "https://b.com/s");
+    }
+
+    #[test]
+    fn local_addresses_are_refused() {
+        for u in [
+            "http://127.0.0.1:8080/x",
+            "https://localhost/a",
+            "http://192.168.1.1/",
+            "http://10.0.0.5",
+            "http://[::1]:80/",
+            "http://[fe80::1]/",
+            "http://[::ffff:192.168.0.1]/",
+            "https://user@172.16.0.1/x",
+            "http://100.64.1.1/",
+            "http://printer.local/",
+            "http://0.0.0.0/",
+        ] {
+            assert!(is_local_address(u), "{u}");
+        }
+        for u in ["https://rr3---sn-x.googlevideo.com/videoplayback?x=1", "https://cf-hls-media.sndcdn.com/a.m4s", "https://8.8.8.8/", "https://[2001:db8::1]/", "https://172.32.0.1/"] {
+            assert!(!is_local_address(u), "{u}");
+        }
     }
 
     #[test]

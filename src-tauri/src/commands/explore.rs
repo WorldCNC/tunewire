@@ -24,6 +24,20 @@ pub async fn search_suggestions(query: String) -> AppResult<Vec<String>> {
     explore::suggestions(query).await
 }
 
+/// The search box while typing: suggestions plus songs, artists and albums
+/// with pictures (YouTube Music); just the text suggestions if that fails.
+#[tauri::command]
+pub async fn search_preview(query: String) -> AppResult<crate::ytm::Suggestions> {
+    let q = query.trim().to_string();
+    if q.is_empty() || q.len() > 200 {
+        return Ok(Default::default());
+    }
+    match crate::ytm::suggestions(&q).await {
+        Ok(s) if !s.queries.is_empty() || !s.items.is_empty() => Ok(s),
+        _ => Ok(crate::ytm::Suggestions { queries: explore::suggestions(q).await?, items: Vec::new() }),
+    }
+}
+
 #[tauri::command]
 pub fn search_history(st: State<'_, AppState>) -> Vec<String> {
     st.store.settings().search_history
@@ -252,10 +266,8 @@ pub async fn background_image_data(path: String) -> AppResult<String> {
         Some("gif") => "image/gif",
         _ => return Err(AppError::Invalid("pick a JPG, PNG, WebP or GIF image".into())),
     };
-    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(&path))
-        .await
-        .map_err(|e| AppError::Storage(e.to_string()))?
-        .map_err(|e| AppError::NotFound(format!("background image: {e}")))?;
+    let bytes =
+        tauri::async_runtime::spawn_blocking(move || std::fs::read(&path)).await.map_err(|e| AppError::Storage(e.to_string()))?.map_err(|e| AppError::NotFound(format!("background image: {e}")))?;
     if bytes.len() > 20 * 1024 * 1024 {
         return Err(AppError::Invalid("that image is over 20 MB".into()));
     }

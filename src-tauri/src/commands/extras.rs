@@ -74,7 +74,7 @@ pub fn list_snapshots(st: State<'_, AppState>) -> Vec<Snapshot> {
                 .collect()
         })
         .unwrap_or_default();
-    v.sort_by(|a, b| b.modified.cmp(&a.modified));
+    v.sort_by_key(|x| std::cmp::Reverse(x.modified));
     v
 }
 
@@ -100,8 +100,8 @@ pub fn restore_playlist(app: AppHandle, st: State<'_, AppState>, playlist: Playl
 pub fn restore_history(app: AppHandle, st: State<'_, AppState>, entries: Vec<HistoryEntry>) -> AppResult<()> {
     st.store.update_history(|h| {
         let mut merged = entries;
-        merged.extend(h.drain(..));
-        merged.sort_by(|a, b| b.played_at.cmp(&a.played_at));
+        merged.append(h);
+        merged.sort_by_key(|x| std::cmp::Reverse(x.played_at));
         merged.truncate(crate::store::HISTORY_MAX);
         *h = merged;
         Ok(())

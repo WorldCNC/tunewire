@@ -141,9 +141,7 @@ pub async fn ytdlp_install(app: AppHandle, st: State<'_, AppState>) -> AppResult
     crate::ytdlp_worker::reset().await;
     let dir = st.data_dir.join("bin");
     emit_status(&app, "info", "Downloading yt-dlp…");
-    tauri::async_runtime::spawn_blocking(move || ytdlp::install_bundled(&dir))
-        .await
-        .map_err(|e| AppError::Network(e.to_string()))??;
+    tauri::async_runtime::spawn_blocking(move || ytdlp::install_bundled(&dir)).await.map_err(|e| AppError::Network(e.to_string()))??;
     let s = st.store.update_settings(|s| s.ytdlp_source = "bundled".into())?;
     apply_settings(&st, &s);
     Ok(ytdlp::health_check().await)

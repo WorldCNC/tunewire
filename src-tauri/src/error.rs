@@ -39,6 +39,9 @@ pub enum AppError {
     Invalid(String),
     #[error("Storage error: {0}")]
     Storage(String),
+    /// The data changed since the caller looked (sync retries with fresh data).
+    #[error("Changed meanwhile: {0}")]
+    Conflict(String),
     #[error("Cancelled")]
     Cancelled,
 }
@@ -80,11 +83,7 @@ pub fn classify_ytdlp_stderr(stderr: &str) -> AppError {
         .collect::<String>();
     if s.contains("drm") {
         AppError::Drm(last)
-    } else if s.contains("available in your country")
-        || s.contains("geo restrict")
-        || s.contains("geo-restrict")
-        || s.contains("not available from your location")
-    {
+    } else if s.contains("available in your country") || s.contains("geo restrict") || s.contains("geo-restrict") || s.contains("not available from your location") {
         AppError::RegionLocked
     } else if s.contains("unsupported url") {
         AppError::Unsupported(last)

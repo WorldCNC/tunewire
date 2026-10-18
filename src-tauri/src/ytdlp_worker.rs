@@ -2,11 +2,13 @@
 //!
 //! Starting yt-dlp costs ~0.3 s of Python startup and imports per song, and
 //! every run opens fresh connections to YouTube. When the configured yt-dlp is
-//! a Python script or zipapp (Linux/macOS installs, the bundled Linux copy),
+//! a Python script or zipapp (pip/package-manager installs, and the bundled
+//! copy on Linux/macOS when Python 3.10+ is there: see `ytdlp::install_bundled`),
 //! this module runs one Python process that imports yt_dlp once and serves
 //! extraction requests over stdin/stdout (JSON lines), which makes resolving a
-//! song ~0.5 s faster. Anything else (e.g. the Windows .exe) keeps using one
-//! process per call; so does every error path here.
+//! song ~0.8 s faster. Standalone executables (the Windows .exe, the bundled
+//! copy without Python) keep using one process per call; so does every error
+//! path here.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -151,8 +153,12 @@ async fn start(binary: &str) -> Option<Worker> {
     *PENDING.lock().unwrap() = Some(HashMap::new());
     tauri::async_runtime::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-            let Some(id) = v.get("id").and_then(Value::as_u64) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(id) = v.get("id").and_then(Value::as_u64) else {
+                continue;
+            };
             let tx = PENDING.lock().unwrap().as_mut().and_then(|p| p.remove(&id));
             if let Some(tx) = tx {
                 let r = match (v.get("ok"), v.get("err").and_then(Value::as_str)) {
@@ -190,6 +196,12 @@ pub async fn warm(binary: String) {
     }
 }
 
+/// Whether the worker runs for this binary (starting it if needed).
+pub async fn available(binary: &str) -> bool {
+    warm(binary.to_string()).await;
+    !DISABLED.load(Ordering::SeqCst)
+}
+
 /// `extract_info(url)` with yt-dlp Python options in the long-lived worker.
 /// `Ok(None)` = worker not available here; use the command line instead.
 pub async fn extract(binary: &str, url: &str, opts: Value) -> AppResult<Option<Value>> {
@@ -209,8 +221,13 @@ pub async fn extract(binary: &str, url: &str, opts: Value) -> AppResult<Option<V
                 }
             }
         }
-        let Some(p) = PENDING.lock().unwrap().as_mut().map(|p| p.insert(id, tx)) else { return Ok(None) };
-        let _ = p;
+        let registered = PENDING.lock().unwrap().as_mut().map(|p| p.insert(id, tx)).is_some();
+        if !registered {
+            // The worker exited while someone held this lock, so its reader
+            // couldn't clear the slot: drop it, and the next call starts a new one.
+            *guard = None;
+            return Ok(None);
+        }
         let line = serde_json::json!({ "id": id, "url": url, "opts": opts }).to_string() + "\n";
         let w = guard.as_mut().unwrap();
         if w.stdin.write_all(line.as_bytes()).await.is_err() || w.stdin.flush().await.is_err() {

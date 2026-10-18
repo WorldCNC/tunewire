@@ -120,13 +120,14 @@ Results are normalized:
 
 Matching is fuzzy: token Jaccard combined with normalized Levenshtein on titles, artist token overlap, and a ±7 s / 4 % duration check. Variant markers (remix, edit, acoustic, sped up, …) must agree, so "Song" and "Song (Remix)" never merge. Same-platform duplicates are collapsed so each song appears once per platform (a 30 s SoundCloud Go+ preview loses to a full upload). Matches across platforms become one logical track with several versions. Ranking combines query relevance, rank inside each platform, your platform preference, and how many platforms have the song. Raw per-platform results are cached in memory for 5 minutes, so switching between All and a single source, or re-ranking, doesn't spawn yt-dlp again.
 
-**Playback.** `yt-dlp -j -f <audio format> --no-playlist URL` is the `-g -f bestaudio` lookup, but it also returns the format's HTTP headers, codec and duration. Formats are chosen AAC/MP3 first because symphonia has no Opus decoder; YouTube always offers m4a. The URL is validated, then streamed into memory in 512 KB ranged chunks, or segment by segment for SoundCloud's HLS. Playback starts after the first chunk; nothing is written to disk.
+**Playback.** The stream is resolved first: SoundCloud through its own API, everything else through `yt-dlp` (a long-lived yt-dlp process where possible, so a song doesn't pay for Python's startup). Formats are chosen AAC/MP3 first (cheap, precise seeking), then Opus/WebM (decoded with libopus). The URL is checked (http(s) only, never this computer or the local network), then downloaded into a temporary file in ranged chunks that grow from 512 KB to 4 MB, or segment by segment for SoundCloud's HLS. Playback starts after the first chunk. The temporary files are deleted when a song is done and at startup.
 
 Seeking:
-- **Progressive streams:** symphonia seeks directly.
-- **HLS:** the decoder is rebuilt at the right segment (the `#EXTINF` timings are known), then trimmed to the exact position.
+- **Progressive streams:** symphonia seeks directly; a position that hasn't downloaded yet is fetched next with a range request.
+- **HLS:** the decoder is rebuilt at the right segment (the `#EXTINF` timings are known), which is downloaded next if it isn't there yet, then trimmed to the exact position.
+- Audio buffered before the seek is dropped at once, so the old position never plays on.
 
-The decoder runs on its own thread and feeds a bounded channel. The rodio source only polls that channel, so a slow network gives a "Buffering…" indicator and silence, not a frozen audio device.
+The decoder runs on its own thread and feeds a bounded channel. The rodio source only polls that channel, so a slow network gives a "Buffering…" indicator and silence, not a frozen audio device. If the output device disappears (headphones unplugged, Bluetooth gone), playback continues on the current default output.
 
 **Version choice and fallback.** Clicking a song that has several versions opens the version picker, with the highest-priority platform preselected. Double-click (or the ▶ button) plays the default right away, and the platform badges play that specific version. If extraction fails, the next platform in your order is tried. If every version fails, Tunewire searches for an equivalent upload as a last resort.
 
@@ -169,8 +170,11 @@ Optional, built on Supabase. Audio never touches the server, only song info (tit
 
 - **Accounts are Discord only.** There are no guest accounts; the database refuses writes from anonymous sessions too.
 - **Sharing.** Song links carry the song in the link. Playlist, profile and session links open the landing page (or a link-preview server, below). Links that change something (join a collaborative playlist or a session, play a song) ask first.
-- **Collaborative playlists.** Invite codes are readable only by the owner (through `playlist_invite()`) and can be reset. Edits are sent as small operations, one at a time and in order; other people's edits arrive as numbered change rows (`playlist_changes`), and a gap means the playlist is fetched again. Each shared playlist shows its sync status, who's editing, and a Retry when something didn't sync.
+- **Library sync.** With Settings → Account → "Sync my library", every playlist and Liked Songs has a private online copy (only you can read it), so each device you sign in to has the same library: songs, names, descriptions, covers, folders and pins. It's off until you turn it on. Turning it off on one computer stops syncing there; your other devices keep their copies.
+- **How syncing works** (`src/js/sync.js`, `syncops.js`). For each linked playlist, `sync.json` keeps the songs and details as they were at the last sync. What changed here (local vs that) goes out as small operations (`playlist_op`: add, remove, move, order); whether anything changed elsewhere comes from the version number. When both sides changed, the server's copy, which already holds ours, is taken. Since the last-sync state and the library are both on disk, edits made offline still go out after a restart. Every change carries the device's id: a device skips only its own changes, not your other devices'. Deletes are tombstones (`deleted_at`) so other devices learn about them; if many playlists vanish locally at once, nothing is deleted online without asking.
+- **Collaborative playlists.** Invite codes are readable only by the owner (through `playlist_invite()`) and can be reset. Edits go out the same way and arrive as numbered change rows (`playlist_changes`); a gap means the playlist is fetched again. Each shared playlist shows its sync status, who's editing, and a Retry when something didn't sync.
 - **Listen Together.** A session is a `jams` row only the host can change; members are checked by the server; the host can hand over, remove people and approve suggested songs. Guests chat, suggest songs and vote to skip. Positions line up with the server's clock. A "room" keeps the same link every time.
+- **Profiles.** A picture and banner of your own (PNG, JPEG, WebP or animated GIF, up to 8 MB) in the public `profile-media` Storage bucket, each person only in their own folder. A new account starts with its Discord picture and banner; signing in again never changes them.
 - **Friends.** Following needs approval. What you play and your Wrapped are only visible to approved followers, and sharing what you play is off until you turn it on. Notifications cover follow requests, accepted follows, playlist activity and friends' sessions.
 
 **Setting up a project**
@@ -180,12 +184,12 @@ Optional, built on Supabase. Audio never touches the server, only song info (tit
 4. Link previews (optional): Supabase serves function HTML as plain text on `*.supabase.co`, so deploy `supabase/functions/share` on a custom domain (or any Deno host) with `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SHARE_PUBLIC_URL`, and build the app with `TUNEWIRE_SHARE_URL` set to the same address. Without it, share links go to the landing page.
 5. Build with `TUNEWIRE_SUPABASE_URL` and `TUNEWIRE_SUPABASE_ANON_KEY` (CI secrets).
 
-**Tests:** `scripts/test-db.sh` applies every migration to a throwaway Postgres (Docker) and runs the row level security tests in `supabase/tests`. `deno test supabase/functions` tests the Edge Functions.
+**Tests:** `scripts/test-db.sh` applies every migration to a throwaway Postgres (Docker) and runs the row level security tests in `supabase/tests`. `deno test supabase/functions` tests the Edge Functions. `deno test --allow-read scripts/syncops_test.ts` checks the sync operations against a copy of the server's logic, and `scripts/test-sync.sh` runs library sync end to end: two devices on one account against a local Supabase (needs the Supabase CLI).
 
 ## Privacy
 
 - Error reports are **off** until you agree (a question on first start; Settings → Privacy). Reports contain the app version, operating system and the error, with folder names and stream links removed.
-- Your library stays on your computer. An account is only used for the online features above.
+- Your library stays on your computer unless you turn on library sync (private copies only you can read). An account is only used for the online features above.
 
 ## Keyboard shortcuts
 
@@ -213,7 +217,7 @@ All data lives in the Tauri app data dir for `app.tunewire.player`:
 - macOS: `~/Library/Application Support/app.tunewire.player/`
 - Windows: `%APPDATA%\app.tunewire.player\`
 
-Contents: `settings.json`, `library.json` (playlists, favorites, followed artists), `history.json`, `downloads.json`, `plays.jsonl` (listening log), `scrobbles.json` (waiting scrobbles), `backups/` (daily snapshots, pre-restore copies), `themes/`, `plugins/`. Window size and position are saved by `tauri-plugin-window-state`. Volume, last source, theme, platform order and plugin state are saved in `settings.json`.
+Contents: `settings.json`, `library.json` (playlists, favorites, followed artists), `history.json`, `downloads.json`, `plays.jsonl` (listening log), `scrobbles.json` (waiting scrobbles), `backups/` (daily snapshots, pre-restore copies), `sync.json` (each synced playlist as of its last sync, and this device's id), `themes/`, `plugins/`. Window size and position are saved by `tauri-plugin-window-state`. Volume, last source, theme, platform order and plugin state are saved in `settings.json`.
 
 ## Themes
 
@@ -309,5 +313,5 @@ Events: `playback` (about 4 Hz while playing), `queue-changed`, `track-started`,
 
 - **Spotify:** without Premium, playback is a matched upload, and a match can occasionally be wrong. With Premium (Settings → Spotify) Spotify's own audio plays through librespot, an unofficial client; Spotify's terms don't allow third-party clients, so use it knowing that. Search uses unofficial web endpoints that Spotify may change.
 - **YouTube Music search:** yt-dlp's flat results carry no artist or duration. They're borrowed from YouTube results when the same video appears there; otherwise the artist is inferred from your query words.
-- **Seeking ahead:** seeking past what has downloaded waits for the download to reach that point. Downloads usually finish within seconds.
+- **Seeking ahead:** seeking past what has downloaded fetches that part first (a range request, or that HLS segment), so it takes one round trip to the server.
 - **macOS:** the app isn't signed or notarized by Apple, so the first launch needs right-click → Open.

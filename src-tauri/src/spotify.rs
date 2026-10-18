@@ -37,19 +37,12 @@ fn fetch_embed(kind: &str, id: &str) -> AppResult<Value> {
     if !resp.status().is_success() {
         return Err(AppError::Unavailable(format!("Spotify returned HTTP {}", resp.status().as_u16())));
     }
-    let html = resp
-        .body_mut()
-        .with_config()
-        .limit(8 * 1024 * 1024)
-        .read_to_string()
-        .map_err(|e| AppError::Network(e.to_string()))?;
+    let html = resp.body_mut().with_config().limit(8 * 1024 * 1024).read_to_string().map_err(|e| AppError::Network(e.to_string()))?;
     let marker = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
     let start = html.find(marker).ok_or_else(|| AppError::Extraction("Spotify page format changed".into()))? + marker.len();
     let end = html[start..].find("</script>").ok_or_else(|| AppError::Extraction("Spotify page format changed".into()))? + start;
     let data: Value = serde_json::from_str(&html[start..end])?;
-    data.pointer("/props/pageProps/state/data/entity")
-        .cloned()
-        .ok_or_else(|| AppError::Unavailable("Spotify returned no data (private or region-locked?)".into()))
+    data.pointer("/props/pageProps/state/data/entity").cloned().ok_or_else(|| AppError::Unavailable("Spotify returned no data (private or region-locked?)".into()))
 }
 
 fn version(title: &str, artist: &str, duration_ms: Option<f64>, uri: &str, thumb: Option<String>) -> TrackVersion {
@@ -95,18 +88,12 @@ pub async fn load(url: &str) -> AppResult<RemotePlaylist> {
         }
     }
     let (k2, i2) = (kind.clone(), id.clone());
-    let entity = tauri::async_runtime::spawn_blocking(move || fetch_embed(&k2, &i2))
-        .await
-        .map_err(|e| AppError::Network(e.to_string()))??;
+    let entity = tauri::async_runtime::spawn_blocking(move || fetch_embed(&k2, &i2)).await.map_err(|e| AppError::Network(e.to_string()))??;
 
     let name = entity.get("name").or_else(|| entity.get("title")).and_then(Value::as_str).unwrap_or("Spotify").to_string();
     let thumb = cover(&entity);
     let tracks: Vec<Track> = if kind == "track" {
-        let artist = entity
-            .get("artists")
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|x| x.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join(", "))
-            .unwrap_or_default();
+        let artist = entity.get("artists").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join(", ")).unwrap_or_default();
         let dur = entity.get("duration").and_then(Value::as_f64);
         let uri = entity.get("uri").and_then(Value::as_str).unwrap_or("");
         vec![build_track(vec![version(&name, &artist, dur, uri, thumb.clone())], 0.0)]
@@ -175,9 +162,23 @@ fn get_text(url: &str) -> AppResult<String> {
 }
 
 /// Anonymous access token embedded in any embed page (cached until expiry).
-/// Fetch the anonymous token ahead of the first search.
+/// Fetch the anonymous token ahead of the first search, and keep renewing it
+/// a few minutes before it expires (it lasts ~50 min): a search never waits
+/// for it, even after the app sat idle.
 pub fn warm() {
     let _ = token(false);
+    static RENEWING: std::sync::Once = std::sync::Once::new();
+    RENEWING.call_once(|| {
+        let _ = std::thread::Builder::new().name("spotify-token".into()).spawn(|| loop {
+            let exp = TOKEN.lock().unwrap().as_ref().map(|(_, exp)| *exp);
+            let wait = match exp {
+                Some(exp) => exp.saturating_sub(now_ms() + 5 * 60_000).max(60_000),
+                None => 5 * 60_000, // failed (offline?): try again later
+            };
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+            let _ = token(true);
+        });
+    });
 }
 
 fn token(force: bool) -> AppResult<String> {
@@ -278,12 +279,10 @@ fn parse_tracks(v: &Value) -> Vec<TrackVersion> {
                 .unwrap_or_default();
             let album = t.pointer("/albumOfTrack/name").and_then(Value::as_str).map(str::to_string);
             // ~300 px cover (good for rows and Discord).
-            let thumbnail = t.pointer("/albumOfTrack/coverArt/sources").and_then(Value::as_array).and_then(|s| {
-                s.iter()
-                    .min_by_key(|x| (x.get("width").and_then(Value::as_i64).unwrap_or(0) - 300).abs())
-                    .and_then(|x| x.get("url").and_then(Value::as_str))
-                    .map(str::to_string)
-            });
+            let thumbnail = t
+                .pointer("/albumOfTrack/coverArt/sources")
+                .and_then(Value::as_array)
+                .and_then(|s| s.iter().min_by_key(|x| (x.get("width").and_then(Value::as_i64).unwrap_or(0) - 300).abs()).and_then(|x| x.get("url").and_then(Value::as_str)).map(str::to_string));
             Some(TrackVersion {
                 platform: Platform::Spotify,
                 url: format!("https://open.spotify.com/track/{id}"),
@@ -325,9 +324,7 @@ fn search_blocking(term: &str, limit: usize) -> AppResult<Vec<TrackVersion>> {
 /// Spotify track search (instant, no account or API key).
 pub async fn search(term: &str, limit: usize) -> AppResult<Vec<TrackVersion>> {
     let term = term.to_string();
-    tauri::async_runtime::spawn_blocking(move || search_blocking(&term, limit))
-        .await
-        .map_err(|e| AppError::Network(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || search_blocking(&term, limit)).await.map_err(|e| AppError::Network(e.to_string()))?
 }
 
 #[cfg(test)]
@@ -417,9 +414,7 @@ pub async fn isrc(track_id: &str) -> AppResult<Option<String>> {
         return Ok(hit);
     }
     let id = track_id.to_string();
-    let found = tauri::async_runtime::spawn_blocking(move || isrc_blocking(&id))
-        .await
-        .map_err(|e| AppError::Network(e.to_string()))??;
+    let found = tauri::async_runtime::spawn_blocking(move || isrc_blocking(&id)).await.map_err(|e| AppError::Network(e.to_string()))??;
     ISRC_CACHE.lock().unwrap().get_or_insert_with(Default::default).insert(track_id.to_string(), found.clone());
     Ok(found)
 }
@@ -488,18 +483,13 @@ fn playlist_item_track(it: &Value) -> Option<Track> {
     }
     let uri = t.get("uri").and_then(Value::as_str)?;
     let title = t.get("name").and_then(Value::as_str)?;
-    let artist = t
-        .pointer("/artists/items")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|x| x.pointer("/profile/name").and_then(Value::as_str)).collect::<Vec<_>>().join(", "))
-        .unwrap_or_default();
+    let artist =
+        t.pointer("/artists/items").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.pointer("/profile/name").and_then(Value::as_str)).collect::<Vec<_>>().join(", ")).unwrap_or_default();
     let dur = t.pointer("/trackDuration/totalMilliseconds").and_then(Value::as_f64);
-    let thumb = t.pointer("/albumOfTrack/coverArt/sources").and_then(Value::as_array).and_then(|s| {
-        s.iter()
-            .min_by_key(|x| (x.get("width").and_then(Value::as_i64).unwrap_or(0) - 300).abs())
-            .and_then(|x| x.get("url").and_then(Value::as_str))
-            .map(str::to_string)
-    });
+    let thumb = t
+        .pointer("/albumOfTrack/coverArt/sources")
+        .and_then(Value::as_array)
+        .and_then(|s| s.iter().min_by_key(|x| (x.get("width").and_then(Value::as_i64).unwrap_or(0) - 300).abs()).and_then(|x| x.get("url").and_then(Value::as_str)).map(str::to_string));
     let mut v = version(title, &artist, dur, uri, thumb);
     v.album = t.pointer("/albumOfTrack/name").and_then(Value::as_str).map(str::to_string);
     Some(build_track(vec![v], 0.0))
@@ -593,9 +583,7 @@ pub fn user_id_from_url(url: &str) -> Option<String> {
 
 pub async fn user_playlists(user: String, client_id: String, secret: String) -> AppResult<Vec<UserPlaylist>> {
     if client_id.trim().is_empty() || secret.trim().is_empty() {
-        return Err(AppError::Invalid(
-            "listing a profile's playlists needs your own free Spotify app: add its Client ID and secret in Settings → Spotify".into(),
-        ));
+        return Err(AppError::Invalid("listing a profile's playlists needs your own free Spotify app: add its Client ID and secret in Settings → Spotify".into()));
     }
     tauri::async_runtime::spawn_blocking(move || {
         let tok = app_token(client_id.trim(), secret.trim())?;
@@ -612,7 +600,9 @@ pub async fn user_playlists(user: String, client_id: String, secret: String) -> 
             }
             let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?;
             for p in v.get("items").and_then(Value::as_array).into_iter().flatten() {
-                let (Some(name), Some(id)) = (p.get("name").and_then(Value::as_str), p.get("id").and_then(Value::as_str)) else { continue };
+                let (Some(name), Some(id)) = (p.get("name").and_then(Value::as_str), p.get("id").and_then(Value::as_str)) else {
+                    continue;
+                };
                 out.push(UserPlaylist {
                     name: name.to_string(),
                     url: format!("https://open.spotify.com/playlist/{id}"),

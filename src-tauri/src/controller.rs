@@ -11,7 +11,7 @@ use crate::downloads;
 use crate::error::{AppError, AppResult};
 use crate::models::{Platform, TrackVersion};
 use crate::search;
-use crate::state::{emit_library, emit_playback, emit_queue, emit_status, AppState, Phase, Preload, QueueItem};
+use crate::state::{emit_library, emit_playback, emit_queue, emit_queue_current, emit_status, AppState, Phase, Preload, QueueItem};
 use crate::stream;
 use crate::ytdlp;
 
@@ -38,9 +38,7 @@ async fn load_version(st: &AppState, v: &TrackVersion, token: u64) -> AppResult<
         // Real Spotify audio (librespot); only reached when logged in.
         let opened = crate::spotify_play::open(&v.id).await?;
         let fallback = v.duration;
-        let loaded = tauri::async_runtime::spawn_blocking(move || audio::prepare(opened, fallback, token))
-            .await
-            .map_err(|e| AppError::Extraction(e.to_string()))??;
+        let loaded = tauri::async_runtime::spawn_blocking(move || audio::prepare(opened, fallback, token)).await.map_err(|e| AppError::Extraction(e.to_string()))??;
         return Ok((loaded, v.clone()));
     }
 
@@ -55,7 +53,9 @@ async fn load_version(st: &AppState, v: &TrackVersion, token: u64) -> AppResult<
         }
         version.thumbnail = version.thumbnail.or(info.thumbnail.clone());
         version.duration = version.duration.or(info.duration);
-        version.partial = false;
+        // The fast YouTube lookup has no uploader: still partial, so the
+        // artist is completed in the background (see `complete_artist_later`).
+        version.partial = info.artist.is_none();
     }
     let fallback = info.duration.or(v.duration);
     let open = |info: ytdlp::StreamInfo| {
@@ -101,8 +101,9 @@ fn candidates(st: &AppState, item: &QueueItem) -> Vec<TrackVersion> {
     c
 }
 
-/// Resolve the stream a click on `track` would play, ahead of time.
-pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<Platform>) {
+/// Resolve the stream a click on `track` would play, ahead of time. False
+/// when it was dropped (too many already running).
+pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<Platform>) -> bool {
     let st = app.state::<AppState>();
     let mut track = track;
     crate::matcher::apply(&mut track);
@@ -110,23 +111,26 @@ pub fn prefetch(app: &AppHandle, track: crate::models::Track, platform: Option<P
     let logged_in = crate::spotify_play::has_login();
     let first = candidates(&st, &item).into_iter().find(|v| v.platform != Platform::Spotify || logged_in);
     match first {
-        Some(v) if matches!(v.platform, Platform::Local | Platform::Spotify) => {}
+        Some(v) if matches!(v.platform, Platform::Local | Platform::Spotify) => true,
         Some(v) if !std::path::Path::new(&v.url).exists() => ytdlp::prefetch_stream(v.url),
-        Some(_) => {}
+        Some(_) => true,
         // Spotify-only: find the exact recording now, then its stream.
         None => {
-            let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() else { return };
+            let Some(sp) = item.track.versions.iter().find(|v| v.platform == Platform::Spotify).cloned() else {
+                return true;
+            };
             tauri::async_runtime::spawn(async move {
                 if let Some(v) = crate::matcher::match_spotify(&sp).await {
                     ytdlp::prefetch_stream(v.url);
                 }
             });
+            true
         }
     }
 }
 
 /// Replace a placeholder track's metadata (queue entry + the item we report).
-fn complete_metadata(st: &AppState, item: &mut QueueItem, version: &TrackVersion) {
+fn complete_metadata(app: &AppHandle, item: &mut QueueItem, version: &TrackVersion) {
     if !item.track.versions.iter().any(|v| v.partial && v.url == version.url) {
         return;
     }
@@ -136,21 +140,67 @@ fn complete_metadata(st: &AppState, item: &mut QueueItem, version: &TrackVersion
     }
     let track = search::build_track(versions, 0.0);
     item.track = track.clone();
-    let mut q = st.queue.lock().unwrap();
-    if let Some(qi) = q.items.iter_mut().find(|i| i.uid == item.uid) {
-        qi.track = track;
+    let st = app.state::<AppState>();
+    let found = st.queue.lock().unwrap().items.iter_mut().find(|i| i.uid == item.uid).map(|qi| qi.track = track).is_some();
+    if found {
+        emit_queue(app);
     }
+    if version.partial && matches!(version.platform, Platform::Youtube | Platform::Ytmusic) {
+        complete_artist_later(app, version.url.clone());
+    }
+}
+
+/// Fill in the artist of a placeholder whose stream lookup didn't include
+/// it (queue entries, and the song shown as playing).
+fn complete_artist_later(app: &AppHandle, url: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(meta) = ytdlp::batch_meta(std::slice::from_ref(&url)).await.ok().and_then(|m| m.into_iter().next()) else {
+            return;
+        };
+        let complete = |item: &mut QueueItem| {
+            let mut versions = item.track.versions.clone();
+            versions.iter_mut().filter(|v| v.url == url).for_each(|v| meta.apply(v));
+            item.track = search::build_track(versions, 0.0);
+        };
+        let st = app.state::<AppState>();
+        let mut found = false;
+        for qi in st.queue.lock().unwrap().items.iter_mut().filter(|i| i.track.versions.iter().any(|v| v.url == url && v.partial)) {
+            complete(qi);
+            found = true;
+        }
+        st.set_now(|n| {
+            if let Some(item) = n.item.as_mut().filter(|i| i.track.versions.iter().any(|v| v.url == url && v.partial)) {
+                complete(item);
+            }
+            if let Some(v) = n.version.as_mut().filter(|v| v.url == url && v.partial) {
+                meta.apply(v);
+            }
+        });
+        // The play was logged with the guessed artist: fix its newest entry.
+        let in_history = |e: &crate::store::HistoryEntry| e.track.versions.iter().any(|v| v.url == url && v.partial);
+        let logged = st.store.library.lock().unwrap().history.iter().any(in_history);
+        if logged {
+            let _ = st.store.update_history(|h| {
+                if let Some(e) = h.iter_mut().find(|e| in_history(e)) {
+                    let mut versions = std::mem::take(&mut e.track.versions);
+                    versions.iter_mut().filter(|v| v.url == url).for_each(|v| meta.apply(v));
+                    e.track = search::build_track(versions, 0.0);
+                }
+                Ok(())
+            });
+            emit_library(&app, "history");
+        }
+        if found {
+            emit_queue(&app);
+        }
+        emit_playback(&app);
+    });
 }
 
 /// Resolve and open a queue item, trying every version and finally a search
 /// for an equivalent upload. `progress` gets user-facing status updates.
-async fn load_item(
-    app: &AppHandle,
-    item: &mut QueueItem,
-    token: u64,
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-    interactive: bool,
-) -> AppResult<(LoadedTrack, TrackVersion)> {
+async fn load_item(app: &AppHandle, item: &mut QueueItem, token: u64, cancelled: &(dyn Fn() -> bool + Send + Sync), interactive: bool) -> AppResult<(LoadedTrack, TrackVersion)> {
     let st = app.state::<AppState>();
     let say = |msg: String| {
         if interactive {
@@ -159,9 +209,9 @@ async fn load_item(
         }
     };
     if crate::matcher::apply(&mut item.track) {
-        let mut q = st.queue.lock().unwrap();
-        if let Some(qi) = q.items.iter_mut().find(|i| i.uid == item.uid) {
-            qi.track = item.track.clone();
+        let found = st.queue.lock().unwrap().items.iter_mut().find(|i| i.uid == item.uid).map(|qi| qi.track = item.track.clone()).is_some();
+        if found {
+            emit_queue(app);
         }
     }
     let mut tried: Vec<Platform> = Vec::new();
@@ -182,7 +232,7 @@ async fn load_item(
         say(format!("Loading from {}…", v.platform.label()));
         match load_version(&st, &v, token).await {
             Ok((loaded, v)) => {
-                complete_metadata(&st, item, &v);
+                complete_metadata(app, item, &v);
                 return Ok((loaded, v));
             }
             Err(e) => {
@@ -211,7 +261,7 @@ async fn load_item(
         say(format!("Loading from {}…", v.platform.label()));
         match load_version(&st, &v, token).await {
             Ok((loaded, v)) => {
-                remember_match(&st, item, &v);
+                remember_match(app, item, &v);
                 return Ok((loaded, v));
             }
             Err(e) => {
@@ -240,18 +290,19 @@ async fn load_item(
     }
     say(format!("Loading from {}…", v.platform.label()));
     let (loaded, v) = load_version(&st, &v, token).await?;
-    remember_match(&st, item, &v);
+    remember_match(app, item, &v);
     Ok((loaded, v))
 }
 
 /// Remember a matched upload so the version picker / next play can use it.
-fn remember_match(st: &AppState, item: &mut QueueItem, v: &TrackVersion) {
+fn remember_match(app: &AppHandle, item: &mut QueueItem, v: &TrackVersion) {
     let known = if v.matched_for.is_some() { item.track.versions.iter().any(|x| x.url == v.url) } else { item.track.has(v.platform) };
     if !known {
         item.track.versions.push(v.clone());
-        let mut q = st.queue.lock().unwrap();
-        if let Some(qi) = q.items.iter_mut().find(|i| i.uid == item.uid) {
-            qi.track = item.track.clone();
+        let st = app.state::<AppState>();
+        let found = st.queue.lock().unwrap().items.iter_mut().find(|i| i.uid == item.uid).map(|qi| qi.track = item.track.clone()).is_some();
+        if found {
+            emit_queue(app);
         }
     }
 }
@@ -277,7 +328,14 @@ pub fn spawn_play(app: &AppHandle, index: usize, auto: bool) {
             Ok(()) => st.consecutive_failures.store(0, Ordering::SeqCst),
             Err(AppError::Cancelled) => {}
             Err(e) => {
-                let what = st.queue.lock().unwrap().items.get(index).map(|i| format!("{} — {} [{}]", i.track.artist, i.track.title, i.track.versions.iter().map(|v| v.platform.label()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+                let what = st
+                    .queue
+                    .lock()
+                    .unwrap()
+                    .items
+                    .get(index)
+                    .map(|i| format!("{} — {} [{}]", i.track.artist, i.track.title, i.track.versions.iter().map(|v| v.platform.label()).collect::<Vec<_>>().join(", ")))
+                    .unwrap_or_default();
                 crate::report::report_app_error(&format!("playing {what}"), &e);
                 emit_status(&app, "error", e.to_string());
                 st.set_now(|n| {
@@ -314,7 +372,7 @@ async fn play_index(app: &AppHandle, index: usize) -> AppResult<()> {
         n.version = None;
         n.message = Some("Resolving stream…".into());
     });
-    emit_queue(app);
+    emit_queue_current(app);
     emit_playback(app);
 
     let st2 = st.inner();
@@ -335,8 +393,24 @@ async fn play_index(app: &AppHandle, index: usize) -> AppResult<()> {
 }
 
 /// Bookkeeping once a track is audible.
-fn started(app: &AppHandle, item: QueueItem, version: TrackVersion) {
+fn started(app: &AppHandle, mut item: QueueItem, mut version: TrackVersion) {
     let st = app.state::<AppState>();
+    // The artist lookup (`complete_artist_later`) may have finished while
+    // this was loading: take its result from the queue entry.
+    if version.partial {
+        let done = st
+            .queue
+            .lock()
+            .unwrap()
+            .items
+            .iter()
+            .find(|i| i.uid == item.uid)
+            .and_then(|qi| qi.track.versions.iter().find(|v| v.url == version.url && !v.partial).map(|v| (qi.track.clone(), v.clone())));
+        if let Some((track, v)) = done {
+            item.track = track;
+            version = v;
+        }
+    }
     st.set_now(|n| {
         n.phase = Phase::Active;
         n.item = Some(item.clone());
@@ -347,7 +421,7 @@ fn started(app: &AppHandle, item: QueueItem, version: TrackVersion) {
         emit_library(app, "history");
     }
     let _ = app.emit("track-started", serde_json::json!({ "item": item, "version": version }));
-    emit_queue(app);
+    emit_queue_current(app);
     emit_playback(app);
     maybe_autoplay(app);
     // "Next" is the most likely click; have its stream ready.
@@ -369,7 +443,13 @@ fn next_index(st: &AppState, auto: bool) -> Option<usize> {
         return None;
     }
     if let Some(i) = q.resume_at {
-        return if i < len { Some(i) } else if repeat == "all" { Some(0) } else { None };
+        return if i < len {
+            Some(i)
+        } else if repeat == "all" {
+            Some(0)
+        } else {
+            None
+        };
     }
     match q.current {
         Some(i) if auto && repeat == "one" => Some(i),
@@ -507,8 +587,12 @@ fn maybe_preload(app: &AppHandle) {
     if settings.repeat == "one" {
         return;
     }
-    let Some(idx) = next_index(&st, true) else { return };
-    let Some(mut item) = st.queue.lock().unwrap().items.get(idx).cloned() else { return };
+    let Some(idx) = next_index(&st, true) else {
+        return;
+    };
+    let Some(mut item) = st.queue.lock().unwrap().items.get(idx).cloned() else {
+        return;
+    };
     let pgen = st.preload_gen.load(Ordering::SeqCst);
     st.preload_inflight.store(true, Ordering::SeqCst);
     let app = app.clone();
@@ -531,7 +615,9 @@ fn maybe_preload(app: &AppHandle) {
 }
 
 pub fn on_engine_event(app: &AppHandle, ev: EngineEvent) {
-    let Some(st) = app.try_state::<AppState>() else { return };
+    let Some(st) = app.try_state::<AppState>() else {
+        return;
+    };
     match ev {
         EngineEvent::Tick => {
             crate::state::emit_tick(app);
@@ -539,7 +625,9 @@ pub fn on_engine_event(app: &AppHandle, ev: EngineEvent) {
         }
         EngineEvent::Advanced { token } => {
             let pre = st.preload.lock().unwrap().take();
-            let Some(p) = pre.filter(|p| p.token == token) else { return };
+            let Some(p) = pre.filter(|p| p.token == token) else {
+                return;
+            };
             let prev = st.now.lock().unwrap().item.clone();
             let _ = app.emit("track-ended", serde_json::json!({ "item": prev }));
             {
@@ -558,6 +646,40 @@ pub fn on_engine_event(app: &AppHandle, ev: EngineEvent) {
             let item = st.now.lock().unwrap().item.clone();
             let _ = app.emit("track-ended", serde_json::json!({ "item": item }));
             advance(app, true);
+        }
+        EngineEvent::DeviceLost { token, position } => {
+            if token != st.current_token.load(Ordering::SeqCst) {
+                return;
+            }
+            // Continue on whatever output is the default now; give up if the
+            // device keeps disappearing (no working output at all).
+            static RESTARTS: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
+            let recent = {
+                let mut r = RESTARTS.lock().unwrap();
+                r.retain(|t| t.elapsed() < std::time::Duration::from_secs(60));
+                r.push(std::time::Instant::now());
+                r.len()
+            };
+            let (index, uid) = {
+                let q = st.queue.lock().unwrap();
+                (q.current, q.current.and_then(|i| q.items.get(i)).map(|i| i.uid))
+            };
+            match (index, uid) {
+                (Some(i), Some(uid)) if recent <= 3 => {
+                    *st.resume_position.lock().unwrap() = Some((uid, position));
+                    emit_status(app, "info", "Audio output changed. Continuing on the current device…");
+                    spawn_play(app, i, false);
+                }
+                _ => {
+                    let msg = "The audio output stopped responding. Check your speakers or headphones.";
+                    emit_status(app, "error", msg);
+                    st.set_now(|n| {
+                        n.phase = Phase::Error;
+                        n.message = Some(msg.into());
+                    });
+                    emit_playback(app);
+                }
+            }
         }
         EngineEvent::Error { token, error } => {
             if token != st.current_token.load(Ordering::SeqCst) {

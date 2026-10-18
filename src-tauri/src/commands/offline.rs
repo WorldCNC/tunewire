@@ -96,9 +96,7 @@ pub fn downloads_dir(st: State<'_, AppState>) -> String {
 }
 
 async fn rescan(app: &AppHandle, folders: Vec<String>) -> AppResult<usize> {
-    let n = tauri::async_runtime::spawn_blocking(move || localfiles::scan(&folders))
-        .await
-        .map_err(|e| AppError::Storage(e.to_string()))??;
+    let n = tauri::async_runtime::spawn_blocking(move || localfiles::scan(&folders)).await.map_err(|e| AppError::Storage(e.to_string()))??;
     emit_library(app, "local");
     Ok(n)
 }

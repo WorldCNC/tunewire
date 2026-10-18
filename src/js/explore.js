@@ -124,8 +124,10 @@ async function checkReleasesQuietly() {
 }
 
 // Search suggestions + history -------------------------------------------------
+// While typing: your past searches, text suggestions, then songs, videos,
+// artists and albums with their pictures (Enter plays or opens one).
 
-const suggest = { items: [], active: -1, seq: 0, timer: null };
+const suggest = { items: [], active: -1, seq: 0, timer: null, typed: '' };
 const suggestBox = $('#suggest');
 const searchInput = $('#search-input');
 
@@ -136,43 +138,86 @@ function closeSuggest() {
   searchInput.setAttribute('aria-expanded', 'false');
 }
 
+/** "Song · Daft Punk", "Artist", "Album · Daft Punk · 2001" from a card. */
+function suggestSub(c) {
+  const parts = (c.subtitle || '').split(' • ').map((x) => x.trim()).filter(Boolean);
+  const kind = c.kind[0].toUpperCase() + c.kind.slice(1);
+  const rest = parts.slice(1).filter((x) => !/\b(views|plays|audience|subscribers)\b/i.test(x));
+  if (c.kind === 'artist') return 'Artist';
+  if ((c.kind === 'song' || c.kind === 'video') && !rest.length && c.track?.artist) rest.push(c.track.artist);
+  return [kind, ...rest.slice(0, 2)].join(' · ');
+}
+
+function suggestRow(it, i) {
+  const cls = `suggest-item${it.card ? ' rich' : ''}${i === suggest.active ? ' active' : ''}`;
+  const down = (e) => { e.preventDefault(); activateSuggestion(it, e); };
+  if (it.card) {
+    const c = it.card;
+    const art = h('div', { class: `s-art${c.kind === 'artist' ? ' round' : ''}` });
+    if (c.thumbnail) art.append(h('img', { src: imgUrl(c.thumbnail, 96), alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove(), onload: (e) => { if (isYtPlaceholder(e.target)) e.target.remove(); } }));
+    return h('div', { class: cls, role: 'option', 'aria-selected': String(i === suggest.active), onmousedown: down }, art,
+      h('div', { class: 'txt' }, h('div', { class: 's-title' }, c.title), h('div', { class: 's-sub' }, suggestSub(c))),
+      c.track ? h('span', { class: 's-play', 'aria-hidden': 'true', html: icon('play') }) : null);
+  }
+  return h('div', { class: cls, role: 'option', 'aria-selected': String(i === suggest.active), onmousedown: down },
+    h('span', { class: 'ico', html: icon(it.history ? 'clock' : 'search') }), h('span', { class: 'txt' }, it.text),
+    it.history ? h('button', { class: 'icon-btn tiny', title: 'Remove from history', html: icon('x'), onmousedown: async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      await call('clear_search_history', { query: it.text }).catch(() => {});
+      state.settings.search_history = (state.settings.search_history || []).filter((q) => q !== it.text);
+      suggest.items = suggest.items.filter((x) => x !== it);
+      renderSuggest();
+    } }) : null);
+}
+
 function renderSuggest() {
   if (!suggest.items.length || document.activeElement !== searchInput) { closeSuggest(); return; }
-  suggestBox.replaceChildren(...suggest.items.map((it, i) => h('div', {
-    class: `suggest-item${i === suggest.active ? ' active' : ''}`, role: 'option',
-    onmousedown: (e) => { e.preventDefault(); pickSuggestion(it.text); },
-  }, h('span', { class: 'ico', html: icon(it.history ? 'clock' : 'search') }), h('span', { class: 'txt' }, it.text),
-  it.history ? h('button', { class: 'icon-btn tiny', title: 'Remove from history', html: icon('x'), onmousedown: async (e) => {
-    e.preventDefault(); e.stopPropagation();
-    await call('clear_search_history', { query: it.text }).catch(() => {});
-    state.settings.search_history = (state.settings.search_history || []).filter((q) => q !== it.text);
-    suggest.items = suggest.items.filter((x) => x !== it);
-    renderSuggest();
-  } }) : null)));
+  const rows = [];
+  suggest.items.forEach((it, i) => {
+    if (it.card && !suggest.items[i - 1]?.card && i > 0) rows.push(h('div', { class: 'suggest-sep', role: 'presentation' }));
+    rows.push(suggestRow(it, i));
+  });
+  suggestBox.replaceChildren(...rows);
   suggestBox.hidden = false;
   searchInput.setAttribute('aria-expanded', 'true');
 }
 
-function pickSuggestion(text) {
-  searchInput.value = text;
-  syncSearchClear();
+/** A text suggestion searches; a song plays (Ctrl/Shift: adds to the queue); an artist or album opens. */
+function activateSuggestion(it, e = {}) {
   closeSuggest();
-  doSearch(text);
+  if (!it.card) {
+    searchInput.value = it.text;
+    syncSearchClear();
+    doSearch(it.text);
+    return;
+  }
+  const c = it.card;
+  if (c.track && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+    enqueue([c.track]).then(() => toast(`Added “${c.title}” to the queue`, 'ok', 2000)).catch((err) => toast(errMsg(err), 'error'));
+    return;
+  }
+  searchInput.blur();
+  openCard(c);
 }
 
 async function updateSuggest() {
   const q = searchInput.value.trim();
   const seq = ++suggest.seq;
+  suggest.typed = searchInput.value;
   const history = (state.settings?.search_history || []).filter((x) => !q || x.toLowerCase().includes(q.toLowerCase())).slice(0, q ? 3 : 8);
-  suggest.items = history.map((text) => ({ text, history: true }));
+  // Keep the pictures of the previous answer while the next one loads (no flicker).
+  const cards = q ? suggest.items.filter((x) => x.card) : [];
+  suggest.items = [...history.map((text) => ({ text, history: true })), ...cards];
   suggest.active = -1;
   renderSuggest();
   if (!q || isUrl(q)) return;
-  let remote = [];
-  try { remote = await call('search_suggestions', { query: q }); } catch { return; }
+  let remote;
+  try { remote = await call('search_preview', { query: q }); } catch { return; }
   if (seq !== suggest.seq) return;
   const seen = new Set(history.map((x) => x.toLowerCase()));
-  suggest.items = [...suggest.items, ...remote.filter((x) => !seen.has(x.toLowerCase())).slice(0, 8 - history.length).map((text) => ({ text }))];
+  const queries = (remote.queries || []).filter((x) => !seen.has(x.toLowerCase())).slice(0, Math.max(2, 5 - history.length));
+  const found = (remote.items || []).filter((c) => c.title).slice(0, 5);
+  suggest.items = [...history.map((text) => ({ text, history: true })), ...queries.map((text) => ({ text })), ...found.map((card) => ({ card, text: card.title }))];
   renderSuggest();
 }
 
@@ -192,11 +237,16 @@ searchInput.addEventListener('keydown', (e) => {
     if (a >= n) a = -1;
     suggest.active = a;
     renderSuggest();
-    if (suggest.active >= 0) searchInput.value = suggest.items[suggest.active].text;
+    // Text suggestions go into the box; on a song or artist the typed text stays.
+    const it = suggest.items[a];
+    searchInput.value = it && !it.card ? it.text : suggest.typed;
+    $('#suggest .suggest-item.active')?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'Escape') {
     e.stopPropagation();
     closeSuggest();
   } else if (e.key === 'Enter') {
+    const it = suggest.items[suggest.active];
+    if (it?.card) { e.preventDefault(); activateSuggestion(it, e); return; }
     closeSuggest();
   }
 });

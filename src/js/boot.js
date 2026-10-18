@@ -24,6 +24,20 @@ async function wireEvents() {
     renderQueue();
     plugins.emit('queue-changed', e.payload);
   });
+  // Only the playing entry moved (a song started): no need to resend the list.
+  await listen('queue-current', async (e) => {
+    const { current, uid } = e.payload;
+    if (current != null && state.queue.items[current]?.uid !== uid) {
+      // Our copy is behind (an event was missed): fetch the whole queue.
+      try { state.queue = await call('get_queue'); } catch { return; }
+    } else if (state.queue.current === current) {
+      return;
+    } else {
+      state.queue = { ...state.queue, current };
+    }
+    renderQueue();
+    plugins.emit('queue-changed', state.queue);
+  });
   await listen('track-started', (e) => {
     plugins.emit('track-started', e.payload);
     loadLyrics();
@@ -109,6 +123,7 @@ async function boot() {
   cloudInit().then(() => {
     $$('.cloud-only').forEach((el) => { el.hidden = !cloudOn(); });
     paintJamButton();
+    setTimeout(maybeShowSignInIntro, 2500);
     // A tunewire:// link that started the app.
     invoke('plugin:deep-link|get_current').then((urls) => (urls || []).forEach(handleShareLink)).catch(() => {});
   });

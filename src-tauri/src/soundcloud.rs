@@ -106,10 +106,7 @@ pub fn warm() {
 }
 
 fn artwork(t: &Value) -> Option<String> {
-    t.get("artwork_url")
-        .and_then(Value::as_str)
-        .or_else(|| t.pointer("/user/avatar_url").and_then(Value::as_str))
-        .map(|u| u.replace("-large.", "-t500x500."))
+    t.get("artwork_url").and_then(Value::as_str).or_else(|| t.pointer("/user/avatar_url").and_then(Value::as_str)).map(|u| u.replace("-large.", "-t500x500."))
 }
 
 /// A track object → our version (same shape the yt-dlp path produces).
@@ -174,14 +171,25 @@ pub async fn stream(url: &str) -> AppResult<StreamInfo> {
                 _ => 9,
             }
         };
-        let pick = codings.iter().filter(|c| score(c) < 9 && !c.get("snipped").and_then(Value::as_bool).unwrap_or(false)).min_by_key(|c| score(c)).or_else(|| codings.iter().min_by_key(|c| score(c))).ok_or_else(|| AppError::Unavailable("no stream on SoundCloud".into()))?;
+        let pick = codings
+            .iter()
+            .filter(|c| score(c) < 9 && !c.get("snipped").and_then(Value::as_bool).unwrap_or(false))
+            .min_by_key(|c| score(c))
+            .or_else(|| codings.iter().min_by_key(|c| score(c)))
+            .ok_or_else(|| AppError::Unavailable("no stream on SoundCloud".into()))?;
         let auth = t.get("track_authorization").and_then(Value::as_str).unwrap_or("");
         let base = pick.get("url").and_then(Value::as_str).ok_or_else(|| AppError::Extraction("SoundCloud stream format changed".into()))?;
         let s = api(&format!("{base}?track_authorization={auth}"))?;
         let stream_url = s.get("url").and_then(Value::as_str).ok_or_else(|| AppError::Extraction("SoundCloud returned no stream URL".into()))?.to_string();
         let proto = pick.pointer("/format/protocol").and_then(Value::as_str).unwrap_or("");
         let mime = pick.pointer("/format/mime_type").and_then(Value::as_str).unwrap_or("");
-        let (ext, acodec) = if mime.contains("mp4a") { ("m4a", "mp4a.40.2") } else if mime.contains("mpeg") { ("mp3", "mp3") } else { ("opus", "opus") };
+        let (ext, acodec) = if mime.contains("mp4a") {
+            ("m4a", "mp4a.40.2")
+        } else if mime.contains("mpeg") {
+            ("mp3", "mp3")
+        } else {
+            ("opus", "opus")
+        };
         let v = version(&t, 0);
         Ok(StreamInfo {
             url: stream_url,

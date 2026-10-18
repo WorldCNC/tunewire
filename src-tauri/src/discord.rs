@@ -63,9 +63,7 @@ fn set(status: &Status, s: impl Into<String>) {
 /// Read Discord's reply to a command; returns its error message if it rejected it.
 fn reply_error(cl: &mut DiscordIpcClient) -> Option<String> {
     match cl.recv() {
-        Ok((_, v)) if v.get("evt").and_then(|e| e.as_str()) == Some("ERROR") => {
-            Some(v.pointer("/data/message").and_then(|m| m.as_str()).unwrap_or("rejected").to_string())
-        }
+        Ok((_, v)) if v.get("evt").and_then(|e| e.as_str()) == Some("ERROR") => Some(v.pointer("/data/message").and_then(|m| m.as_str()).unwrap_or("rejected").to_string()),
         _ => None,
     }
 }
@@ -119,11 +117,7 @@ fn run(rx: Receiver<Msg>, status: Status) {
                 Err(e) => {
                     // No socket (Discord closed, or Vesktop with arRPC off): retry later.
                     let msg = e.to_string();
-                    set(&status, if msg.to_lowercase().contains("not found") || msg.contains("IPC") {
-                        "waiting: no Discord IPC socket found".to_string()
-                    } else {
-                        format!("waiting: {msg}")
-                    });
+                    set(&status, if msg.to_lowercase().contains("not found") || msg.contains("IPC") { "waiting: no Discord IPC socket found".to_string() } else { format!("waiting: {msg}") });
                     next_connect = Instant::now() + Duration::from_secs(10);
                     continue;
                 }

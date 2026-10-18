@@ -52,7 +52,9 @@ pub async fn rootlist(session: &Session) -> AppResult<Vec<SpotifyPlaylistInfo>> 
         }
         // meta_items line up with the items (folder markers included).
         for (k, uri) in items.iter().enumerate() {
-            let Some(id) = uri.strip_prefix("spotify:playlist:") else { continue };
+            let Some(id) = uri.strip_prefix("spotify:playlist:") else {
+                continue;
+            };
             let meta = contents.meta_items.get(k);
             let attrs = meta.map(|m| m.attributes.get_or_default());
             out.push(SpotifyPlaylistInfo {
@@ -107,9 +109,15 @@ pub async fn liked_uris(session: &Session) -> AppResult<Vec<SpotifyUri>> {
         if !seen.insert(url.clone()) || seen.len() > 200 {
             continue;
         }
-        let Ok(bytes) = session.spclient().get_next_page(&url).await else { continue };
-        let Ok(text) = String::from_utf8(bytes.to_vec()) else { continue };
-        let Ok(page) = protobuf_json_mapping::parse_from_str::<librespot_protocol::context_page::ContextPage>(&text) else { continue };
+        let Ok(bytes) = session.spclient().get_next_page(&url).await else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(bytes.to_vec()) else {
+            continue;
+        };
+        let Ok(page) = protobuf_json_mapping::parse_from_str::<librespot_protocol::context_page::ContextPage>(&text) else {
+            continue;
+        };
         collect(&page.tracks, &mut uris);
         pending.extend(page.next_page_url.clone());
     }
@@ -131,10 +139,12 @@ pub async fn tracks(session: &Session, uris: Vec<SpotifyUri>, progress: impl Fn(
     let total = uris.len();
     let mut done = 0;
     let mut results: Vec<(usize, Option<Track>)> = Vec::with_capacity(total);
-    let mut stream = stream::iter(uris.into_iter().enumerate()).map(|(i, uri)| {
-        let session = session.clone();
-        async move { (i, librespot_metadata::Track::get(&session, &uri).await.ok().and_then(|t| to_track(&t))) }
-    }).buffer_unordered(PARALLEL);
+    let mut stream = stream::iter(uris.into_iter().enumerate())
+        .map(|(i, uri)| {
+            let session = session.clone();
+            async move { (i, librespot_metadata::Track::get(&session, &uri).await.ok().and_then(|t| to_track(&t))) }
+        })
+        .buffer_unordered(PARALLEL);
     while let Some(r) = stream.next().await {
         results.push(r);
         done += 1;
@@ -147,7 +157,9 @@ pub async fn tracks(session: &Session, uris: Vec<SpotifyUri>, progress: impl Fn(
 }
 
 fn to_track(t: &librespot_metadata::Track) -> Option<Track> {
-    let SpotifyUri::Track { id } = &t.id else { return None };
+    let SpotifyUri::Track { id } = &t.id else {
+        return None;
+    };
     let id = id.to_base62().ok()?;
     if let Some(isrc) = t.external_ids.iter().find(|x| x.external_type.eq_ignore_ascii_case("isrc")) {
         crate::spotify::remember_isrc(&id, &isrc.id);

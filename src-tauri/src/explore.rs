@@ -35,10 +35,7 @@ pub async fn suggestions(q: String) -> AppResult<Vec<String>> {
     blocking(move || {
         let url = format!("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&oe=utf8&q={}", percent_encode(&q));
         let v: Value = serde_json::from_str(&get_text(&url)?)?;
-        Ok(v.get(1)
-            .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(8).map(str::to_string).collect())
-            .unwrap_or_default())
+        Ok(v.get(1).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).take(8).map(str::to_string).collect()).unwrap_or_default())
     })
     .await
 }
@@ -71,17 +68,66 @@ pub struct Charts {
 }
 
 pub const CHART_COUNTRIES: &[(&str, &str)] = &[
-    ("ZZ", "Global"), ("AR", "Argentina"), ("AU", "Australia"), ("AT", "Austria"), ("BE", "Belgium"), ("BO", "Bolivia"),
-    ("BR", "Brazil"), ("CA", "Canada"), ("CL", "Chile"), ("CO", "Colombia"), ("CR", "Costa Rica"), ("CZ", "Czechia"),
-    ("DK", "Denmark"), ("DO", "Dominican Republic"), ("EC", "Ecuador"), ("EG", "Egypt"), ("SV", "El Salvador"),
-    ("EE", "Estonia"), ("FI", "Finland"), ("FR", "France"), ("DE", "Germany"), ("GT", "Guatemala"), ("HN", "Honduras"),
-    ("HU", "Hungary"), ("IS", "Iceland"), ("IN", "India"), ("ID", "Indonesia"), ("IE", "Ireland"), ("IL", "Israel"),
-    ("IT", "Italy"), ("JP", "Japan"), ("KE", "Kenya"), ("LU", "Luxembourg"), ("MX", "Mexico"), ("NL", "Netherlands"),
-    ("NZ", "New Zealand"), ("NI", "Nicaragua"), ("NG", "Nigeria"), ("NO", "Norway"), ("PA", "Panama"), ("PY", "Paraguay"),
-    ("PE", "Peru"), ("PL", "Poland"), ("PT", "Portugal"), ("RO", "Romania"), ("RS", "Serbia"), ("ZA", "South Africa"),
-    ("KR", "South Korea"), ("ES", "Spain"), ("SE", "Sweden"), ("CH", "Switzerland"), ("TZ", "Tanzania"), ("TR", "Turkey"),
-    ("UG", "Uganda"), ("UA", "Ukraine"), ("AE", "United Arab Emirates"), ("GB", "United Kingdom"), ("US", "United States"),
-    ("UY", "Uruguay"), ("ZW", "Zimbabwe"),
+    ("ZZ", "Global"),
+    ("AR", "Argentina"),
+    ("AU", "Australia"),
+    ("AT", "Austria"),
+    ("BE", "Belgium"),
+    ("BO", "Bolivia"),
+    ("BR", "Brazil"),
+    ("CA", "Canada"),
+    ("CL", "Chile"),
+    ("CO", "Colombia"),
+    ("CR", "Costa Rica"),
+    ("CZ", "Czechia"),
+    ("DK", "Denmark"),
+    ("DO", "Dominican Republic"),
+    ("EC", "Ecuador"),
+    ("EG", "Egypt"),
+    ("SV", "El Salvador"),
+    ("EE", "Estonia"),
+    ("FI", "Finland"),
+    ("FR", "France"),
+    ("DE", "Germany"),
+    ("GT", "Guatemala"),
+    ("HN", "Honduras"),
+    ("HU", "Hungary"),
+    ("IS", "Iceland"),
+    ("IN", "India"),
+    ("ID", "Indonesia"),
+    ("IE", "Ireland"),
+    ("IL", "Israel"),
+    ("IT", "Italy"),
+    ("JP", "Japan"),
+    ("KE", "Kenya"),
+    ("LU", "Luxembourg"),
+    ("MX", "Mexico"),
+    ("NL", "Netherlands"),
+    ("NZ", "New Zealand"),
+    ("NI", "Nicaragua"),
+    ("NG", "Nigeria"),
+    ("NO", "Norway"),
+    ("PA", "Panama"),
+    ("PY", "Paraguay"),
+    ("PE", "Peru"),
+    ("PL", "Poland"),
+    ("PT", "Portugal"),
+    ("RO", "Romania"),
+    ("RS", "Serbia"),
+    ("ZA", "South Africa"),
+    ("KR", "South Korea"),
+    ("ES", "Spain"),
+    ("SE", "Sweden"),
+    ("CH", "Switzerland"),
+    ("TZ", "Tanzania"),
+    ("TR", "Turkey"),
+    ("UG", "Uganda"),
+    ("UA", "Ukraine"),
+    ("AE", "United Arab Emirates"),
+    ("GB", "United Kingdom"),
+    ("US", "United States"),
+    ("UY", "Uruguay"),
+    ("ZW", "Zimbabwe"),
 ];
 
 static CHARTS_CACHE: Mutex<Option<HashMap<String, (std::time::Instant, Charts)>>> = Mutex::new(None);
@@ -103,12 +149,7 @@ fn best_thumb(v: &Value) -> Option<String> {
 
 fn browse_id(v: &Value) -> Option<String> {
     match v {
-        Value::Object(m) => m
-            .get("browseEndpoint")
-            .and_then(|b| b.get("browseId"))
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| m.values().find_map(browse_id)),
+        Value::Object(m) => m.get("browseEndpoint").and_then(|b| b.get("browseId")).and_then(Value::as_str).map(str::to_string).or_else(|| m.values().find_map(browse_id)),
         Value::Array(a) => a.iter().find_map(browse_id),
         _ => None,
     }
@@ -138,8 +179,12 @@ pub fn parse_charts(country: &str, v: &Value) -> Charts {
         let group = sh.pointer("/header/musicCarouselShelfBasicHeaderRenderer/title").map(runs_text).unwrap_or_default();
         for item in sh.get("contents").and_then(Value::as_array).into_iter().flatten() {
             if let Some(r) = item.get("musicTwoRowItemRenderer") {
-                let Some(id) = browse_id(r.get("navigationEndpoint").unwrap_or(r)) else { continue };
-                let Some(list) = id.strip_prefix("VL") else { continue };
+                let Some(id) = browse_id(r.get("navigationEndpoint").unwrap_or(r)) else {
+                    continue;
+                };
+                let Some(list) = id.strip_prefix("VL") else {
+                    continue;
+                };
                 playlists.push(ChartPlaylist {
                     title: r.get("title").map(runs_text).unwrap_or_default(),
                     url: format!("https://music.youtube.com/playlist?list={list}"),
@@ -148,16 +193,13 @@ pub fn parse_charts(country: &str, v: &Value) -> Charts {
                 });
             } else if let Some(r) = item.get("musicResponsiveListItemRenderer") {
                 let name = r.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text").map(runs_text).unwrap_or_default();
-                let Some(id) = browse_id(r.get("navigationEndpoint").unwrap_or(r)) else { continue };
+                let Some(id) = browse_id(r.get("navigationEndpoint").unwrap_or(r)) else {
+                    continue;
+                };
                 if name.is_empty() || !id.starts_with("UC") {
                     continue;
                 }
-                artists.push(ChartArtist {
-                    rank: artists.len() + 1,
-                    name,
-                    url: format!("https://www.youtube.com/channel/{id}"),
-                    thumbnail: best_thumb(r.get("thumbnail").unwrap_or(r)),
-                });
+                artists.push(ChartArtist { rank: artists.len() + 1, name, url: format!("https://www.youtube.com/channel/{id}"), thumbnail: best_thumb(r.get("thumbnail").unwrap_or(r)) });
             }
         }
     }
@@ -229,11 +271,7 @@ pub async fn translate(lines: Vec<String>, target: String) -> AppResult<Translat
             return Err(AppError::Network(format!("translation failed (HTTP {})", r.status().as_u16())));
         }
         let v: Value = serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?;
-        let joined: String = v
-            .get(0)
-            .and_then(Value::as_array)
-            .map(|segs| segs.iter().filter_map(|s| s.get(0).and_then(Value::as_str)).collect())
-            .unwrap_or_default();
+        let joined: String = v.get(0).and_then(Value::as_array).map(|segs| segs.iter().filter_map(|s| s.get(0).and_then(Value::as_str)).collect()).unwrap_or_default();
         Ok(Translation { lines: joined.split('\n').map(|l| l.trim().to_string()).collect(), source_lang: v.get(2).and_then(Value::as_str).map(str::to_string) })
     })
     .await

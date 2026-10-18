@@ -33,6 +33,23 @@ pub async fn cloud_sign_out() -> AppResult<()> {
     .await
 }
 
+/// An update is about to restart the app (or that failed): see cloud.rs.
+/// Pending library and queue saves are written first (a restart skips the
+/// exit handler).
+#[tauri::command]
+pub async fn cloud_prepare_restart(app: tauri::AppHandle, restarting: bool) -> AppResult<()> {
+    blocking(move || {
+        cloud::freeze_for_restart(restarting);
+        if restarting {
+            if let Some(st) = tauri::Manager::try_state::<crate::state::AppState>(&app) {
+                st.save_all_now();
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// The user closed a sign-in dialog: stop waiting for the browser.
 #[tauri::command]
 pub fn cancel_sign_in() {

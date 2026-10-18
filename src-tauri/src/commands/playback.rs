@@ -17,6 +17,7 @@ pub fn play_track_inner(app: &AppHandle, st: &AppState, mut track: Track, platfo
         q.items.insert(at, item);
         at
     };
+    emit_queue(app);
     spawn_play(app, idx, false);
 }
 
@@ -246,8 +247,9 @@ pub fn start_radio(app: AppHandle, st: State<'_, AppState>, track: Track) {
     });
 }
 
-/// Warm up the stream for a song the user is likely to play (hover, top result).
+/// Warm up the stream for a song the user is likely to play (hover, top
+/// result). False when it was skipped (busy): the page may ask again.
 #[tauri::command]
-pub fn prefetch_track(app: AppHandle, track: Track, platform: Option<crate::models::Platform>) {
-    crate::controller::prefetch(&app, track, platform);
+pub fn prefetch_track(app: AppHandle, track: Track, platform: Option<crate::models::Platform>) -> bool {
+    crate::controller::prefetch(&app, track, platform)
 }

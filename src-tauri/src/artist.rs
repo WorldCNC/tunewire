@@ -65,7 +65,9 @@ pub async fn artist(name: &str, soundcloud_url: Option<String>) -> AppResult<Art
 
     let mut page = ArtistPage { name: name.to_string(), thumbnail: None, url: None, songs: Vec::new(), soundcloud: Vec::new() };
     for url in candidates {
-        let Ok(v) = ytdlp::flat(&url, Some(30)).await else { continue };
+        let Ok(v) = ytdlp::flat(&url, Some(30)).await else {
+            continue;
+        };
         let uploader = v.get("uploader").or_else(|| v.get("channel")).and_then(Value::as_str).unwrap_or("");
         if !same_artist(name, &crate::search::clean_uploader(uploader)) {
             continue;
@@ -136,9 +138,7 @@ async fn official_channel(name: &str) -> Option<String> {
         es.iter().find_map(|e| {
             let ch = e.get("channel").and_then(Value::as_str).unwrap_or("");
             let verified = e.get("channel_is_verified").and_then(Value::as_bool).unwrap_or(false);
-            (same_artist(name, &crate::search::clean_uploader(ch)) && (verified || !verified_only))
-                .then(|| e.get("channel_url").and_then(Value::as_str).map(str::to_string))
-                .flatten()
+            (same_artist(name, &crate::search::clean_uploader(ch)) && (verified || !verified_only)).then(|| e.get("channel_url").and_then(Value::as_str).map(str::to_string)).flatten()
         })
     };
     pick(true).or_else(|| pick(false))
@@ -151,7 +151,9 @@ pub async fn albums(name: &str, channel_url: Option<String>) -> AppResult<Vec<Al
         Some(c) => Some(c),
         None => official_channel(name).await,
     };
-    let Some(channel) = channel else { return Ok(Vec::new()) };
+    let Some(channel) = channel else {
+        return Ok(Vec::new());
+    };
     let v = match ytdlp::flat(&format!("{}/releases", channel.trim_end_matches('/')), Some(80)).await {
         Ok(v) => v,
         Err(AppError::YtDlp(_)) | Err(AppError::Unavailable(_)) => return Ok(Vec::new()),
@@ -161,14 +163,7 @@ pub async fn albums(name: &str, channel_url: Option<String>) -> AppResult<Vec<Al
     Ok(entries(&v)
         .iter()
         .filter(|e| seen.insert(norm_text(e.get("title").and_then(Value::as_str).unwrap_or(""))))
-        .filter_map(|e| {
-            Some(AlbumCard {
-                title: e.get("title").and_then(Value::as_str)?.to_string(),
-                url: e.get("url").and_then(Value::as_str)?.to_string(),
-                thumbnail: thumb(e),
-                tracks: 0,
-            })
-        })
+        .filter_map(|e| Some(AlbumCard { title: e.get("title").and_then(Value::as_str)?.to_string(), url: e.get("url").and_then(Value::as_str)?.to_string(), thumbnail: thumb(e), tracks: 0 }))
         .collect())
 }
 
@@ -182,9 +177,7 @@ pub async fn album_cover(url: &str) -> AppResult<Option<String>> {
         return Ok(hit.clone());
     }
     let v = ytdlp::flat(url, Some(1)).await?;
-    let cover = thumb(&v).or_else(|| {
-        entries(&v).first().and_then(|e| e.get("id").and_then(Value::as_str)).map(|id| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"))
-    });
+    let cover = thumb(&v).or_else(|| entries(&v).first().and_then(|e| e.get("id").and_then(Value::as_str)).map(|id| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg")));
     cache.lock().unwrap().insert(url.to_string(), cover.clone());
     Ok(cover)
 }
@@ -237,4 +230,3 @@ mod live_tests {
         assert_eq!(m.len(), 1);
     }
 }
-

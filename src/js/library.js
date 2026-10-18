@@ -24,7 +24,7 @@ async function refreshPlaylists({ silent = false } = {}) {
 
 function openPlaylist(id, { push = true } = {}) {
   state.selectedPlaylist = id;
-  if (state.playlists.find((p) => p.id === id)?.cloud_id) syncSoon(5000);
+  if (state.playlists.find((p) => p.id === id)?.cloud_id) syncChangedSoon();
   showView('playlist', { push, reopen: () => openPlaylist(id, { push: false }) });
   renderPlaylistDetail();
 }
@@ -38,7 +38,7 @@ function coverArt(tracks, cls, custom) {
   if (!thumbs.length) { box.innerHTML = icon('music'); return box; }
   if (thumbs.length >= 4) box.classList.add('grid4');
   for (const t of thumbs.length >= 4 ? thumbs : thumbs.slice(0, 1)) {
-    box.append(h('img', { src: t, 'data-px': thumbs.length >= 4 ? Math.round(big / 2) : big, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; } }));
+    box.append(h('img', { src: t, 'data-px': thumbs.length >= 4 ? Math.round(big / 2) : big, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.style.visibility = 'hidden'; }, onload: (e) => { if (isYtPlaceholder(e.target)) e.target.style.visibility = 'hidden'; } }));
   }
   return box;
 }
@@ -238,10 +238,12 @@ async function removeWithUndo(pl, indices) {
   const live = state.playlists.find((p) => p.id === pl.id) || pl;
   const before = live.tracks.slice();
   const added = { ...(live.added || {}) };
+  // Keys too: if a synced edit just moved things, the right songs still go.
+  const keys = indices.map((i) => (pl.tracks || before)[i]?.key).filter(Boolean);
   try {
     const n = indices.length === 1
-      ? (await call('remove_from_playlist', { id: pl.id, index: indices[0] }), 1)
-      : await call('remove_many_from_playlist', { id: pl.id, indices });
+      ? (await call('remove_from_playlist', { id: pl.id, index: indices[0], key: keys[0] ?? null }), 1)
+      : await call('remove_many_from_playlist', { id: pl.id, indices, keys });
     clearSelection();
     undoToast(`Removed ${n === 1 ? `“${before[indices[0]]?.title || 'song'}”` : `${n} songs`} from ${pl.name}`,
       () => call('replace_playlist_tracks', { id: pl.id, tracks: before, added }));
@@ -466,14 +468,16 @@ function renderChunked(list, items, makeRow, root) {
     if (!near || !sentinel.isConnected) return;
     const t0 = performance.now();
     const frag = document.createDocumentFragment();
+    const added = [];
     // About 4 ms of work per frame, at least one batch.
     do {
       const next = items.slice(n, n + BATCH_ROWS).map((it, k) => makeRow(it, n + k));
       n += next.length;
+      added.push(...next);
       frag.append(...next);
     } while (n < items.length && performance.now() - t0 < 3);
     sentinel.before(frag);
-    markPlaying();
+    markPlayingIn(added);
     if (n >= items.length) { io.disconnect(); sentinel.remove(); return; }
     list._chunkRaf = requestAnimationFrame(step);
   };
@@ -546,8 +550,8 @@ function renderPlaylistDetail() {
 
   const cm = !remote && pl.cloud_id ? cloudMeta.get(pl.cloud_id) : null;
   const kind = remote ? (pl.cloud ? 'Shared playlist' : pl.platform ? `${PLATFORMS[pl.platform]?.label || ''} playlist` : 'Playlist')
-    : cm?.collaborative || pl.cloud_role === 'editor' ? 'Collaborative playlist' : pl.cloud_role === 'follower' ? 'Followed playlist' : pl.cloud_id ? 'Shared playlist' : 'Playlist';
-  if (!remote && cloudOn() && pl.cloud_role !== 'follower') actions.push(h('button', { class: 'ab-icon', title: pl.cloud_id ? 'Copy link' : 'Share', html: icon('share'), onclick: () => sharePlaylist(pl) }));
+    : cm?.collaborative || pl.cloud_role === 'editor' ? 'Collaborative playlist' : pl.cloud_role === 'follower' ? 'Followed playlist' : isShared(pl) ? 'Shared playlist' : 'Playlist';
+  if (!remote && cloudOn() && pl.cloud_role !== 'follower') actions.push(h('button', { class: 'ab-icon', title: isShared(pl) ? 'Copy link' : 'Share', html: icon('share'), onclick: () => sharePlaylist(pl) }));
   renderCollection(box, {
     id,
     kind,
@@ -564,7 +568,7 @@ function renderPlaylistDetail() {
     actions,
     menu: remote ? () => [{ label: 'Add to queue', icon: 'plus', onClick: () => enqueue(tracks) }] : () => playlistMenuItems(pl),
     removeMany: remote ? null : (indices) => removeWithUndo(pl, indices),
-    reorder: remote ? null : (indices, to) => call('move_many_in_playlist', { id: pl.id, indices, to }).catch((e) => toast(errMsg(e), 'error')),
+    reorder: remote ? null : (indices, to) => callInOrder(`pl:${pl.id}`, 'move_many_in_playlist', { id: pl.id, indices, to, keys: indices.map((i) => tracks[i]?.key).filter(Boolean) }).catch((e) => toast(errMsg(e), 'error')),
     rowMenu: remote ? null : (t, i) => ['sep', { label: 'Remove from this playlist', icon: 'trash', onClick: () => removeWithUndo(pl, [i]) }],
     status: matchStatus(tracks),
     empty: h('div', { class: 'empty' }, h('p', {}, 'Let’s find something for your playlist'), h('p', { class: 'small' }, 'Search for songs, then drag them here or use ⋯ → Add to playlist.'),

@@ -62,11 +62,7 @@ impl AudioDecoder {
             .map_err(|e| AppError::Decode(format!("unrecognized stream ({e}; format {})", hint.unwrap_or("?"))))?;
         probing.store(false, std::sync::atomic::Ordering::Relaxed);
         let format = probed.format;
-        let track = format
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .ok_or_else(|| AppError::Decode("no audio track".into()))?;
+        let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or_else(|| AppError::Decode("no audio track".into()))?;
         let mut params = track.codec_params.clone();
         // WebM/Matroska leaves Opus channel info in the OpusHead header
         // (byte 9) instead of the codec parameters; the decoder needs it.
@@ -79,9 +75,7 @@ impl AudioDecoder {
             params.sample_rate = params.sample_rate.or(Some(48_000));
         }
         let track_id = track.id;
-        let decoder = codecs()
-            .make(&params, &DecoderOptions::default())
-            .map_err(|e| AppError::Decode(format!("unsupported codec ({e})")))?;
+        let decoder = codecs().make(&params, &DecoderOptions::default()).map_err(|e| AppError::Decode(format!("unsupported codec ({e})")))?;
         let total = match (params.n_frames, params.time_base) {
             (Some(n), Some(tb)) => {
                 let t = tb.calc_time(n);
@@ -91,19 +85,7 @@ impl AudioDecoder {
             _ => None,
         };
         let spec = SignalSpec::new(params.sample_rate.unwrap_or(48_000), params.channels.unwrap_or(symphonia::core::audio::Channels::FRONT_LEFT | symphonia::core::audio::Channels::FRONT_RIGHT));
-        let mut d = AudioDecoder {
-            format,
-            decoder,
-            track_id,
-            time_base: params.time_base,
-            spec,
-            buf: Vec::new(),
-            idx: 0,
-            scratch: None,
-            total,
-            skip: 0,
-            ended: false,
-        };
+        let mut d = AudioDecoder { format, decoder, track_id, time_base: params.time_base, spec, buf: Vec::new(), idx: 0, scratch: None, total, skip: 0, ended: false };
         // Decode the first packet so channels/rate reflect the real stream.
         d.refill();
         if d.ended && d.buf.is_empty() {

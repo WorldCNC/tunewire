@@ -226,10 +226,14 @@ function miniLogo(platform, { button = false, title } = {}) {
   return h(button ? 'button' : 'span', { class: `mini-logo ${platform}`, title: title || PLATFORMS[platform]?.label, html: plogo(platform) });
 }
 
+/** YouTube's gray "no picture" image (sent with a 404, so no error event). */
+const isYtPlaceholder = (img) => /ytimg\.com\//.test(img.src) && img.naturalWidth === 120 && img.naturalHeight === 90;
+
 function thumbEl(src, cls = 'thumb') {
   const t = h('div', { class: cls });
+  const missing = (img) => { img.remove(); t.innerHTML = icon('music'); };
   // Decoded off the main thread: rows scrolling into view don't stall a frame.
-  if (src) t.append(h('img', { src, loading: 'lazy', decoding: 'async', alt: '', referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); t.innerHTML = icon('music'); } }));
+  if (src) t.append(h('img', { src, loading: 'lazy', decoding: 'async', alt: '', referrerpolicy: 'no-referrer', onerror: (e) => missing(e.target), onload: (e) => { if (isYtPlaceholder(e.target)) missing(e.target); } }));
   else t.innerHTML = icon('music');
   return t;
 }
@@ -295,18 +299,26 @@ function openGallery(kind) { return lazyModule('gallery').then(() => openGallery
 function backupSettingsRows() { const box = h('div', { class: 'lazy-rows' }); lazyModule('backup').then(() => box.replaceWith(...backupSettingsRows())).catch(() => {}); return [box]; }
 function scrobbleSettingsRows() { const box = h('div', { class: 'lazy-rows' }); lazyModule('backup').then(() => box.replaceWith(...scrobbleSettingsRows())).catch(() => {}); return [box]; }
 
-/** Hooks run after a command succeeds (online sync of playlist edits). */
-const commandHooks = [];
 async function call(cmd, args) {
   try {
-    // Playlist edits: remember the songs before (removals are by index).
-    const before = /_playlist$|_in_playlist$|_from_playlist$/.test(cmd) && args?.id ? state.playlists.find((p) => p.id === args.id)?.tracks.slice() : null;
-    const result = await invoke(cmd, args);
-    for (const f of commandHooks) { try { f(cmd, args, result, before); } catch (e) { console.error(e); } }
-    return result;
+    return await invoke(cmd, args);
   } catch (e) {
     throw (typeof e === 'object' && e) ? e : { kind: 'error', message: String(e) };
   }
+}
+
+/**
+ * call(), but after the previous callInOrder() with the same `lane` has
+ * finished: library commands run in parallel in the backend, and a double
+ * click on the heart or two quick drags must apply in the order they happened.
+ */
+const callLanes = new Map();
+function callInOrder(lane, cmd, args) {
+  const run = (callLanes.get(lane) || Promise.resolve()).then(() => call(cmd, args));
+  const tail = run.catch(() => {});
+  callLanes.set(lane, tail);
+  tail.then(() => { if (callLanes.get(lane) === tail) callLanes.delete(lane); });
+  return run;
 }
 
 // ===========================================================================

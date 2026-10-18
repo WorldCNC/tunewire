@@ -9,11 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::store::write_atomic;
 
-const BUILTIN: &[&str] = &[
-    include_str!("../themes/midnight.json"),
-    include_str!("../themes/daylight.json"),
-    include_str!("../themes/synthwave.json"),
-];
+const BUILTIN: &[&str] = &[include_str!("../themes/midnight.json"), include_str!("../themes/daylight.json"), include_str!("../themes/synthwave.json")];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
@@ -48,15 +44,7 @@ pub struct ThemeMeta {
 
 impl From<&Theme> for ThemeMeta {
     fn from(t: &Theme) -> Self {
-        ThemeMeta {
-            id: t.id.clone(),
-            name: t.name.clone(),
-            author: t.author.clone(),
-            dark: t.dark,
-            builtin: t.builtin,
-            accent: t.vars.get("--accent").cloned(),
-            bg: t.vars.get("--bg").cloned(),
-        }
+        ThemeMeta { id: t.id.clone(), name: t.name.clone(), author: t.author.clone(), dark: t.dark, builtin: t.builtin, accent: t.vars.get("--accent").cloned(), bg: t.vars.get("--bg").cloned() }
     }
 }
 
@@ -128,7 +116,9 @@ impl ThemeStore {
     }
 
     fn user(&self) -> Vec<Theme> {
-        let Ok(rd) = std::fs::read_dir(&self.dir) else { return Vec::new() };
+        let Ok(rd) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
         let mut v: Vec<Theme> = rd
             .flatten()
             .filter(|e| e.path().extension().map(|x| x == "json").unwrap_or(false))
@@ -149,11 +139,7 @@ impl ThemeStore {
     }
 
     pub fn get(&self, id: &str) -> AppResult<Theme> {
-        Self::builtins()
-            .into_iter()
-            .chain(self.user())
-            .find(|t| t.id == id)
-            .ok_or_else(|| AppError::NotFound(format!("theme '{id}'")))
+        Self::builtins().into_iter().chain(self.user()).find(|t| t.id == id).ok_or_else(|| AppError::NotFound(format!("theme '{id}'")))
     }
 
     /// Save (create or overwrite) a user theme. Built-ins are never overwritten:

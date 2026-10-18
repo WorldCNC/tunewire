@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{AppError, AppResult};
-use crate::store::{now_ms, write_atomic, FollowedArtist, HistoryEntry, Playlist, Settings, Store};
 use crate::models::Track;
+use crate::store::{now_ms, write_atomic, FollowedArtist, HistoryEntry, Playlist, Settings, Store};
 use crate::themes::{Theme, ThemeStore};
 
 pub const FORMAT: &str = "tunewire-backup";
@@ -61,9 +61,7 @@ pub fn build(store: &Store, themes: &ThemeStore) -> Backup {
     if let Some(o) = settings.as_object_mut() {
         o.remove("spotify_client_secret");
     }
-    let plays = std::fs::read_to_string(store.dir.join("plays.jsonl"))
-        .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
-        .unwrap_or_default();
+    let plays = std::fs::read_to_string(store.dir.join("plays.jsonl")).map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()).unwrap_or_default();
     let custom = themes.list().into_iter().filter(|m| !m.builtin).filter_map(|m| themes.get(&m.id).ok()).collect();
     Backup {
         format: FORMAT.into(),
@@ -157,6 +155,7 @@ pub fn restore(store: &Store, themes: &ThemeStore, path: &Path) -> AppResult<Bac
         h.truncate(crate::store::HISTORY_MAX);
         Ok(())
     })?;
+    store.flush();
     let mut log = String::new();
     for p in &b.plays {
         log.push_str(&p.to_string());
@@ -185,12 +184,31 @@ mod tests {
         let themes = ThemeStore::new(dir.join("data/themes"));
         store
             .update_library(|lib| {
-                lib.playlists.push(Playlist { id: "p1".into(), name: "Road trip".into(), tracks: vec![track("x"), track("y")], source_url: None, created: 1, updated: 1, description: String::new(), cover: None, pinned: false, folder: None, added: Default::default(), cloud_id: None, cloud_role: None });
+                lib.playlists.push(Playlist {
+                    id: "p1".into(),
+                    name: "Road trip".into(),
+                    tracks: vec![track("x"), track("y")],
+                    source_url: None,
+                    created: 1,
+                    updated: 1,
+                    description: String::new(),
+                    cover: None,
+                    pinned: false,
+                    folder: None,
+                    added: Default::default(),
+                    cloud_id: None,
+                    cloud_role: None,
+                });
                 lib.favorites.push(track("z"));
                 Ok(())
             })
             .unwrap();
-        store.update_settings(|s| { s.crossfade = 4.0; s.local_folders = vec!["/music".into()]; }).unwrap();
+        store
+            .update_settings(|s| {
+                s.crossfade = 4.0;
+                s.local_folders = vec!["/music".into()];
+            })
+            .unwrap();
         std::fs::write(store.dir.join("plays.jsonl"), "{\"t\":1,\"secs\":40.0,\"platform\":null,\"track\":{\"key\":\"x\",\"title\":\"x\",\"versions\":[]}}\n").unwrap();
 
         let file = dir.join("my.tunewire-backup");
@@ -198,8 +216,19 @@ mod tests {
         assert_eq!((s.playlists, s.songs, s.favorites, s.plays), (1, 2, 1, 1));
 
         // Change everything, then restore.
-        store.update_library(|lib| { lib.playlists.clear(); lib.favorites.clear(); Ok(()) }).unwrap();
-        store.update_settings(|s| { s.crossfade = 0.0; s.local_folders = vec!["/other".into()]; }).unwrap();
+        store
+            .update_library(|lib| {
+                lib.playlists.clear();
+                lib.favorites.clear();
+                Ok(())
+            })
+            .unwrap();
+        store
+            .update_settings(|s| {
+                s.crossfade = 0.0;
+                s.local_folders = vec!["/other".into()];
+            })
+            .unwrap();
         std::fs::write(store.dir.join("plays.jsonl"), "").unwrap();
         restore(&store, &themes, &file).unwrap();
 

@@ -18,8 +18,8 @@
 //!   themes, plugins, discord
 
 mod artist;
-mod backup;
 mod audio;
+mod backup;
 mod cloud;
 mod commands;
 mod controller;
@@ -28,12 +28,12 @@ mod decoder;
 mod discord;
 mod downloads;
 mod eq;
-mod explore;
-mod imports;
-mod foryou;
 mod error;
+mod explore;
+mod foryou;
 mod gallery;
 mod http;
+mod imports;
 mod localfiles;
 mod loopback;
 mod lyrics;
@@ -61,9 +61,9 @@ mod ytdlp_worker;
 mod ytm;
 
 #[cfg(test)]
-mod itests;
-#[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod itests;
 #[cfg(test)]
 mod perfbench;
 
@@ -172,16 +172,11 @@ pub fn run() {
             let audio = AudioHandle::spawn(store.settings().volume, move |ev| controller::on_engine_event(&handle, ev));
             let settings = store.settings();
             // Last session's queue, restored paused (play resumes where it was).
-            let saved: state::SavedQueue = store::load_json(&data.join("queue.json"));
+            let saved = state::SavedQueue::load(&data);
             let current_item = saved.current.and_then(|i| saved.items.get(i).cloned());
             let resume = current_item.as_ref().filter(|_| saved.position > 3.0).map(|i| (i.uid, saved.position));
-            let queue = QueueState {
-                next_uid: saved.items.iter().map(|i| i.uid).max().unwrap_or(0),
-                current: current_item.as_ref().and(saved.current),
-                items: saved.items,
-                resume_at: None,
-                unshuffled: None,
-            };
+            let queue =
+                QueueState { next_uid: saved.items.iter().map(|i| i.uid).max().unwrap_or(0), current: current_item.as_ref().and(saved.current), items: saved.items, resume_at: None, unshuffled: None };
             app.manage(AppState {
                 store,
                 themes,
@@ -199,7 +194,7 @@ pub fn run() {
                 discord,
                 consecutive_failures: AtomicU32::new(0),
                 data_dir: data,
-                last_full: Mutex::new(String::new()),
+                last_full: AtomicU64::new(0),
                 search_gen: AtomicU64::new(0),
                 volume_save_gen: AtomicU64::new(0),
                 resume_position: Mutex::new(resume),
@@ -233,8 +228,16 @@ pub fn run() {
                 }
             });
             // Python + yt_dlp import take ~0.5 s; pay it now, not on the first song.
-            tauri::async_runtime::spawn(async {
+            let bin_dir = (settings.ytdlp_source == "bundled").then(|| app.state::<AppState>().data_dir.join("bin"));
+            tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                // A bundled standalone yt-dlp from an older version: switch to
+                // the zipapp when Python can run it (the worker needs it).
+                if let Some(dir) = bin_dir {
+                    if tauri::async_runtime::spawn_blocking(move || ytdlp::upgrade_bundled(&dir)).await.unwrap_or(false) {
+                        ytdlp_worker::reset().await;
+                    }
+                }
                 ytdlp_worker::warm(ytdlp::binary()).await;
                 ytdlp::warm_youtube().await;
             });
@@ -271,6 +274,18 @@ pub fn run() {
                     for u in ev.urls() {
                         let _ = tauri::Emitter::emit(&h, "deep-link", u.to_string());
                     }
+                });
+            }
+            // Logout/shutdown (SIGTERM) and Ctrl+C: exit normally, so the Exit
+            // handler below saves the library, stats and queue.
+            #[cfg(unix)]
+            {
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let (Ok(mut term), Ok(mut int)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else { return };
+                    std::future::poll_fn(|cx| if term.poll_recv(cx).is_ready() || int.poll_recv(cx).is_ready() { std::task::Poll::Ready(()) } else { std::task::Poll::Pending }).await;
+                    h.exit(0);
                 });
             }
             media::init(app);
@@ -337,12 +352,16 @@ pub fn run() {
             library::update_playlist_meta,
             library::set_playlist_cloud,
             library::replace_playlist_tracks,
+            library::replace_favorites,
+            library::load_sync_state,
+            library::save_sync_state,
             playback::set_sleep_timer,
             commands::queue::set_shuffle,
             commands::cloud::cloud_config,
             commands::cloud::cloud_session,
             commands::cloud::cloud_sign_in,
             commands::cloud::cloud_sign_out,
+            commands::cloud::cloud_prepare_restart,
             commands::cloud::cancel_sign_in,
             commands::extras::backup_file_name,
             commands::extras::export_backup,
@@ -363,6 +382,7 @@ pub fn run() {
             commands::foryou::listening_stats,
             commands::foryou::save_share_image,
             commands::explore::search_suggestions,
+            commands::explore::search_preview,
             commands::explore::search_history,
             commands::explore::clear_search_history,
             commands::explore::chart_countries,
@@ -431,9 +451,16 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|_, ev| {
+        .run(|app, ev| {
             if let tauri::RunEvent::Exit = ev {
+                // A sign-in refresh in flight saves its new token first.
+                cloud::freeze_for_restart(true);
                 stats::flush();
+                // Library changes still waiting for the background writer, and
+                // where the song was.
+                if let Some(st) = app.try_state::<AppState>() {
+                    st.save_all_now();
+                }
             }
         });
 }

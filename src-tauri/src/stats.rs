@@ -52,7 +52,9 @@ static LISTEN: Mutex<Option<Listen>> = Mutex::new(None);
 /// only when a reader still holds the previous snapshot.
 static PLAYS: Mutex<Option<Arc<Vec<Play>>>> = Mutex::new(None);
 /// Last summary per (range, year), valid while the log length is unchanged.
-static SUMMARIES: Mutex<Option<HashMap<(String, Option<i32>), (usize, Stats)>>> = Mutex::new(None);
+/// (kind, year) -> (plays counted, stats).
+type SummaryCache = HashMap<(String, Option<i32>), (usize, Stats)>;
+static SUMMARIES: Mutex<Option<SummaryCache>> = Mutex::new(None);
 static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn log_path(dir: &Path) -> PathBuf {
@@ -78,10 +80,10 @@ pub fn init(dir: &Path, history: &[crate::store::HistoryEntry]) {
 }
 
 fn load() -> Vec<Play> {
-    let Some(dir) = DIR.lock().unwrap().clone() else { return Vec::new() };
-    std::fs::read_to_string(log_path(&dir))
-        .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
-        .unwrap_or_default()
+    let Some(dir) = DIR.lock().unwrap().clone() else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(log_path(&dir)).map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()).unwrap_or_default()
 }
 
 /// All logged plays, oldest first.
@@ -115,7 +117,9 @@ fn append(l: Listen) {
         return;
     }
     let play = Play { t: l.started, secs: (l.secs * 10.0).round() / 10.0, est: false, platform: l.platform, track: slim(&l.track, l.platform) };
-    let Some(dir) = DIR.lock().unwrap().clone() else { return };
+    let Some(dir) = DIR.lock().unwrap().clone() else {
+        return;
+    };
     if let Ok(line) = serde_json::to_string(&play) {
         let file = std::fs::OpenOptions::new().create(true).append(true).open(log_path(&dir));
         if let Ok(mut f) = file {
@@ -142,6 +146,10 @@ pub fn on_tick(ps: &PlaybackState) {
         }
     }
     if let Some(l) = g.as_mut() {
+        // The artist was completed after the song started (fast YouTube lookup).
+        if let Some(c) = cur.filter(|c| c.track.key != l.track.key) {
+            l.track = c.track.clone();
+        }
         if ps.status == "playing" {
             // Capped, so a suspended laptop doesn't count as hours of listening.
             l.secs += l.last.elapsed().as_secs_f64().min(2.0);
@@ -365,7 +373,9 @@ fn summarize_plays(all: &[Play], range: &str, year: Option<i32>) -> Stats {
     let best_by_artist: HashMap<String, Track> = top.iter().rev().map(|a| (primary_artist(&a.track.artist), a.track.clone())).collect();
     s.top_tracks = top.into_iter().take(50).map(|a| TopTrack { track: a.track, plays: a.plays, minutes: a.secs / 60.0 }).collect();
 
-    let mut arts: Vec<(String, (String, usize, f64, Option<String>))> = artists.into_iter().filter(|a| a.1 .1 > 0).collect();
+    /// Key -> (name, plays, minutes, picture).
+    type ArtistTally = (String, (String, usize, f64, Option<String>));
+    let mut arts: Vec<ArtistTally> = artists.into_iter().filter(|a| a.1 .1 > 0).collect();
     arts.sort_by(|a, b| b.1 .2.total_cmp(&a.1 .2));
     s.top_artists = arts
         .into_iter()
@@ -408,8 +418,20 @@ mod tests {
 
     fn play(t: u64, secs: f64, title: &str, artist: &str) -> Play {
         let v = TrackVersion {
-            platform: Platform::Ytmusic, url: format!("u/{title}"), id: String::new(), title: title.into(), artist: artist.into(),
-            duration: Some(200.0), thumbnail: None, preview: false, partial: false, artist_url: None, album: None, rank: 0, matched_for: None, isrc_match: false,
+            platform: Platform::Ytmusic,
+            url: format!("u/{title}"),
+            id: String::new(),
+            title: title.into(),
+            artist: artist.into(),
+            duration: Some(200.0),
+            thumbnail: None,
+            preview: false,
+            partial: false,
+            artist_url: None,
+            album: None,
+            rank: 0,
+            matched_for: None,
+            isrc_match: false,
         };
         Play { t, secs, est: false, platform: Some(Platform::Ytmusic), track: Track::from_version(v) }
     }

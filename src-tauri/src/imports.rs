@@ -47,13 +47,7 @@ pub struct SpotifyLibrary {
 }
 
 fn token() -> AppResult<String> {
-    TOKEN
-        .lock()
-        .unwrap()
-        .as_ref()
-        .filter(|(_, at)| at.elapsed() < Duration::from_secs(50 * 60))
-        .map(|(t, _)| t.clone())
-        .ok_or_else(|| AppError::Unavailable("log in to Spotify first".into()))
+    TOKEN.lock().unwrap().as_ref().filter(|(_, at)| at.elapsed() < Duration::from_secs(50 * 60)).map(|(t, _)| t.clone()).ok_or_else(|| AppError::Unavailable("log in to Spotify first".into()))
 }
 
 fn api_blocking(token: &str, url: &str) -> AppResult<Value> {
@@ -100,12 +94,7 @@ async fn api(url: String) -> AppResult<Value> {
 fn image(v: &Value) -> Option<String> {
     let imgs = v.get("images").and_then(Value::as_array)?;
     // Smallest image that's still at least 300 px, else the biggest.
-    imgs.iter()
-        .filter(|i| i.get("width").and_then(Value::as_u64).unwrap_or(640) >= 300)
-        .next_back()
-        .or_else(|| imgs.first())
-        .and_then(|i| i.get("url").and_then(Value::as_str))
-        .map(str::to_string)
+    imgs.iter().rfind(|i| i.get("width").and_then(Value::as_u64).unwrap_or(640) >= 300).or_else(|| imgs.first()).and_then(|i| i.get("url").and_then(Value::as_str)).map(str::to_string)
 }
 
 fn spotify_track(t: &Value) -> Option<Track> {
@@ -171,7 +160,9 @@ pub async fn spotify_login(app: &AppHandle) -> AppResult<SpotifyLibrary> {
     let steps = Steps::new(app);
     if token().is_err() {
         steps.step("Waiting for you to log in in your browser…");
-        let tok = crate::spotify_play::oauth(&["streaming", "user-library-read", "playlist-read-private", "playlist-read-collaborative"]).await.inspect_err(|e| steps.step(&format!("Sign-in failed: {e}")))?;
+        let tok = crate::spotify_play::oauth(&["streaming", "user-library-read", "playlist-read-private", "playlist-read-collaborative"])
+            .await
+            .inspect_err(|e| steps.step(&format!("Sign-in failed: {e}")))?;
         *TOKEN.lock().unwrap() = Some((tok, std::time::Instant::now()));
         steps.step("Signed in. Reading your library…");
     }
@@ -244,7 +235,9 @@ async fn list_library(steps: &Steps<'_>) -> AppResult<SpotifyLibrary> {
         let page = api(url).await?;
         let items = page.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
         for p in &items {
-            let Some(id) = p.get("id").and_then(Value::as_str) else { continue };
+            let Some(id) = p.get("id").and_then(Value::as_str) else {
+                continue;
+            };
             playlists.push(SpotifyPlaylistInfo {
                 id: id.to_string(),
                 name: p.get("name").and_then(Value::as_str).unwrap_or("Playlist").to_string(),
@@ -330,7 +323,9 @@ pub async fn spotify_profile(user: &str) -> AppResult<(String, Vec<SpotifyPlayli
         match api(url).await {
             Ok(page) => {
                 for p in page.get("items").and_then(Value::as_array).into_iter().flatten() {
-                    let Some(id) = p.get("id").and_then(Value::as_str) else { continue };
+                    let Some(id) = p.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
                     out.push(SpotifyPlaylistInfo {
                         id: id.to_string(),
                         name: p.get("name").and_then(Value::as_str).unwrap_or("Playlist").to_string(),
@@ -350,7 +345,13 @@ pub async fn spotify_profile(user: &str) -> AppResult<(String, Vec<SpotifyPlayli
         let u = user.to_string();
         let v = tauri::async_runtime::spawn_blocking(move || -> AppResult<Value> {
             let url = format!("https://spclient.wg.spotify.com/user-profile-view/v3/profile/{u}/playlists?offset=0&limit=200&market=from_token");
-            let mut r = crate::http::agent().get(&url).header("Authorization", &format!("Bearer {t}")).header("Accept", "application/json").header("App-Platform", "WebPlayer").call().map_err(|e| AppError::Extraction(format!("Spotify profile view: {e}")))?;
+            let mut r = crate::http::agent()
+                .get(&url)
+                .header("Authorization", &format!("Bearer {t}"))
+                .header("Accept", "application/json")
+                .header("App-Platform", "WebPlayer")
+                .call()
+                .map_err(|e| AppError::Extraction(format!("Spotify profile view: {e}")))?;
             Ok(serde_json::from_str(&r.body_mut().read_to_string().map_err(|e| AppError::Network(e.to_string()))?)?)
         })
         .await
@@ -358,7 +359,9 @@ pub async fn spotify_profile(user: &str) -> AppResult<(String, Vec<SpotifyPlayli
         match v {
             Ok(v) => {
                 for p in v.get("public_playlists").and_then(Value::as_array).into_iter().flatten() {
-                    let Some(id) = p.get("uri").and_then(Value::as_str).and_then(|u| u.rsplit(':').next()) else { continue };
+                    let Some(id) = p.get("uri").and_then(Value::as_str).and_then(|u| u.rsplit(':').next()) else {
+                        continue;
+                    };
                     out.push(SpotifyPlaylistInfo {
                         id: id.to_string(),
                         name: p.get("name").and_then(Value::as_str).unwrap_or("Playlist").to_string(),
@@ -429,7 +432,9 @@ fn parse_apple(html: &str) -> AppResult<(String, Vec<ImportRow>)> {
             continue;
         }
         for it in &items {
-            let Some(name) = it.get("title").and_then(Value::as_str) else { continue };
+            let Some(name) = it.get("title").and_then(Value::as_str) else {
+                continue;
+            };
             let artist = it.get("subtitleLinks").and_then(Value::as_array).map(|a| a.iter().filter_map(|l| l.get("title").and_then(Value::as_str)).collect::<Vec<_>>().join(", ")).unwrap_or_default();
             let album = it.pointer("/tertiaryLinks/0/title").and_then(Value::as_str).map(|a| a.trim_end_matches(" - Single").trim_end_matches(" - EP").to_string());
             let duration = it.get("duration").and_then(Value::as_f64).map(|ms| ms / 1000.0);

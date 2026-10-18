@@ -79,6 +79,14 @@ async function listenAlong(uid, name) {
   Object.assign(along, { uid, name, key: null });
   along.channel = new Channel(`along:${uid}`, { changes: [{ event: 'UPDATE', schema: 'public', table: 'now_playing', filter: `user_id=eq.${uid}` }] });
   along.channel.on('change', (d) => { if (d?.record) followAlong(d.record); });
+  // After a reconnect: where they are now (changes while away were missed).
+  let first = true;
+  along.channel.on('status', async (s) => {
+    if (s !== 'live') return;
+    if (first) { first = false; return; }
+    const [now] = await db('GET', `now_playing?user_id=eq.${uid}&select=*`).catch(() => []);
+    if (now && along.uid === uid) followAlong(now);
+  });
   await followAlong(row);
   paintAlong();
   toast(`Listening along with ${name}`, 'ok', 2500);
@@ -289,29 +297,133 @@ async function tasteMatch(theirArtists) {
 }
 
 // Editing your profile ----------------------------------------------------------------------------
+const MEDIA_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+const MEDIA_MAX = 8 * 1024 * 1024;
+
+/**
+ * A picked file, ready to upload: GIFs as they are (so they keep moving),
+ * other pictures cropped square (picture) or scaled down (banner).
+ */
+function prepareMedia(file, kind) {
+  const ext = MEDIA_TYPES[file.type];
+  if (!ext) return Promise.reject(new Error('Pick a PNG, JPEG, WebP or GIF picture.'));
+  if (file.size > MEDIA_MAX) return Promise.reject(new Error('That file is too big (8 MB at most).'));
+  if (ext === 'gif') return Promise.resolve({ blob: file, ext });
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      const c = document.createElement('canvas');
+      const g = c.getContext('2d');
+      if (kind === 'avatar') {
+        const side = Math.min(img.width, img.height);
+        c.width = c.height = Math.min(512, side);
+        g.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, c.width, c.height);
+      } else {
+        const scale = Math.min(1, 1600 / img.width);
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        g.drawImage(img, 0, 0, c.width, c.height);
+      }
+      const type = kind === 'avatar' ? 'image/png' : 'image/jpeg';
+      c.toBlob((blob) => (blob ? resolve({ blob, ext: MEDIA_TYPES[blob.type] || 'png' }) : reject(new Error('That picture couldn’t be read.'))), type, 0.88);
+    };
+    img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('That file isn’t a picture Tunewire can read.')); };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 async function editProfile(p, done) {
   const name = h('input', { class: 'input', value: p.name || '', maxlength: 40, 'aria-label': 'Name' });
   const pronouns = h('input', { class: 'input', value: p.pronouns || '', maxlength: 40, placeholder: 'e.g. she/her, they/them', 'aria-label': 'Pronouns' });
   const bio = h('textarea', { class: 'input font-inherit', rows: 4, maxlength: 300, placeholder: 'A line about you and your music', 'aria-label': 'Bio' }, p.bio || '');
   const count = h('span', { class: 'meta' }, `${(p.bio || '').length}/300`);
   bio.addEventListener('input', () => { count.textContent = `${bio.value.length}/300`; });
+
+  // Picture and banner: what's there now, or a picked file (shown right away).
+  const media = { avatar: { value: p.avatar || null, file: null, preview: null }, banner: { value: p.banner || null, file: null, preview: null } };
+  const accent = p.accent_color != null ? hexColor(p.accent_color) : null;
+  const bannerBox = h('div', { class: 'pe-banner' });
+  const avatarBox = h('div', { class: 'pe-avatar' });
+  const shown = (k) => media[k].preview || mediaUrl(media[k].value);
+  const paint = () => {
+    const b = shown('banner');
+    bannerBox.style.backgroundImage = b ? `url("${b}")` : '';
+    bannerBox.classList.toggle('no-image', !b);
+    if (accent) bannerBox.style.setProperty('--accent-c', accent);
+    const a = shown('avatar');
+    avatarBox.replaceChildren(a ? h('img', { src: a, alt: '' }) : document.createTextNode((name.value || p.name || '?')[0].toUpperCase()));
+    removeAvatar.hidden = !a;
+    removeBanner.hidden = !b;
+  };
+  const picker = (kind) => {
+    const input = h('input', { type: 'file', accept: Object.keys(MEDIA_TYPES).join(','), hidden: true });
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      input.value = '';
+      if (!f) return;
+      try {
+        const ready = await prepareMedia(f, kind);
+        if (media[kind].preview) URL.revokeObjectURL(media[kind].preview);
+        media[kind].file = ready;
+        media[kind].preview = URL.createObjectURL(ready.blob);
+        paint();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+    return input;
+  };
+  const clear = (kind) => {
+    if (media[kind].preview) URL.revokeObjectURL(media[kind].preview);
+    Object.assign(media[kind], { value: null, file: null, preview: null });
+    paint();
+  };
+  const avatarInput = picker('avatar');
+  const bannerInput = picker('banner');
+  const removeAvatar = h('button', { class: 'btn small', onclick: () => clear('avatar') }, 'Remove');
+  const removeBanner = h('button', { class: 'btn small', onclick: () => clear('banner') }, 'Remove');
+  avatarBox.addEventListener('click', () => avatarInput.click());
+  bannerBox.addEventListener('click', () => bannerInput.click());
+  paint();
+
+  const save = h('button', { class: 'btn primary' }, 'Save');
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    save.textContent = 'Saving…';
+    try {
+      const patch = { name: name.value.trim().slice(0, 40) || p.name, pronouns: pronouns.value.trim().slice(0, 40), bio: bio.value.trim().slice(0, 300) };
+      for (const k of ['avatar', 'banner']) {
+        const m = media[k];
+        if (m.file) patch[k] = await uploadMedia(m.file.blob, m.file.ext);
+        else if (m.value !== (p[k] || null)) patch[k] = null;
+      }
+      await db('PATCH', `profiles?id=eq.${cloud.session.user_id}`, patch);
+      // The old uploads aren't used anymore.
+      for (const k of ['avatar', 'banner']) if (k in patch && p[k] !== patch[k]) removeMedia(p[k]);
+      cloud.session.name = patch.name;
+      if ('avatar' in patch) cloud.session.avatar = patch.avatar;
+      cloud.profile = { ...(cloud.profile || {}), ...patch };
+      cloudChanged();
+      m.close();
+      done?.();
+    } catch (e) {
+      toast(errMsg(e), 'error');
+      save.disabled = false;
+      save.textContent = 'Save';
+    }
+  });
   const m = openModal({
     title: 'Edit profile',
     body: h('div', { class: 'col gap-10' },
+      h('div', { class: 'pe-head' }, bannerBox, h('div', { class: 'pe-row' }, avatarBox,
+        h('div', { class: 'pe-actions' },
+          h('div', { class: 'pe-group' }, h('button', { class: 'btn small', onclick: () => avatarInput.click() }, 'Change picture'), removeAvatar),
+          h('div', { class: 'pe-group' }, h('button', { class: 'btn small', onclick: () => bannerInput.click() }, 'Change banner'), removeBanner))),
+      avatarInput, bannerInput),
+      h('p', { class: 'meta' }, 'PNG, JPEG, WebP or GIF, up to 8 MB. GIFs stay animated. Your Discord picture and banner were added when you joined; they only change when you change them here.'),
       h('label', { class: 'field' }, h('span', {}, 'Name'), name),
       h('label', { class: 'field' }, h('span', {}, 'Pronouns'), pronouns),
-      h('label', { class: 'field' }, h('span', {}, 'Bio'), bio, count),
-      h('p', { class: 'meta' }, 'Your picture, banner and avatar decoration come from Discord and update when you sign in.')),
-    footer: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
-      const patch = { name: name.value.trim().slice(0, 40) || p.name, pronouns: pronouns.value.trim().slice(0, 40), bio: bio.value.trim().slice(0, 300) };
-      try {
-        await db('PATCH', `profiles?id=eq.${cloud.session.user_id}`, patch);
-        cloud.session.name = patch.name;
-        cloud.profile = { ...(cloud.profile || {}), ...patch };
-        cloudChanged();
-        m.close();
-        done?.();
-      } catch (e) { toast(errMsg(e), 'error'); }
-    } }, 'Save')],
+      h('label', { class: 'field' }, h('span', {}, 'Bio'), bio, count)),
+    footer: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), save],
+    onClose: () => { for (const k of ['avatar', 'banner']) if (media[k].preview) URL.revokeObjectURL(media[k].preview); },
   });
 }

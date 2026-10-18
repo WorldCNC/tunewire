@@ -41,7 +41,9 @@ pub fn init(dir: &std::path::Path) {
 }
 
 fn save() {
-    let Some(path) = PATH.lock().unwrap().clone() else { return };
+    let Some(path) = PATH.lock().unwrap().clone() else {
+        return;
+    };
     let data = MATCHES.lock().unwrap().as_ref().and_then(|m| serde_json::to_vec(m).ok());
     if let Some(data) = data {
         let _ = crate::store::write_atomic(&path, &data);
@@ -88,7 +90,9 @@ pub fn apply(track: &mut Track) -> bool {
     if playable(track) {
         return false;
     }
-    let Some(id) = spotify_version(track).map(|v| v.id.clone()) else { return false };
+    let Some(id) = spotify_version(track).map(|v| v.id.clone()) else {
+        return false;
+    };
     match lookup(&id) {
         Some(v) => {
             track.versions.push(v);
@@ -342,7 +346,6 @@ pub fn with_matches(mut tracks: Vec<Track>) -> Vec<Track> {
     tracks
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,7 +357,20 @@ mod tests {
         let _g = rt.enter();
         *MATCHES.lock().unwrap() = Some(HashMap::new());
         let mut sps = Vec::new();
-        for q in ["daft punk one more time", "tame impala let it happen", "kendrick lamar money trees", "hiatus kaiyote nakamarra", "fleetwood mac dreams", "radiohead weird fishes", "billie eilish birds of a feather", "sza snooze", "arctic monkeys 505", "frank ocean pink + white", "mitski my love mine all mine", "the weeknd blinding lights"] {
+        for q in [
+            "daft punk one more time",
+            "tame impala let it happen",
+            "kendrick lamar money trees",
+            "hiatus kaiyote nakamarra",
+            "fleetwood mac dreams",
+            "radiohead weird fishes",
+            "billie eilish birds of a feather",
+            "sza snooze",
+            "arctic monkeys 505",
+            "frank ocean pink + white",
+            "mitski my love mine all mine",
+            "the weeknd blinding lights",
+        ] {
             sps.push(rt.block_on(crate::spotify::search(q, 1)).unwrap().remove(0));
         }
         let t0 = std::time::Instant::now();

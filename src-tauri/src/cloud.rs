@@ -7,12 +7,21 @@
 //! concurrent refreshes would spend the same token twice. Only a rejected
 //! grant signs the user out; network or server trouble keeps the session.
 //!
+//! Staying signed in across restarts and updates: the whole session (not
+//! just the refresh token) is saved, so a restart within the hour reuses the
+//! access token and spends nothing. Before an update restarts the app,
+//! refreshing is paused and any refresh in flight finishes saving, so the
+//! new version never starts with a token the server already replaced. If a
+//! token is refused because the previous run (still closing) just replaced
+//! it, the newer saved one is used instead of signing out.
+//!
 //! Project URL and anon key are public by design (row level security does
 //! the protecting). They're baked in at build time (TUNEWIRE_SUPABASE_URL,
 //! TUNEWIRE_SUPABASE_ANON_KEY) or set in settings for development.
 
 use std::io::Write;
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -62,11 +71,7 @@ pub struct CloudSession {
 /// The avatar decoration's image (animated PNG) from a Discord user object.
 fn discord_decoration(me: &Value) -> Option<String> {
     let asset = me.pointer("/avatar_decoration_data/asset").and_then(Value::as_str)?;
-    asset
-        .trim_start_matches("a_")
-        .chars()
-        .all(|c| c.is_ascii_hexdigit())
-        .then(|| format!("https://cdn.discordapp.com/avatar-decoration-presets/{asset}.png?size=160&passthrough=true"))
+    asset.trim_start_matches("a_").chars().all(|c| c.is_ascii_hexdigit()).then(|| format!("https://cdn.discordapp.com/avatar-decoration-presets/{asset}.png?size=160&passthrough=true"))
 }
 
 /// Banner image URL (Discord CDN) and accent color from a Discord user object.
@@ -107,11 +112,15 @@ static SESSION: Mutex<Option<Inner>> = Mutex::new(None);
 /// Held for the whole refresh request (see the module docs).
 static REFRESHING: Mutex<()> = Mutex::new(());
 static OVERRIDE: Mutex<Option<CloudConfig>> = Mutex::new(None);
+/// Set while the app restarts for an update: no new refreshes.
+static FROZEN: AtomicBool = AtomicBool::new(false);
 static FALLBACK_FILE: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
 
 pub fn init(dir: &std::path::Path, settings_url: &str, settings_key: &str) {
     *FALLBACK_FILE.lock().unwrap() = Some(dir.join("cloud_session"));
-    if !settings_url.is_empty() && !settings_key.is_empty() {
+    // Development only: in a release, settings (which the page can change)
+    // must never be able to send the sign-in token to another server.
+    if cfg!(debug_assertions) && !settings_url.is_empty() && !settings_key.is_empty() {
         *OVERRIDE.lock().unwrap() = Some(CloudConfig { url: settings_url.trim_end_matches('/').to_string(), anon_key: settings_key.to_string(), share_url: share_url() });
     }
 }
@@ -130,33 +139,90 @@ fn cfg() -> AppResult<CloudConfig> {
     config().ok_or_else(|| AppError::Unavailable("online features aren't set up in this build".into()))
 }
 
-// Token storage: keychain, or a private file where there is none.
-fn save_refresh(token: &str) {
-    if crate::secrets::set(KEY_REFRESH, token).is_err() {
-        if let Some(p) = FALLBACK_FILE.lock().unwrap().as_ref() {
-            // Created private: never briefly readable by other users.
-            let mut o = std::fs::OpenOptions::new();
-            o.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                o.mode(0o600);
-            }
-            if let Ok(mut f) = o.open(p) {
-                let _ = f.write_all(token.as_bytes());
-            }
+/// What's kept between runs: the refresh token, plus the session it came
+/// with (so a restart can reuse a still-valid access token).
+struct Stored {
+    refresh: String,
+    session: Option<CloudSession>,
+}
+
+// Storage. The refresh token goes in the keychain, or a private file where
+// the keychain doesn't work; that file only exists while it's the newest
+// copy (a keychain write failed), is read first, and is removed once the
+// keychain takes a write again. The session itself (a short-lived access
+// token, too big for some keychains) goes in a private file, tagged with the
+// refresh token it belongs to.
+fn token_tag(refresh: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(refresh.trim().as_bytes()).iter().take(12).map(|b| format!("{b:02x}")).collect()
+}
+
+fn session_file() -> Option<std::path::PathBuf> {
+    FALLBACK_FILE.lock().unwrap().as_ref().map(|p| p.with_file_name("cloud_session.json"))
+}
+
+/// Write `data` readable by this user only.
+fn write_private(path: &std::path::Path, data: &[u8]) {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    if let Ok(mut f) = o.open(path) {
+        let _ = f.write_all(data).and_then(|_| f.sync_all());
+    }
+}
+
+fn save_stored(st: &Stored) {
+    let file = FALLBACK_FILE.lock().unwrap().clone();
+    if crate::secrets::set(KEY_REFRESH, &st.refresh).is_ok() {
+        if let Some(p) = &file {
+            let _ = std::fs::remove_file(p);
+        }
+    } else if let Some(p) = &file {
+        write_private(p, st.refresh.as_bytes());
+    }
+    if let (Some(p), Some(session)) = (session_file(), &st.session) {
+        if let Ok(data) = serde_json::to_vec(&serde_json::json!({ "for": token_tag(&st.refresh), "session": session })) {
+            write_private(&p, &data);
         }
     }
 }
 
-fn load_refresh() -> Option<String> {
-    crate::secrets::get(KEY_REFRESH).or_else(|| FALLBACK_FILE.lock().unwrap().as_ref().and_then(|p| std::fs::read_to_string(p).ok()).filter(|s| !s.trim().is_empty()))
+fn load_stored() -> Option<Stored> {
+    let file = FALLBACK_FILE.lock().unwrap().as_ref().and_then(|p| std::fs::read_to_string(p).ok());
+    let refresh = file.filter(|s| !s.trim().is_empty()).or_else(|| crate::secrets::get(KEY_REFRESH))?.trim().to_string();
+    if refresh.is_empty() {
+        return None;
+    }
+    // The saved session only counts if it came with this refresh token.
+    let session = session_file()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter(|v| v.get("for").and_then(Value::as_str) == Some(token_tag(&refresh).as_str()))
+        .and_then(|v| serde_json::from_value::<CloudSession>(v.get("session")?.clone()).ok());
+    Some(Stored { refresh, session })
 }
 
 fn clear_refresh() {
     let _ = crate::secrets::set(KEY_REFRESH, "");
-    if let Some(p) = FALLBACK_FILE.lock().unwrap().as_ref() {
+    // Separate statements: a lock guard lives until the end of its statement,
+    // and session_file() takes the same lock.
+    let token_file = FALLBACK_FILE.lock().unwrap().clone();
+    let files = [token_file, session_file()];
+    for p in files.into_iter().flatten() {
         let _ = std::fs::remove_file(p);
+    }
+}
+
+/// The update is about to restart the app (true), or that failed (false).
+/// Waits for a refresh in flight, so its new token is saved before exiting.
+pub fn freeze_for_restart(on: bool) {
+    FROZEN.store(on, Ordering::SeqCst);
+    if on {
+        drop(REFRESHING.lock().unwrap_or_else(|e| e.into_inner()));
     }
 }
 
@@ -203,10 +269,7 @@ fn classify(status: u16, v: Value) -> Result<Value, AuthFail> {
 
 fn post(path: &str, body: Value, bearer: Option<&str>) -> Result<Value, AuthFail> {
     let c = cfg().map_err(AuthFail::Other)?;
-    let mut req = crate::http::agent()
-        .post(&format!("{}{path}", c.url))
-        .header("apikey", &c.anon_key)
-        .header("Content-Type", "application/json");
+    let mut req = crate::http::agent().post(&format!("{}{path}", c.url)).header("apikey", &c.anon_key).header("Content-Type", "application/json");
     if let Some(b) = bearer {
         req = req.header("Authorization", &format!("Bearer {b}"));
     }
@@ -243,7 +306,7 @@ fn adopt(v: &Value) -> AppResult<CloudSession> {
         expires_at: now_ms() + expires_in * 1000,
     };
     if !refresh.is_empty() {
-        save_refresh(&refresh);
+        save_stored(&Stored { refresh: refresh.clone(), session: Some(session.clone()) });
     }
     *SESSION.lock().unwrap() = Some(Inner { session: session.clone(), refresh });
     Ok(session)
@@ -261,11 +324,7 @@ pub fn sign_in_blocking(provider: &str) -> AppResult<CloudSession> {
         .ok_or_else(|| AppError::Unavailable(format!("sign-in ports {}–{} are all busy; close the program using them and try again", REDIRECT_PORTS[0], REDIRECT_PORTS[REDIRECT_PORTS.len() - 1])))?;
     let (verifier, challenge) = crate::loopback::pkce();
     let redirect = format!("http://127.0.0.1:{port}/callback");
-    let url = format!(
-        "{}/auth/v1/authorize?provider=discord&redirect_to={}&code_challenge={challenge}&code_challenge_method=s256",
-        c.url,
-        crate::search::percent_encode(&redirect)
-    );
+    let url = format!("{}/auth/v1/authorize?provider=discord&redirect_to={}&code_challenge={challenge}&code_challenge_method=s256", c.url, crate::search::percent_encode(&redirect));
     open::that_detached(&url).map_err(|e| AppError::Unavailable(format!("couldn't open the browser: {e}")))?;
     let code = crate::loopback::wait_for_code(listener, "/callback", None, "Tunewire", Instant::now() + Duration::from_secs(300))?;
     let v = post("/auth/v1/token?grant_type=pkce", serde_json::json!({ "auth_code": code, "code_verifier": verifier }), None)?;
@@ -289,20 +348,63 @@ pub fn session_blocking() -> AppResult<Option<CloudSession>> {
     if let Some(s) = fresh_session() {
         return Ok(Some(s));
     }
-    let current = SESSION.lock().unwrap().as_ref().map(|i| i.refresh.clone()).filter(|r| !r.is_empty());
-    let Some(refresh) = current.or_else(load_refresh) else { return Ok(None) };
-    match post("/auth/v1/token?grant_type=refresh_token", serde_json::json!({ "refresh_token": refresh.trim() }), None) {
-        // A guest session is refused by `adopt` (and cleared).
-        Ok(v) => Ok(adopt(&v).ok()),
-        Err(AuthFail::Rejected(_)) => {
+    let current = SESSION.lock().unwrap().as_ref().filter(|i| !i.refresh.is_empty()).map(|i| Stored { refresh: i.refresh.clone(), session: Some(i.session.clone()) });
+    let first = current.is_none();
+    let Some(stored) = current.or_else(load_stored) else {
+        return Ok(None);
+    };
+    let still_valid = |st: &Stored| st.session.clone().filter(|s| s.expires_at > now_ms() + 120_000);
+    // Just started (or restarted for an update): the saved session is still
+    // good, so nothing is spent.
+    if first {
+        if let Some(s) = still_valid(&stored) {
+            *SESSION.lock().unwrap() = Some(Inner { session: s.clone(), refresh: stored.refresh });
+            return Ok(Some(s));
+        }
+    }
+    if FROZEN.load(Ordering::SeqCst) {
+        // Restarting: keep the token for the next run.
+        return Ok(stored.session.filter(|s| s.expires_at > now_ms()));
+    }
+    match refresh_with(&stored.refresh) {
+        Ok(s) => Ok(s),
+        Err(AuthFail::Rejected(e)) => {
+            // Maybe the previous run (still closing) or a save we raced with
+            // already replaced it: a newer saved token isn't "signed out".
+            if let Some(newer) = load_stored().filter(|n| n.refresh != stored.refresh) {
+                if let Some(s) = still_valid(&newer) {
+                    *SESSION.lock().unwrap() = Some(Inner { session: s.clone(), refresh: newer.refresh });
+                    return Ok(Some(s));
+                }
+                match refresh_with(&newer.refresh) {
+                    Ok(s) => return Ok(s),
+                    Err(AuthFail::Other(e)) => return Err(e),
+                    Err(AuthFail::Rejected(_)) => {}
+                }
+            }
             // The session really ended (revoked, expired, used elsewhere).
+            let _ = e;
             clear_refresh();
             *SESSION.lock().unwrap() = None;
             Ok(None)
         }
-        // Offline or server trouble: keep the refresh token for next time.
-        Err(AuthFail::Other(e)) => Err(e),
+        // Offline or server trouble: keep the refresh token for next time,
+        // and keep using the access token while it lasts.
+        Err(AuthFail::Other(e)) => match stored.session.filter(|s| s.expires_at > now_ms() + 5_000) {
+            Some(s) => {
+                *SESSION.lock().unwrap() = Some(Inner { session: s.clone(), refresh: stored.refresh });
+                Ok(Some(s))
+            }
+            None => Err(e),
+        },
     }
+}
+
+/// Spend `refresh` for a new session (saved by `adopt`).
+fn refresh_with(refresh: &str) -> Result<Option<CloudSession>, AuthFail> {
+    let v = post("/auth/v1/token?grant_type=refresh_token", serde_json::json!({ "refresh_token": refresh.trim() }), None)?;
+    // A guest session is refused by `adopt` (and cleared).
+    Ok(adopt(&v).ok())
 }
 
 pub fn sign_out_blocking() {
@@ -316,6 +418,13 @@ pub fn sign_out_blocking() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The session and its storage are process-wide: tests that touch them
+    /// take turns (cargo runs tests in parallel).
+    static GLOBALS: Mutex<()> = Mutex::new(());
+    fn globals() -> std::sync::MutexGuard<'static, ()> {
+        GLOBALS.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn only_rejected_grants_sign_out() {
@@ -351,21 +460,119 @@ mod tests {
 
     #[test]
     fn guest_sessions_are_refused() {
+        let _g = globals();
         let v = serde_json::json!({ "access_token": "t", "refresh_token": "", "user": { "id": "u", "is_anonymous": true } });
         assert!(adopt(&v).is_err());
+    }
+
+    fn fake_session(expires_in_ms: u64) -> CloudSession {
+        CloudSession { access_token: "access".into(), user_id: "u1".into(), name: "Me".into(), avatar: None, expires_at: now_ms() + expires_in_ms, banner: None, accent_color: None, decoration: None }
+    }
+
+    /// Staying signed in across restarts, without a server.
+    #[test]
+    fn restarts_keep_the_session() {
+        let _g = globals();
+        use crate::secrets::fake::BROKEN;
+        let dir = std::env::temp_dir().join(format!("tw-cloud-{}", now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        *FALLBACK_FILE.lock().unwrap() = Some(dir.join("cloud_session"));
+        // Nothing listens here: any refresh attempt fails with a network error.
+        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url: "http://127.0.0.1:9".into(), anon_key: "k".into(), share_url: String::new() });
+        let restart = || *SESSION.lock().unwrap() = None;
+
+        // Saved with its session; read back as long as it's the same token.
+        save_stored(&Stored { refresh: "r1".into(), session: Some(fake_session(3_600_000)) });
+        assert_eq!(load_stored().unwrap().session.unwrap().user_id, "u1");
+        crate::secrets::set(KEY_REFRESH, "r-other").unwrap();
+        assert!(load_stored().unwrap().session.is_none(), "a session never pairs with another token");
+
+        // Restart within the hour: the saved session, nothing spent.
+        save_stored(&Stored { refresh: "r1".into(), session: Some(fake_session(3_600_000)) });
+        restart();
+        assert_eq!(session_blocking().unwrap().unwrap().access_token, "access");
+        assert_eq!(load_stored().unwrap().refresh, "r1");
+
+        // Offline at start with a token near expiry: still signed in.
+        save_stored(&Stored { refresh: "r1".into(), session: Some(fake_session(60_000)) });
+        restart();
+        assert!(session_blocking().unwrap().is_some(), "offline is not signed out");
+        // Expired and offline: an error (try again later), and the token is kept.
+        save_stored(&Stored { refresh: "r1".into(), session: Some(fake_session(0)) });
+        restart();
+        assert!(session_blocking().is_err());
+        assert_eq!(load_stored().unwrap().refresh, "r1");
+
+        // Restarting for an update: no refresh is started.
+        save_stored(&Stored { refresh: "r1".into(), session: Some(fake_session(60_000)) });
+        restart();
+        freeze_for_restart(true);
+        assert!(session_blocking().unwrap().is_some());
+        freeze_for_restart(false);
+
+        // Keychain locked: the newest token goes to the file and wins over
+        // the older one still in the keychain…
+        BROKEN.store(true, Ordering::SeqCst);
+        save_stored(&Stored { refresh: "r2".into(), session: None });
+        BROKEN.store(false, Ordering::SeqCst);
+        assert_eq!(crate::secrets::get(KEY_REFRESH).as_deref(), Some("r1"));
+        assert_eq!(load_stored().unwrap().refresh, "r2", "the newest copy wins");
+        // …until the keychain works again.
+        save_stored(&Stored { refresh: "r3".into(), session: None });
+        assert!(!dir.join("cloud_session").exists());
+        assert_eq!(load_stored().unwrap().refresh, "r3");
+
+        // Older versions kept only the bare token.
+        crate::secrets::set(KEY_REFRESH, "legacy").unwrap();
+        assert_eq!(load_stored().unwrap().refresh, "legacy");
+
+        clear_refresh();
+        assert!(load_stored().is_none());
+        *OVERRIDE.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The previous run replaced the token while this one started with the
+    /// old one: the newer saved token is used, not "signed out".
+    /// Local stack: SB_URL, SB_ANON, SB_EMAIL/SB_PASSWORD of a user.
+    #[test]
+    #[ignore]
+    fn live_replaced_token_is_not_a_sign_out() {
+        let _g = globals();
+        *OVERRIDE.lock().unwrap() = Some(CloudConfig { url: std::env::var("SB_URL").unwrap(), anon_key: std::env::var("SB_ANON").unwrap(), share_url: String::new() });
+        *FALLBACK_FILE.lock().unwrap() = Some(std::env::temp_dir().join(format!("tw-cloud-live-{}", now_ms())));
+        let grant = post("/auth/v1/token?grant_type=password", serde_json::json!({ "email": std::env::var("SB_EMAIL").unwrap(), "password": std::env::var("SB_PASSWORD").unwrap() }), None)
+            .unwrap_or_else(|_| panic!("password sign-in"));
+        let t1 = grant["refresh_token"].as_str().unwrap().to_string();
+        // "The other run" spends t1 and saves t2.
+        let r = post("/auth/v1/token?grant_type=refresh_token", serde_json::json!({ "refresh_token": t1 }), None).unwrap_or_else(|_| panic!("refresh"));
+        let t2 = r["refresh_token"].as_str().unwrap().to_string();
+        // Past the server's reuse window: t1 alone would now be refused.
+        std::thread::sleep(Duration::from_secs(12));
+        save_stored(&Stored { refresh: t2.clone(), session: None });
+        // This run still holds t1 (read before the other run saved).
+        *SESSION.lock().unwrap() = Some(Inner { session: fake_session(0), refresh: t1 });
+        let s = session_blocking().expect("no error").expect("still signed in");
+        assert!(!s.user_id.is_empty());
+        // What's saved still works (whether the server answered t1 with t2's
+        // session or we fell back to t2).
+        let saved = load_stored().unwrap().refresh;
+        assert!(refresh_with(&saved).is_ok(), "the saved token is usable");
+        sign_out_blocking();
     }
 
     /// Against the local stack: `supabase start` in the repo (see supabase/).
     #[test]
     #[ignore]
     fn live_refresh_is_single_flight() {
+        let _g = globals();
         let url = std::env::var("SB_URL").unwrap();
         let key = std::env::var("SB_ANON").unwrap();
         *OVERRIDE.lock().unwrap() = Some(CloudConfig { url, anon_key: key, share_url: String::new() });
         *FALLBACK_FILE.lock().unwrap() = Some(std::env::temp_dir().join("tw-cloud-test"));
         // Needs a Discord sign-in first (SB_REFRESH = a refresh token).
         let refresh = std::env::var("SB_REFRESH").unwrap();
-        save_refresh(&refresh);
+        save_stored(&Stored { refresh, session: None });
         let handles: Vec<_> = (0..4).map(|_| std::thread::spawn(session_blocking)).collect();
         let ids: Vec<_> = handles.into_iter().map(|h| h.join().unwrap().unwrap().unwrap().user_id).collect();
         assert!(ids.windows(2).all(|w| w[0] == w[1]));

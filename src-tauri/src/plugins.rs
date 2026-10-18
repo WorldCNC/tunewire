@@ -130,7 +130,9 @@ impl PluginStore {
     }
 
     pub fn list(&self, enabled: &[String]) -> Vec<PluginInfo> {
-        let Ok(rd) = std::fs::read_dir(&self.dir) else { return Vec::new() };
+        let Ok(rd) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
         let mut out: Vec<PluginInfo> = rd
             .flatten()
             .filter(|e| e.path().is_dir())
@@ -143,13 +145,7 @@ impl PluginStore {
                     Ok(m) => (Some(m), None),
                     Err(e) => (None, Some(e.to_string())),
                 };
-                Some(PluginInfo {
-                    enabled: enabled.contains(&id) && manifest.is_some(),
-                    path: e.path().display().to_string(),
-                    id,
-                    manifest,
-                    error,
-                })
+                Some(PluginInfo { enabled: enabled.contains(&id) && manifest.is_some(), path: e.path().display().to_string(), id, manifest, error })
             })
             .collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));

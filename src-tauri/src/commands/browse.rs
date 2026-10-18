@@ -97,16 +97,7 @@ pub struct SpotifyProfile {
 /// Someone's public playlists from their profile link (needs the login above).
 #[tauri::command]
 pub async fn spotify_profile_playlists(url: String) -> AppResult<SpotifyProfile> {
-    let user = url
-        .trim()
-        .trim_start_matches("spotify:user:")
-        .split("/user/")
-        .last()
-        .unwrap_or("")
-        .split(['?', '/', '#'])
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let user = url.trim().trim_start_matches("spotify:user:").split("/user/").last().unwrap_or("").split(['?', '/', '#']).next().unwrap_or("").to_string();
     if user.is_empty() || user.contains(':') {
         return Err(AppError::Invalid("paste a Spotify profile link (open.spotify.com/user/…)".into()));
     }

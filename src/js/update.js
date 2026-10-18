@@ -39,6 +39,21 @@ async function checkForUpdate(manual = false) {
   }
 }
 
+/**
+ * Install and restart. Sign-in refreshes pause first, so the new version
+ * starts with the latest sign-in token (an old one would sign you out).
+ */
+async function installAndRestart(update) {
+  await call('cloud_prepare_restart', { restarting: true }).catch(() => {});
+  try {
+    await update.install();
+    await window.__TAURI__.process.relaunch();
+  } catch (e) {
+    call('cloud_prepare_restart', { restarting: false }).catch(() => {});
+    throw e;
+  }
+}
+
 /** Remember the notes so the new version can show "What's new". */
 function rememberNotes(update) {
   try { localStorage.setItem('tw-update-notes', JSON.stringify({ version: update.version, notes: update.body || '' })); } catch { /* optional */ }
@@ -70,9 +85,7 @@ function promptRestart() {
     restart.disabled = true;
     status.textContent = 'Installing…';
     try {
-      await update.install();
-      status.textContent = 'Restarting…';
-      await window.__TAURI__.process.relaunch();
+      await installAndRestart(update);
     } catch (e) {
       status.textContent = '';
       restart.disabled = false;
@@ -96,7 +109,7 @@ function promptUpdate(update) {
     rememberNotes(update);
     let total = 0, got = 0;
     try {
-      await update.downloadAndInstall((ev) => {
+      await update.download((ev) => {
         if (ev.event === 'Started') total = ev.data.contentLength || 0;
         if (ev.event === 'Progress') {
           got += ev.data.chunkLength;
@@ -105,7 +118,7 @@ function promptUpdate(update) {
         if (ev.event === 'Finished') progress.textContent = 'Installing…';
       });
       progress.textContent = 'Restarting…';
-      await window.__TAURI__.process.relaunch();
+      await installAndRestart(update);
     } catch (e) {
       progress.textContent = '';
       install.disabled = false;

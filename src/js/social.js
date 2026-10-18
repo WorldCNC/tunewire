@@ -12,7 +12,8 @@ const me = () => cloud.session?.user_id;
 // Account ---------------------------------------------------------------------------
 function avatarEl(src, name, cls = 'avatar') {
   const el = h('span', { class: cls, title: name || '' });
-  if (src && /^https:\/\//.test(src)) el.append(h('img', { src, alt: '', 'data-px': 96, referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); el.textContent = (name || '?')[0].toUpperCase(); } }));
+  const url = mediaUrl(src);
+  if (url) el.append(h('img', { src: url, alt: '', 'data-px': 96, referrerpolicy: 'no-referrer', onerror: (e) => { e.target.remove(); el.textContent = (name || '?')[0].toUpperCase(); } }));
   else el.textContent = (name || '?')[0].toUpperCase();
   return el;
 }
@@ -29,7 +30,6 @@ function paintAccountButton() {
 onCloudChange(paintAccountButton);
 onCloudChange(() => {
   if (state.view === 'settings') renderSettings();
-  syncCloudPlaylists();
   renderFriends();
   startNotifications();
   if (!signedIn() && jam.code) leaveJam({ silent: true });
@@ -81,11 +81,13 @@ function askCloudPrivacy(force = false) {
   const activity = h('input', { type: 'checkbox', checked: !!cloud.profile?.share_activity });
   const wrapped = h('input', { type: 'checkbox', checked: cloud.profile?.share_wrapped !== false });
   const stats = h('input', { type: 'checkbox', checked: !!cloud.profile?.share_stats });
+  const library = h('input', { type: 'checkbox', checked: state.settings?.sync_asked ? !!state.settings.sync_library : true });
   const row = (label, help, input) => h('label', { class: 'setting' }, h('div', { class: 'label' }, label, h('small', {}, help)), h('span', { class: 'switch' }, input, h('span')));
   const save = async () => {
     await saveCloudPrivacy({ share_activity: activity.checked, share_wrapped: wrapped.checked, share_stats: stats.checked });
     await updateSettings({ cloud_privacy_asked: true });
     m.close();
+    if (library.checked !== !!state.settings.sync_library || !state.settings.sync_asked) await setLibrarySync(library.checked);
   };
   const m = openModal({
     title: 'What friends can see',
@@ -93,7 +95,8 @@ function askCloudPrivacy(force = false) {
     body: h('div', { class: 'privacy-list' },
       row('Share what I’m playing', 'Approved followers see your current song in their Friends panel.', activity),
       row('Share my listening', 'Your top artists and songs, recently played and minutes this week show on your profile for approved followers, and you join the friends’ leaderboard.', stats),
-      row('Compare Wrapped with friends', 'Approved friends can compare their year in music with yours (only after you press “Compare”).', wrapped)),
+      row('Compare Wrapped with friends', 'Approved friends can compare their year in music with yours (only after you press “Compare”).', wrapped),
+      row('Sync my library', 'Your playlists and Liked Songs on every device you sign in to, as private copies only you can see.', library)),
     footer: [h('button', { class: 'btn primary', onclick: save }, 'Save')],
     onClose: () => { if (!state.settings.cloud_privacy_asked) updateSettings({ cloud_privacy_asked: true }); },
   });
@@ -126,6 +129,8 @@ function accountSettingsRows() {
     input.addEventListener('change', () => saveCloudPrivacy({ [key]: input.checked }));
     return h('div', { class: 'setting' }, h('div', { class: 'label' }, label, h('small', {}, help)), h('label', { class: 'switch' }, input, h('span')));
   };
+  const syncInput = h('input', { type: 'checkbox', checked: !!state.settings?.sync_library });
+  syncInput.addEventListener('change', () => setLibrarySync(syncInput.checked));
   return [
     settingRow(h('span', { class: 'row-gap' }, avatarEl(s.avatar, s.name), s.name), 'Signed in with Discord.',
       h('div', { class: 'actions' },
@@ -135,6 +140,7 @@ function accountSettingsRows() {
           try { await db('PATCH', `profiles?id=eq.${s.user_id}`, { name: name.slice(0, 40) }); cloud.session.name = name.slice(0, 40); cloudChanged(); toast('Name saved', 'ok', 1500); } catch (e) { toast(errMsg(e), 'error'); }
         } }, 'Change name'),
         h('button', { class: 'btn small', onclick: () => openProfile(s.user_id) }, 'Profile'), h('button', { class: 'btn small', onclick: signOut }, 'Sign out'))),
+    h('div', { class: 'setting' }, h('div', { class: 'label' }, 'Sync my library', h('small', {}, 'Your playlists and Liked Songs on every device you sign in to. The online copies are private: only you can see them.')), h('label', { class: 'switch' }, syncInput, h('span'))),
     toggle('Share what I’m listening to', 'Approved followers see the song you’re playing in their Friends panel.', 'share_activity'),
     toggle('Share my listening', 'Top artists and songs, recently played and minutes this week on your profile (approved followers only), and the friends’ leaderboard.', 'share_stats'),
     toggle('Compare Wrapped with friends', 'Approved friends can compare their year with yours. Turning this off removes what you shared.', 'share_wrapped'),
@@ -153,39 +159,33 @@ const INVITE_LINK = (code) => shareLink('c', code);
 const JAM_LINK = (code) => shareLink('j', code);
 const PROFILE_LINK = (id) => shareLink('u', id);
 
-/** Publish (or update) a local playlist online and return its id. */
+/**
+ * Share a playlist (or change who can open it) and return its online id.
+ * With library sync it's online already (private): this only opens it up.
+ */
 async function publishPlaylist(pl, { visibility, collaborative } = {}) {
-  // Ask the backend: an in-flight library refresh can briefly leave an older
-  // copy (without the online link) in memory.
-  try { pl = (await call('list_playlists')).find((p) => p.id === pl.id) || pl; } catch { /* keep */ }
   if (!(await requireAccount({ why: 'Sign in to share playlists' }))) return null;
-  const meta = { title: pl.name, description: pl.description || '', cover: pl.cover || null };
-  if (visibility) meta.visibility = visibility;
-  if (collaborative !== undefined) meta.collaborative = collaborative;
-  if (pl.cloud_id && pl.cloud_role === 'owner') {
-    setSync(pl.id, 'syncing');
-    const [row] = await db('PATCH', `playlists?id=eq.${pl.cloud_id}`, meta, { prefer: 'return=representation' });
-    if (row) rememberRow(row);
-    if (!row?.collaborative) {
-      const r = await rpc('playlist_op', { pid: pl.cloud_id, op: { replace: pl.tracks.map(slimTrack) } });
-      knownVersion.set(pl.cloud_id, r.version);
+  return syncTask(async () => {
+    // Ask the backend: the page's copy may not know about a link made a moment ago.
+    try { pl = (await call('list_playlists')).find((p) => p.id === pl.id) || pl; } catch { /* keep */ }
+    if (pl.cloud_id && pl.cloud_role === 'owner') {
+      const m = cloudMeta.get(pl.cloud_id) || {};
+      const patch = {};
+      if (visibility) patch.visibility = visibility;
+      else if (m.visibility === 'private' && !m.collaborative && !collaborative) patch.visibility = 'unlisted';
+      if (collaborative !== undefined) patch.collaborative = collaborative;
+      if (collaborative && m.visibility === 'private' && !m.collaborative && !visibility) patch.visibility = 'unlisted';
+      if (Object.keys(patch).length) {
+        const row = await patchRow(pl.cloud_id, patch);
+        if (row) rememberRow(row);
+      }
+      syncLocalSoon(0); // anything not sent yet
+      return pl.cloud_id;
     }
-    pushedSig.set(pl.id, playlistSig(pl));
+    const row = await uploadPlaylist(pl, { visibility: visibility || 'unlisted', collaborative: !!collaborative });
     setSync(pl.id, 'synced');
-    return pl.cloud_id;
-  }
-  const [row] = await db('POST', 'playlists', { ...meta, visibility: visibility || 'unlisted', collaborative: !!collaborative, tracks: pl.tracks.map(slimTrack) }, { prefer: 'return=representation' });
-  rememberRow(row);
-  // Known right away (the library refresh comes a moment later): a quick
-  // second click must update this row, not create another one.
-  pl.cloud_id = row.id;
-  pl.cloud_role = 'owner';
-  const live = state.playlists.find((p) => p.id === pl.id);
-  if (live) Object.assign(live, { cloud_id: row.id, cloud_role: 'owner' });
-  await call('set_playlist_cloud', { id: pl.id, cloudId: row.id, role: 'owner' });
-  pushedSig.set(pl.id, playlistSig(pl));
-  setSync(pl.id, 'synced');
-  return row.id;
+    return row.id;
+  });
 }
 
 async function sharePlaylist(pl) {
@@ -204,7 +204,6 @@ async function makeCollaborative(pl) {
     const code = await rpc('playlist_invite', { pid: id });
     copyText(INVITE_LINK(code));
     toast('Invite link copied. Friends who open it can add, remove and reorder songs with you. Only send it to people you trust.', 'ok', 5000);
-    watchPlaylist(pl.id, id);
   } catch (e) { toast(errMsg(e), 'error'); }
 }
 
@@ -223,10 +222,23 @@ async function setVisibility(pl, visibility) {
 async function unsharePlaylist(pl) {
   if (!(await confirmModal({ title: 'Stop sharing?', message: 'The link stops working and collaborators lose access. Your playlist stays in Your Library.', okLabel: 'Stop sharing', danger: true }))) return;
   try {
-    await db('DELETE', `playlists?id=eq.${pl.cloud_id}`);
-    await call('set_playlist_cloud', { id: pl.id, cloudId: null, role: null });
-    unwatch(pl.id);
-    syncInfo.delete(pl.id);
+    await syncTask(async () => {
+      if (libSyncOn()) {
+        // Still your synced copy: just private again, without the others.
+        const row = await patchRow(pl.cloud_id, { visibility: 'private', collaborative: false });
+        if (row) rememberRow(row);
+        await db('DELETE', `playlist_members?playlist_id=eq.${pl.cloud_id}`);
+        await rpc('rotate_playlist_invite', { pid: pl.cloud_id }).catch(() => {});
+        paintSyncBadges(pl.id);
+        return;
+      }
+      await db('DELETE', `playlists?id=eq.${pl.cloud_id}`);
+      delete bases().pl[pl.cloud_id];
+      syncSave();
+      await call('set_playlist_cloud', { id: pl.id, cloudId: null, role: null });
+      syncInfo.delete(pl.id);
+    });
+    if (state.view === 'playlist') renderPlaylistDetail();
     toast('No longer shared', 'info', 1800);
   } catch (e) { toast(errMsg(e), 'error'); }
 }
@@ -234,7 +246,8 @@ async function unsharePlaylist(pl) {
 /** Extra items for a playlist's ⋯ menu. */
 function shareMenuItems(pl) {
   if (!cloudOn()) return [];
-  const linked = pl.cloud_id;
+  // A private sync copy isn't shared: the menu offers sharing it.
+  const linked = isShared(pl) ? pl.cloud_id : null;
   if (linked && pl.cloud_role !== 'owner') {
     return ['sep', { label: 'Copy link', icon: 'link', onClick: () => { copyText(PL_LINK(pl.cloud_id)); toast('Link copied', 'ok', 1500); } },
       { label: pl.cloud_role === 'editor' ? 'Leave collaborative playlist' : 'Unfollow', icon: 'x', onClick: () => leaveCloudPlaylist(pl) }];
@@ -252,306 +265,16 @@ function shareMenuItems(pl) {
   ].filter(Boolean);
 }
 
-// Keeping linked playlists in sync ---------------------------------------------------------
-// Edits made here go out as small operations, one at a time and in order
-// (owners of non-collaborative playlists push the whole list, debounced).
-// Edits made elsewhere arrive as numbered change rows; a gap in the numbers
-// means something was missed, and the whole playlist is fetched again.
-const cloudMeta = new Map();    // cloud id -> { owner, collaborative, visibility, ownerName, editors }
-const knownVersion = new Map(); // cloud id -> last version applied here
-const pushedSig = new Map();    // local id -> signature last pushed (owner)
-const watchers = new Map();     // local id -> Channel
-const opChains = new Map();     // cloud id -> promise chain of pending ops
-const syncInfo = new Map();     // local id -> { status, pending }
-const playlistSig = (pl) => `${pl.name}|${pl.description || ''}|${(pl.cover || '').length}|${pl.tracks.map((t) => t.key).join(',')}`;
-// Calls made to apply someone else's change (their hooks must not send it back).
-const remoteArgs = new WeakSet();
-
-function rememberRow(row) {
-  const prev = cloudMeta.get(row.id) || {};
-  cloudMeta.set(row.id, { ...prev, owner: row.owner, collaborative: row.collaborative, visibility: row.visibility, ownerName: row.profiles?.name || prev.ownerName });
-  if (typeof row.version === 'number') knownVersion.set(row.id, row.version);
-}
-
-/** status: synced | syncing | offline | error. */
-function setSync(localId, status, delta = 0) {
-  const info = syncInfo.get(localId) || { status: 'synced', pending: 0 };
-  info.pending = Math.max(0, info.pending + delta);
-  info.status = status === 'synced' && info.pending ? 'syncing' : status;
-  syncInfo.set(localId, info);
-  paintSyncBadges(localId);
-}
-
-const SYNC_TEXT = { synced: 'Synced', syncing: 'Syncing…', offline: 'Offline · will sync', error: 'Couldn’t sync' };
-function syncBadge(pl) {
-  if (!pl?.cloud_id || !cloudOn()) return null;
-  const el = h('span', { class: 'sync-badge', dataset: { pl: pl.id }, role: 'status' });
-  paintSyncBadge(el, pl);
-  return el;
-}
-function paintSyncBadge(el, pl) {
-  const info = syncInfo.get(pl.id) || { status: signedIn() ? 'synced' : 'offline' };
-  el.className = `sync-badge ${info.status}`;
-  const meta = cloudMeta.get(pl.cloud_id) || {};
-  const people = (meta.editors || []).slice(0, 4);
-  el.replaceChildren(...[
-    h('span', { class: 'sync-dot', 'aria-hidden': 'true' }),
-    h('span', {}, SYNC_TEXT[info.status] || 'Synced'),
-    info.status === 'error' ? h('button', { class: 'link-btn', onclick: (e) => { e.stopPropagation(); retryFailed(); } }, 'Retry') : null,
-    people.length ? h('span', { class: 'avatar-stack', title: people.map((p) => p.name).join(', ') }, ...people.map((p) => avatarEl(p.avatar, p.name, 'avatar xs'))) : null].filter(Boolean));
-}
-function paintSyncBadges(localId) {
-  const pl = state.playlists.find((p) => p.id === localId);
-  if (!pl) return;
-  for (const el of $$(`.sync-badge[data-pl="${CSS.escape(localId)}"]`)) paintSyncBadge(el, pl);
-}
-
-// Failed edits: one grouped message with Retry, not one per edit.
-let failedOps = [];
-let failToastTimer = null;
-let failToast = null;
-function noteFailure(item, e) {
-  failedOps.push(item);
-  setSync(item.localId, e?.kind === 'network' || !navigator.onLine ? 'offline' : 'error');
-  clearTimeout(failToastTimer);
-  failToastTimer = setTimeout(() => {
-    if (!failedOps.length) return;
-    failToast?.close();
-    const n = failedOps.length;
-    const offline = failedOps.every((f) => syncInfo.get(f.localId)?.status === 'offline');
-    failToast = toast(offline ? `Offline: ${n} change${n === 1 ? '' : 's'} will sync when you’re back online` : `${n} change${n === 1 ? '' : 's'} didn’t sync`, offline ? 'info' : 'warn', 10000, { action: { label: 'Retry', onClick: retryFailed } });
-  }, 600);
-}
-function retryFailed() {
-  const items = failedOps;
-  failedOps = [];
-  failToast?.close();
-  for (const it of items) {
-    if (it.op) queueOp(it.localId, it.cloudId, it.op);
-    else schedulePush(it.localId, 0);
-  }
-  syncSoon(0);
-}
-window.addEventListener('online', () => { if (failedOps.length) retryFailed(); });
-
-function queueOp(localId, cloudId, op) {
-  setSync(localId, 'syncing', +1);
-  const prev = opChains.get(cloudId) || Promise.resolve();
-  const next = prev.then(async () => {
-    try {
-      const r = await rpc('playlist_op', { pid: cloudId, op });
-      const known = knownVersion.get(cloudId);
-      // Someone else changed it in between: their edits haven't reached us.
-      if (known != null && r.version !== known + 1) pullPlaylist(localId, null);
-      else knownVersion.set(cloudId, r.version);
-      setSync(localId, 'synced', -1);
-    } catch (e) {
-      setSync(localId, 'synced', -1);
-      noteFailure({ localId, cloudId, op }, e);
-    }
-  });
-  opChains.set(cloudId, next);
-  return next;
-}
-
-/** Edits as operations, from the songs before and after a change. */
-function diffOps(before, after) {
-  const ops = [];
-  const afterKeys = new Set(after.map((t) => t.key));
-  const beforeKeys = new Set(before.map((t) => t.key));
-  const removed = before.filter((t) => !afterKeys.has(t.key)).map((t) => t.key);
-  if (removed.length) ops.push({ remove: removed });
-  after.forEach((t, i) => { if (!beforeKeys.has(t.key)) ops.push({ add: [slimTrack(t)], at: i }); });
-  return ops;
-}
-
-// Edits made here.
-commandHooks.push((cmd, args, result, before) => {
-  if (!args || remoteArgs.has(args) || !signedIn() || !args.id) return;
-  const pl = state.playlists.find((p) => p.id === args.id);
-  if (!pl?.cloud_id || pl.cloud_role === 'follower') return;
-  const meta = cloudMeta.get(pl.cloud_id) || {};
-  const ops = [];
-  if (cmd === 'add_to_playlist') ops.push({ add: args.tracks.map(slimTrack) });
-  if (cmd === 'remove_from_playlist' && before?.[args.index]) ops.push({ remove: [before[args.index].key] });
-  if (cmd === 'remove_many_from_playlist' && before) ops.push({ remove: args.indices.map((i) => before[i]?.key).filter(Boolean) });
-  if (cmd === 'move_many_in_playlist' && before) ops.push({ move: args.indices.map((i) => before[i]?.key).filter(Boolean), to: args.to });
-  if (cmd === 'move_in_playlist' && before?.[args.from]) ops.push({ move: [before[args.from].key], to: args.to });
-  // Undo of a removal (or any full replace) as add/remove operations.
-  if (cmd === 'replace_playlist_tracks' && before) ops.push(...diffOps(before, args.tracks));
-  if (pl.cloud_role === 'editor' || meta.collaborative) {
-    for (const op of ops) queueOp(pl.id, pl.cloud_id, op);
-    if ((cmd === 'update_playlist_meta' || cmd === 'rename_playlist') && pl.cloud_role === 'owner') schedulePush(pl.id);
-  } else if (pl.cloud_role === 'owner') {
-    schedulePush(pl.id);
-  }
-});
-
-const pushTimers = new Map();
-function schedulePush(localId, delay = 1500) {
-  clearTimeout(pushTimers.get(localId));
-  setSync(localId, 'syncing');
-  pushTimers.set(localId, setTimeout(async () => {
-    const pl = state.playlists.find((p) => p.id === localId);
-    if (!pl?.cloud_id || pl.cloud_role !== 'owner') return;
-    if (pushedSig.get(pl.id) === playlistSig(pl)) { setSync(localId, 'synced'); return; }
-    try {
-      await db('PATCH', `playlists?id=eq.${pl.cloud_id}`, { title: pl.name, description: pl.description || '', cover: pl.cover || null });
-      if (!(cloudMeta.get(pl.cloud_id) || {}).collaborative) {
-        const r = await rpc('playlist_op', { pid: pl.cloud_id, op: { replace: pl.tracks.map(slimTrack) } });
-        knownVersion.set(pl.cloud_id, r.version);
-      }
-      pushedSig.set(pl.id, playlistSig(pl));
-      setSync(localId, 'synced');
-    } catch (e) { noteFailure({ localId }, e); }
-  }, delay));
-}
-
-/** A library command applying a remote change (not synced back out). */
-function callRemote(cmd, args) {
-  remoteArgs.add(args);
-  return call(cmd, args);
-}
-
-/** Take the server's copy (songs, name, description, cover) into the local playlist. */
-async function pullPlaylist(localId, row) {
-  const pl = state.playlists.find((p) => p.id === localId);
-  if (!pl?.cloud_id) return;
-  try {
-    if (!row) [row] = await db('GET', `playlists?id=eq.${pl.cloud_id}&select=id,owner,title,description,cover,tracks,collaborative,visibility,version,profiles!playlists_owner_fkey(name)`);
-  } catch (e) { setSync(localId, e?.kind === 'network' ? 'offline' : 'error'); return; }
-  if (!row) return;
-  rememberRow(row);
-  const remote = (row.tracks || []).map(fromCloudTrack);
-  if (remote.map((t) => t.key).join(',') !== pl.tracks.map((t) => t.key).join(',')) {
-    const added = Object.fromEntries((row.tracks || []).filter((t) => t._at).map((t) => [t.key, t._at]));
-    await callRemote('replace_playlist_tracks', { id: localId, tracks: remote, added });
-  }
-  // Renames and new covers reach followers and editors too.
-  // Compared the way the library stores them (trimmed, capped), or a
-  // difference that can never be saved would re-sync forever.
-  const norm = (x, n) => String(x || '').trim().slice(0, n);
-  if (pl.cloud_role !== 'owner' && (norm(row.title, 120) !== norm(pl.name, 120) || norm(row.description, 600) !== norm(pl.description, 600) || (row.cover || '') !== (pl.cover || ''))) {
-    await callRemote('update_playlist_meta', { id: localId, patch: { name: row.title, description: row.description || '', cover: row.cover || '' } }).catch(() => {});
-  }
-  pushedSig.set(localId, playlistSig({ ...pl, name: row.title, tracks: (row.tracks || []) }));
-  setSync(localId, 'synced');
-}
-
-/** Apply one change row here (or fetch everything after a gap). */
-async function applyChange(localId, cloudId, ch) {
-  const pl = state.playlists.find((p) => p.id === localId);
-  if (!pl) return;
-  const op = ch.op || {};
-  // Name/description/cover: these don't change the song list's version.
-  if (op.meta) {
-    const m = op.meta;
-    cloudMeta.set(cloudId, { ...(cloudMeta.get(cloudId) || {}), collaborative: m.collaborative, visibility: m.visibility });
-    if (pl.cloud_role !== 'owner') {
-      await callRemote('update_playlist_meta', { id: localId, patch: { name: m.title, description: m.description || '' } }).catch(() => {});
-      if (m.cover_changed) {
-        const [r] = await db('GET', `playlists?id=eq.${cloudId}&select=cover`).catch(() => []);
-        if (r) await callRemote('update_playlist_meta', { id: localId, patch: { cover: r.cover || '' } }).catch(() => {});
-      }
-    }
-    paintSyncBadges(localId);
-    return;
-  }
-  const known = knownVersion.get(cloudId);
-  if (known != null && ch.version <= known) return; // already have it
-  if (known == null || ch.version !== known + 1 || op.replace) { await pullPlaylist(localId, null); return; }
-  let tracks = pl.tracks.slice();
-  if (op.add) {
-    const keys = new Set(tracks.map((t) => t.key));
-    const fresh = op.add.filter((t) => !keys.has(t.key)).map(fromCloudTrack);
-    tracks.splice(Math.min(op.at ?? tracks.length, tracks.length), 0, ...fresh);
-  } else if (op.remove) {
-    const keys = new Set(op.remove);
-    tracks = tracks.filter((t) => !keys.has(t.key));
-  } else if (op.move) {
-    const keys = new Set(op.move);
-    const moving = tracks.filter((t) => keys.has(t.key));
-    const rest = tracks.filter((t) => !keys.has(t.key));
-    rest.splice(Math.min(op.to ?? 0, rest.length), 0, ...moving);
-    tracks = rest;
-  }
-  knownVersion.set(cloudId, ch.version);
-  if (ch.by === me()) return; // our own edit, already here
-  const added = Object.fromEntries((op.add || []).filter((t) => t._at).map((t) => [t.key, t._at]));
-  await callRemote('replace_playlist_tracks', { id: localId, tracks, added });
-}
-
-function watchPlaylist(localId, cloudId) {
-  if (watchers.has(localId) || !signedIn()) return;
-  const ch = new Channel(`pl:${cloudId}`, { changes: [{ event: 'INSERT', schema: 'public', table: 'playlist_changes', filter: `playlist_id=eq.${cloudId}` }] });
-  // Changes apply one at a time, in order.
-  let chain = Promise.resolve();
-  ch.on('change', (d) => { if (d?.record) chain = chain.then(() => applyChange(localId, cloudId, d.record)).catch(() => {}); });
-  // Back after a disconnect: catch up on anything missed.
-  ch.on('status', (s) => { if (s === 'joined' && knownVersion.has(cloudId)) pullIfBehind(localId, cloudId); });
-  watchers.set(localId, ch);
-  loadEditors(cloudId, localId);
-}
-function unwatch(localId) {
-  watchers.get(localId)?.close();
-  watchers.delete(localId);
-}
-
-async function pullIfBehind(localId, cloudId) {
-  try {
-    const [r] = await db('GET', `playlists?id=eq.${cloudId}&select=version`);
-    if (r && r.version !== knownVersion.get(cloudId)) pullPlaylist(localId, null);
-  } catch { /* offline */ }
-}
-
-/** Who edits a collaborative playlist (avatars next to the sync status). */
-async function loadEditors(cloudId, localId) {
-  const meta = cloudMeta.get(cloudId);
-  if (!meta?.collaborative) return;
-  try {
-    const rows = await db('GET', `playlist_members?playlist_id=eq.${cloudId}&role=eq.editor&select=user_id,profiles(name,avatar)`);
-    const [owner] = await db('GET', `profiles?id=eq.${meta.owner}&select=name,avatar`);
-    meta.editors = [owner, ...rows.map((r) => r.profiles)].filter(Boolean);
-    meta.ownerName = owner?.name || meta.ownerName;
-    paintSyncBadges(localId);
-  } catch { /* offline */ }
-}
-
-/** On sign-in/start: refresh followed & collaborative playlists and watch them live. */
-async function syncCloudPlaylists() {
-  if (!signedIn()) { for (const id of [...watchers.keys()]) unwatch(id); return; }
-  const linked = state.playlists.filter((p) => p.cloud_id && UUID_RE.test(p.cloud_id));
-  if (!linked.length) return;
-  try {
-    const rows = await db('GET', `playlists?id=in.(${linked.map((p) => p.cloud_id).join(',')})&select=id,owner,title,description,cover,tracks,collaborative,visibility,version,profiles!playlists_owner_fkey(name)`);
-    for (const pl of linked) {
-      const row = rows.find((r) => r.id === pl.cloud_id);
-      if (!row) { setSync(pl.id, 'error'); continue; }
-      rememberRow(row);
-      if (pl.cloud_role !== 'owner' || row.collaborative) await pullPlaylist(pl.id, row);
-      else { pushedSig.set(pl.id, playlistSig(pl)); setSync(pl.id, 'synced'); }
-      if (pl.cloud_role !== 'owner' || row.collaborative) watchPlaylist(pl.id, pl.cloud_id);
-    }
-  } catch (e) { for (const pl of linked) setSync(pl.id, e?.kind === 'network' ? 'offline' : 'error'); }
-}
-
-// Safety net for missed live updates: refresh linked playlists every minute,
-// when the window comes back, and when one is opened.
-let lastCloudSync = 0;
-function syncSoon(minGap = 20000) {
-  if (!signedIn() || Date.now() - lastCloudSync < minGap) return;
-  lastCloudSync = Date.now();
-  syncCloudPlaylists();
-}
-setInterval(() => syncSoon(55000), 60000);
-window.addEventListener('focus', () => syncSoon());
-
+// Leaving someone else's playlist (sync itself lives in sync.js).
 async function leaveCloudPlaylist(pl) {
   try {
-    await db('DELETE', `playlist_members?playlist_id=eq.${pl.cloud_id}&user_id=eq.${me()}`);
-    unwatch(pl.id);
-    syncInfo.delete(pl.id);
-    await call('set_playlist_cloud', { id: pl.id, cloudId: null, role: null });
+    await syncTask(async () => {
+      await db('DELETE', `playlist_members?playlist_id=eq.${pl.cloud_id}&user_id=eq.${me()}`);
+      delete bases().pl[pl.cloud_id];
+      syncSave();
+      await call('set_playlist_cloud', { id: pl.id, cloudId: null, role: null });
+      syncInfo.delete(pl.id);
+    });
     toast('Left. Your copy stays in Your Library.', 'info', 2200);
   } catch (e) { toast(errMsg(e), 'error'); }
 }
@@ -626,7 +349,7 @@ async function openSharedPlaylist(id) {
   if (local) return openPlaylist(local.id);
   if (!cloudOn()) return toast('Online features aren’t available in this build', 'warn');
   try {
-    const rows = await db('GET', `playlists?id=eq.${id}&select=id,title,description,cover,tracks,owner,collaborative,visibility,version,profiles!playlists_owner_fkey(name,avatar)`);
+    const rows = await db('GET', `playlists?id=eq.${id}&deleted_at=is.null&select=id,title,description,cover,tracks,owner,collaborative,visibility,version,profiles!playlists_owner_fkey(name,avatar)`);
     const row = rows[0];
     if (!row) return toast('This playlist isn’t shared anymore, or it’s private', 'warn');
     rememberRow(row);
@@ -644,7 +367,7 @@ async function followShared(remote) {
     const pl = await call('create_playlist', { name: remote.title, tracks: remote.tracks, sourceUrl: null });
     await call('set_playlist_cloud', { id: pl.id, cloudId: remote.cloud.id, role: remote.cloud.owner === me() ? 'owner' : 'follower' });
     await refreshPlaylists({ silent: true });
-    watchPlaylist(pl.id, remote.cloud.id);
+    syncOneSoon(remote.cloud.id, 0);
     state.remote = null;
     openPlaylist(pl.id, { push: false });
     toast(`Following “${pl.name}”. You’ll get its updates.`, 'ok', 2500);
@@ -660,10 +383,10 @@ async function joinCollaborative(code) {
     const [row] = await db('GET', `playlists?id=eq.${id}&select=id,title,description,cover,tracks,owner,collaborative,visibility,version`);
     rememberRow(row);
     const pl = await call('create_playlist', { name: row.title, tracks: (row.tracks || []).map(fromCloudTrack), sourceUrl: null });
-    await callRemote('update_playlist_meta', { id: pl.id, patch: { description: row.description || '', cover: row.cover || '' } }).catch(() => {});
+    await call('update_playlist_meta', { id: pl.id, patch: { description: row.description || '', cover: row.cover || '' } }).catch(() => {});
     await call('set_playlist_cloud', { id: pl.id, cloudId: id, role: 'editor' });
     await refreshPlaylists({ silent: true });
-    watchPlaylist(pl.id, id);
+    syncOneSoon(id, 0);
     openPlaylist(pl.id);
     toast(`You joined “${row.title}”. Your changes show up for everyone.`, 'ok', 3000);
   } catch (e) { toast(errMsg(e), 'error'); }
@@ -769,7 +492,7 @@ async function openJam(code) {
     { event: 'DELETE', schema: 'public', table: 'jam_members', filter: `code=eq.${code}` },
   ] });
   jam.live.on('change', onJamChange);
-  jam.live.on('status', (s) => { if (s === 'joined') refreshJam(); });
+  jam.live.on('status', (s) => { if (s === 'live') refreshJam(); });
   await refreshJam();
   jam.timers.push(setInterval(() => { if (jam.host) publishJamState(false); else checkJamQuality(); }, 4000));
   setPanelOpen(true);
@@ -1192,7 +915,7 @@ async function renderFriends() {
     const q = search.value.trim();
     if (q.length < 2) { results.replaceChildren(); return; }
     try {
-      const rows = await db('GET', `profiles?name=ilike.*${encodeURIComponent(q.replace(/[*,()]/g, ''))}*&select=*&limit=8`);
+      const rows = (await rpc('search_profiles', { q })).slice(0, 8);
       results.replaceChildren(...rows.filter((r) => r.id !== me()).map((r) => personRow(r)));
     } catch { /* offline */ }
   }, 300));
@@ -1319,6 +1042,9 @@ async function startNotifications() {
     const a = notifAction(n);
     toast(notifText(n), 'info', a ? 8000 : 4000, a ? { action: a } : undefined);
   });
+  // After a reconnect: whatever arrived while the connection was down.
+  let first = true;
+  notif.channel.on('status', (s) => { if (s === 'live' && !first) refreshNotifications(); if (s === 'live') first = false; });
   refreshNotifications();
 }
 
@@ -1380,12 +1106,13 @@ function openNotifications() {
 }
 
 // Profiles ------------------------------------------------------------------------------------
-// A Discord-style header (their Discord banner, or their accent color), and
+// A Discord-style header (their banner, or their accent color), and
 // tabs for public playlists, followers and following.
 const DISCORD_BANNER = /^https:\/\/cdn\.discordapp\.com\/banners\/[0-9]+\/(a_)?[0-9a-f]+\.(png|gif|webp)(\?size=[0-9]+)?$/;
 const hexColor = (n) => `#${Number(n).toString(16).padStart(6, '0')}`;
 
 let profileSeq = 0;
+const PUBLIC_PROFILE = 'id,name,avatar,banner,accent_color,decoration';
 async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
   if (!cloudOn() || !UUID_RE.test(userId)) return;
   const seq = ++profileSeq;
@@ -1395,10 +1122,11 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
   try {
     const signed = signedIn();
     const [[p], lists, followers, following, mine, stats, nps, badges, followsMe] = await Promise.all([
-      db('GET', `profiles?id=eq.${userId}&select=*`),
-      db('GET', `playlists?owner=eq.${userId}&visibility=eq.public&select=id,title,cover,tracks->0->thumbnail&order=updated_at.desc`),
-      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(*)&order=created_at.desc`),
-      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(*)&order=created_at.desc`),
+      // Signed out, only a profile's public fields are readable.
+      db('GET', `profiles?id=eq.${userId}&select=${signed ? '*' : PUBLIC_PROFILE}`),
+      db('GET', `playlists?owner=eq.${userId}&visibility=eq.public&deleted_at=is.null&select=id,title,cover,tracks->0->thumbnail&order=updated_at.desc`),
+      db('GET', `follows?followee=eq.${userId}&select=follower,status,created_at,profiles!follows_follower_fkey(id,name,avatar,decoration)&order=created_at.desc`),
+      db('GET', `follows?follower=eq.${userId}&status=eq.accepted&select=followee,created_at,profiles!follows_followee_fkey(id,name,avatar,decoration)&order=created_at.desc`),
       signed ? db('GET', `follows?follower=eq.${me()}&select=followee,status`) : Promise.resolve([]),
       signed ? db('GET', `profile_stats?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),
       signed ? db('GET', `now_playing?user_id=eq.${userId}&select=*`).catch(() => []) : Promise.resolve([]),
@@ -1421,11 +1149,12 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
     // Header: banner, decorated avatar, name, pronouns, badges, bio, counts.
     const banner = h('div', { class: 'profile-banner' });
     const accent = p.accent_color != null ? hexColor(p.accent_color) : null;
-    if (typeof p.banner === 'string' && DISCORD_BANNER.test(p.banner)) banner.style.backgroundImage = `url("${p.banner}")`;
+    // Their upload (a GIF moves) or their Discord banner.
+    if (typeof p.banner === 'string' && (DISCORD_BANNER.test(p.banner) || MEDIA_RE.test(p.banner))) banner.style.backgroundImage = `url("${mediaUrl(p.banner)}")`;
     else banner.classList.add('no-image');
     if (accent) banner.style.setProperty('--accent-c', accent);
     const avatar = h('div', { class: 'profile-avatar' });
-    if (p.avatar && /^https:\/\//.test(p.avatar)) avatar.append(h('img', { src: p.avatar, 'data-px': 300, alt: '', referrerpolicy: 'no-referrer' }));
+    if (mediaUrl(p.avatar)) avatar.append(h('img', { src: mediaUrl(p.avatar), 'data-px': 300, alt: '', referrerpolicy: 'no-referrer' }));
     else { avatar.textContent = (p.name || '?')[0].toUpperCase(); if (accent) avatar.style.background = accent; }
     const avatarBox = h('div', { class: 'profile-avatar-box' }, avatar);
     if (typeof p.decoration === 'string' && DECORATION_RE.test(p.decoration)) avatarBox.append(h('img', { class: 'profile-deco', src: p.decoration, alt: '', referrerpolicy: 'no-referrer', onerror: (e) => e.target.remove() }));
@@ -1533,7 +1262,7 @@ async function openProfile(userId, { push = true, tab = 'playlists' } = {}) {
       markPlaying();
     };
     render();
-    heroColor(body, p.avatar);
+    heroColor(body, mediaUrl(p.avatar));
   } catch (e) { if (seq === profileSeq) body.replaceChildren(h('div', { class: 'empty' }, h('p', {}, errMsg(e)))); }
 }
 

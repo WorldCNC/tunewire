@@ -66,15 +66,14 @@ fn fetch(artist: &str, title: &str, album: Option<&str>, duration: Option<f64>) 
     }
     // Fuzzy search, preferring synced lyrics with a close duration.
     let url = format!("https://lrclib.net/api/search?track_name={}&artist_name={}", enc(title), enc(artist));
-    let Some(Value::Array(items)) = get(url)? else { return Ok(None) };
+    let Some(Value::Array(items)) = get(url)? else {
+        return Ok(None);
+    };
     let close = |it: &Value| match (duration, it.get("duration").and_then(Value::as_f64)) {
         (Some(d), Some(x)) => (d - x).abs() <= 4.0,
         _ => true,
     };
-    let best = items
-        .iter()
-        .filter(|it| close(it))
-        .max_by_key(|it| it.get("syncedLyrics").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false) as u8);
+    let best = items.iter().filter(|it| close(it)).max_by_key(|it| it.get("syncedLyrics").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false) as u8);
     Ok(best.and_then(parse))
 }
 
@@ -85,9 +84,7 @@ pub async fn get(artist: String, title: String, album: Option<String>, duration:
     if let Some(hit) = cache().lock().unwrap().get(&key) {
         return Ok(hit.clone());
     }
-    let res = tauri::async_runtime::spawn_blocking(move || fetch(&artist, &title, album.as_deref(), duration))
-        .await
-        .map_err(|e| AppError::Network(e.to_string()))??;
+    let res = tauri::async_runtime::spawn_blocking(move || fetch(&artist, &title, album.as_deref(), duration)).await.map_err(|e| AppError::Network(e.to_string()))??;
     cache().lock().unwrap().insert(key, res.clone());
     Ok(res)
 }

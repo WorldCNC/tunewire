@@ -68,12 +68,7 @@ fn week_key() -> String {
 
 fn covers(tracks: &[Track]) -> Vec<String> {
     let mut seen = HashSet::new();
-    tracks
-        .iter()
-        .filter_map(|t| t.thumbnail.clone())
-        .filter(|c| seen.insert(c.clone()))
-        .take(4)
-        .collect()
+    tracks.iter().filter_map(|t| t.thumbnail.clone()).filter(|c| seen.insert(c.clone())).take(4).collect()
 }
 
 /// Weighted taste: listened time with a 30-day half-life, likes, playlists.
@@ -123,17 +118,24 @@ pub fn local_mixes(plays: &[Play]) -> Vec<Mix> {
     let mut out = Vec::new();
 
     let mut rep: Vec<(Track, usize)> = recent.into_values().filter(|(_, n)| *n >= 2).collect();
-    rep.sort_by(|a, b| b.1.cmp(&a.1));
+    rep.sort_by_key(|x| std::cmp::Reverse(x.1));
     let rep: Vec<Track> = rep.into_iter().take(30).map(|(t, _)| t).collect();
     if rep.len() >= 5 {
         out.push(Mix { id: "repeat".into(), kind: "repeat".into(), title: "On Repeat".into(), subtitle: "Your most played songs of the last 30 days".into(), covers: covers(&rep), tracks: rep });
     }
 
     let mut old: Vec<(Track, usize, u64)> = ever.into_values().filter(|(_, n, last)| *n >= 3 && *last + 45 * DAY_MS < now).collect();
-    old.sort_by(|a, b| b.1.cmp(&a.1));
+    old.sort_by_key(|x| std::cmp::Reverse(x.1));
     let old: Vec<Track> = old.into_iter().take(30).map(|(t, ..)| t).collect();
     if old.len() >= 5 {
-        out.push(Mix { id: "rediscover".into(), kind: "rediscover".into(), title: "Forgotten favorites".into(), subtitle: "Songs you loved and haven't played in a while".into(), covers: covers(&old), tracks: old });
+        out.push(Mix {
+            id: "rediscover".into(),
+            kind: "rediscover".into(),
+            title: "Forgotten favorites".into(),
+            subtitle: "Songs you loved and haven't played in a while".into(),
+            covers: covers(&old),
+            tracks: old,
+        });
     }
     out
 }
@@ -162,7 +164,7 @@ fn artist_list(tracks: &[Track], first: &str) -> String {
         }
     }
     let mut names: Vec<(String, (String, usize))> = counts.into_iter().collect();
-    names.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+    names.sort_by_key(|x| std::cmp::Reverse(x.1 .1));
     let mut out: Vec<String> = Vec::new();
     if let Some((_, (n, _))) = names.iter().find(|(k, _)| k == first) {
         out.push(n.clone());
@@ -186,7 +188,9 @@ async fn build_daily(t: &Taste, cache: &Arc<SearchCache>, day: &str) -> Vec<Mix>
         e.0 += w;
         e.1.push((tr.clone(), *w));
     }
-    let mut anchors: Vec<(String, (f64, Vec<(Track, f64)>))> = by_artist.into_iter().collect();
+    /// Artist -> (weight, their songs with scores).
+    type Anchor = (String, (f64, Vec<(Track, f64)>));
+    let mut anchors: Vec<Anchor> = by_artist.into_iter().collect();
     anchors.sort_by(|a, b| b.1 .0.total_cmp(&a.1 .0));
     anchors.truncate(MAX_DAILY * 2);
 
@@ -215,7 +219,9 @@ async fn build_daily(t: &Taste, cache: &Arc<SearchCache>, day: &str) -> Vec<Mix>
         if mixes.len() >= MAX_DAILY || covered.contains(artist) {
             continue;
         }
-        let Some(recs) = results.get(artist) else { continue };
+        let Some(recs) = results.get(artist) else {
+            continue;
+        };
         // The anchor plus the artists closest to it (the top of its radio).
         let mix_artists: HashSet<String> = recs.iter().take(15).map(|r| primary_artist(&r.artist)).chain([artist.clone()]).collect();
         // Familiar: your own songs from the anchor and artists in its orbit.
@@ -346,8 +352,20 @@ mod tests {
 
     fn tr(title: &str, artist: &str) -> Track {
         Track::from_version(TrackVersion {
-            platform: Platform::Ytmusic, url: format!("u/{title}"), id: String::new(), title: title.into(), artist: artist.into(),
-            duration: Some(200.0), thumbnail: Some(format!("c/{title}")), preview: false, partial: false, artist_url: None, album: None, rank: 0, matched_for: None, isrc_match: false,
+            platform: Platform::Ytmusic,
+            url: format!("u/{title}"),
+            id: String::new(),
+            title: title.into(),
+            artist: artist.into(),
+            duration: Some(200.0),
+            thumbnail: Some(format!("c/{title}")),
+            preview: false,
+            partial: false,
+            artist_url: None,
+            album: None,
+            rank: 0,
+            matched_for: None,
+            isrc_match: false,
         })
     }
 
@@ -371,10 +389,8 @@ mod tests {
     #[test]
     fn taste_decays_and_counts_likes() {
         let now = now_ms();
-        let plays = vec![
-            Play { t: now, secs: 120.0, est: false, platform: None, track: tr("Fresh", "A") },
-            Play { t: now - 120 * DAY_MS, secs: 600.0, est: false, platform: None, track: tr("Stale", "B") },
-        ];
+        let plays =
+            vec![Play { t: now, secs: 120.0, est: false, platform: None, track: tr("Fresh", "A") }, Play { t: now - 120 * DAY_MS, secs: 600.0, est: false, platform: None, track: tr("Stale", "B") }];
         let t = taste(&plays, &[tr("Liked", "C")], &[]);
         assert_eq!(t.tracks[0].0.title, "Liked");
         assert_eq!(t.tracks[1].0.title, "Fresh");
@@ -390,9 +406,14 @@ mod tests {
         let now = now_ms();
         let mut plays = Vec::new();
         let queries = [
-            ("tame impala let it happen", 6), ("tame impala the less i know the better", 5), ("mac demarco chamber of reflection", 4),
-            ("daft punk digital love", 6), ("justice d.a.n.c.e.", 4), ("daft punk something about us", 3),
-            ("kendrick lamar money trees", 5), ("sza good days", 3),
+            ("tame impala let it happen", 6),
+            ("tame impala the less i know the better", 5),
+            ("mac demarco chamber of reflection", 4),
+            ("daft punk digital love", 6),
+            ("justice d.a.n.c.e.", 4),
+            ("daft punk something about us", 3),
+            ("kendrick lamar money trees", 5),
+            ("sza good days", 3),
         ];
         for (q, n) in queries {
             let r = rt.block_on(crate::search::search(q.into(), "ytmusic".into(), 3, vec![Platform::Ytmusic], cache.clone(), false, false)).unwrap();

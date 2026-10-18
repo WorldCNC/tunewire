@@ -170,12 +170,7 @@ async fn load_spotify(backend: &str, url: &str) -> AppResult<RemotePlaylist> {
             return Err(AppError::EmptyResults);
         }
         let title = if versions.len() == 1 { versions[0].title.clone() } else { "Spotify".into() };
-        let mut pl = RemotePlaylist {
-            title,
-            url: url.to_string(),
-            platform: Some(Platform::Spotify),
-            tracks: versions.into_iter().map(|v| search::build_track(vec![v], 0.0)).collect(),
-        };
+        let mut pl = RemotePlaylist { title, url: url.to_string(), platform: Some(Platform::Spotify), tracks: versions.into_iter().map(|v| search::build_track(vec![v], 0.0)).collect() };
         if pl.tracks.len() > 1 {
             if let Ok(meta) = spotify::load(url).await {
                 pl.title = meta.title;

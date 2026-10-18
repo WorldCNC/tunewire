@@ -69,15 +69,13 @@ pub async fn save(query: &str) -> AppResult<Vec<TrackVersion>> {
     if let Some((id, secret)) = tokio::task::spawn_blocking(credentials).await.ok().flatten() {
         cmd.args(["--client-id", &id, "--client-secret", &secret]);
     }
-    let child = cmd
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                AppError::Unsupported("spotDL is not installed (pipx install spotdl / uv tool install spotdl)".into())
-            } else {
-                AppError::Extraction(e.to_string())
-            }
-        })?;
+    let child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            AppError::Unsupported("spotDL is not installed (pipx install spotdl / uv tool install spotdl)".into())
+        } else {
+            AppError::Extraction(e.to_string())
+        }
+    })?;
     let out = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
         .await
         .map_err(|_| AppError::Timeout("spotDL took too long".into()))?

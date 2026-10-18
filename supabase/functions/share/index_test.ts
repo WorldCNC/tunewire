@@ -60,3 +60,29 @@ Deno.test("data: covers are served as images", async () => {
   const r2 = await get(`/share/img/p/${PID}`, fake({ playlist_cover: "data:text/html;base64,PHNjcmlwdD4=" }));
   assertEquals(r2.status, 302, "only images");
 });
+
+Deno.test("profile links show an uploaded banner or picture", async () => {
+  const UID = "00000000-0000-0000-0000-00000000000a";
+  const up = await (await get(`/share/u/${UID}`, fake({ profile_preview: [{ name: "Alex", banner: `media:${UID}/0123456789abcdef0123.gif` }] }))).text();
+  assertStringIncludes(up, `https://db.test/storage/v1/object/public/profile-media/${UID}/0123456789abcdef0123.gif`);
+  const pic = await (await get(`/share/u/${UID}`, fake({ profile_preview: [{ name: "Alex", avatar: `media:${UID}/0123456789abcdef0123.png` }] }))).text();
+  assertStringIncludes(pic, "profile-media/" + UID + "/0123456789abcdef0123.png");
+  const odd = await (await get(`/share/u/${UID}`, fake({ profile_preview: [{ name: "Alex", avatar: "media:../../etc/passwd" }] }))).text();
+  assert(!odd.includes("passwd"));
+});
+
+Deno.test("profiles are read through profile_preview, not the table", async () => {
+  const UID = "00000000-0000-0000-0000-00000000000a";
+  const seen: string[] = [];
+  const f = (async (url: string, init?: RequestInit) => {
+    seen.push(`${init?.method} ${url} ${init?.body ?? ""}`);
+    return new Response(JSON.stringify(url.includes("rpc/profile_preview") ? [{ name: "Alex" }] : []));
+  }) as typeof fetch;
+  assertStringIncludes(await (await get(`/share/u/${UID}`, f)).text(), "Alex on Tunewire");
+  assertEquals(seen, [`POST https://db.test/rest/v1/rpc/profile_preview {"uid":"${UID}"}`]);
+});
+
+Deno.test("a malformed escape is not a server error", async () => {
+  const r = await get("/share/p/%E0%A4%A", fake({}));
+  assertEquals(r.status, 302);
+});

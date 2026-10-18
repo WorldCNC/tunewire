@@ -50,7 +50,9 @@ pub fn is_audio(p: &Path) -> bool {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         if out.len() >= MAX_FILES {
             return;
@@ -143,12 +145,7 @@ pub fn search(query: &str, limit: usize) -> Vec<TrackVersion> {
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored
-        .into_iter()
-        .take(limit)
-        .enumerate()
-        .map(|(i, (_, t))| TrackVersion { rank: i, ..t.clone() })
-        .collect()
+    scored.into_iter().take(limit).enumerate().map(|(i, (_, t))| TrackVersion { rank: i, ..t.clone() }).collect()
 }
 
 /// All indexed tracks (for the Local view).

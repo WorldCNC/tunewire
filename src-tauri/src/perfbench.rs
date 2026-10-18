@@ -59,12 +59,29 @@ fn perfbench() {
     store
         .update_library(|lib| {
             for p in 0..10 {
-                lib.playlists.push(Playlist { id: format!("p{p}"), name: format!("List {p}"), tracks: (0..300).map(|i| track(p * 300 + i)).collect(), source_url: None, created: 0, updated: 0, description: String::new(), cover: None, pinned: false, folder: None, added: Default::default(), cloud_id: None, cloud_role: None });
+                lib.playlists.push(Playlist {
+                    id: format!("p{p}"),
+                    name: format!("List {p}"),
+                    tracks: (0..300).map(|i| track(p * 300 + i)).collect(),
+                    source_url: None,
+                    created: 0,
+                    updated: 0,
+                    description: String::new(),
+                    cover: None,
+                    pinned: false,
+                    folder: None,
+                    added: Default::default(),
+                    cloud_id: None,
+                    cloud_role: None,
+                });
             }
             Ok(())
         })
         .unwrap();
-    time("library: save (3 000 songs)", 30, || store.update_library(|_| Ok(())).unwrap());
+    time("library: save (3 000 songs)", 30, || {
+        store.update_library(|_| Ok(())).unwrap();
+        store.flush();
+    });
 
     // Concurrent saves: does the file on disk end up with every change?
     let store = std::sync::Arc::new(Store::open(dir.join("race")).unwrap());
@@ -84,6 +101,7 @@ fn perfbench() {
     for t in threads {
         t.join().unwrap();
     }
+    store.flush();
     let disk: crate::store::Library = crate::store::load_json(&dir.join("race/library.json"));
     println!("{:<52} {:>9}", "library: concurrent saves kept on disk (of 320)", disk.favorites.len());
     let _ = std::fs::remove_dir_all(&dir);

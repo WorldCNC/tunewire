@@ -23,3 +23,31 @@ for (const f of files) {
 }
 console.log(bad ? `${bad} file(s) with syntax errors` : `${files.length} scripts parse`);
 if (bad) Deno.exit(1);
+
+// The app's scripts are classic scripts sharing one global scope: two files
+// declaring the same top-level name either stop the second file from loading
+// (const/let/class: "already declared") or silently replace a function.
+const declared = new Map<string, { at: string; fn: boolean }>();
+let clashes = 0;
+const appScripts = files.filter((f) => f.startsWith(`${root}src/`));
+for (const f of appScripts) {
+  const at = f.slice(root.length);
+  const text = await Deno.readTextFile(f);
+  for (const line of text.split("\n")) {
+    const fn = line.match(/^(?:async\s+)?function\*?\s+([A-Za-z_$][\w$]*)/);
+    const m = fn || line.match(/^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/);
+    const names = m ? [m[1]] : (line.match(/^(?:const|let|var)\s+\{([^}]*)\}\s*=/)?.[1].split(",").map((x) => x.split(":").pop()!.trim()).filter(Boolean) ?? []);
+    for (const name of names) {
+      const prev = declared.get(name);
+      // Allowed: a stub function that loads src/js/lazy/<x>.js, which then
+      // replaces it with the real function of the same name.
+      const lazyStub = prev && prev.fn && !!fn && (prev.at.includes("/lazy/") !== at.includes("/lazy/"));
+      if (prev && prev.at !== at && !lazyStub) {
+        clashes++;
+        console.error(`${at}: "${name}" is already declared in ${prev.at}`);
+      } else if (!prev) declared.set(name, { at, fn: !!fn });
+    }
+  }
+}
+console.log(clashes ? `${clashes} global name clash(es)` : `${declared.size} global names, no clashes`);
+if (clashes) Deno.exit(1);

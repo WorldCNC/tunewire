@@ -159,11 +159,7 @@ pub fn lastfm_finish(token: &str) -> AppResult<String> {
 
 /// Check a ListenBrainz token and return the user name; stores it on success.
 pub fn listenbrainz_connect(token: &str) -> AppResult<String> {
-    let mut r = crate::http::agent()
-        .get(&format!("{LB_API}/validate-token"))
-        .header("Authorization", &format!("Token {}", token.trim()))
-        .call()
-        .map_err(|e| AppError::Network(e.to_string()))?;
+    let mut r = crate::http::agent().get(&format!("{LB_API}/validate-token")).header("Authorization", &format!("Token {}", token.trim())).call().map_err(|e| AppError::Network(e.to_string()))?;
     let v: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap_or_default()).unwrap_or(Value::Null);
     if v.get("valid").and_then(Value::as_bool) != Some(true) {
         return Err(AppError::Invalid("that ListenBrainz token isn't valid".into()));
@@ -235,7 +231,14 @@ fn from_track(track: &Track, started_ms: u64, service: &str) -> Option<Scrobble>
         return None;
     }
     let album = track.versions.iter().find_map(|v| v.album.clone()).unwrap_or_default();
-    Some(Scrobble { artist: artist.trim().to_string(), track: track.title.trim().to_string(), album, duration: track.duration.map(|d| d.round() as u32), timestamp: started_ms / 1000, service: service.into() })
+    Some(Scrobble {
+        artist: artist.trim().to_string(),
+        track: track.title.trim().to_string(),
+        album,
+        duration: track.duration.map(|d| d.round() as u32),
+        timestamp: started_ms / 1000,
+        service: service.into(),
+    })
 }
 
 /// Which plays are scrobbled (the services' rules).

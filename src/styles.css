@@ -494,6 +494,16 @@ button.link:hover { text-decoration: underline; }
 .suggest-item .icon-btn { opacity: 0; }
 .suggest-item:hover .icon-btn, .suggest-item.active .icon-btn { opacity: 1; }
 .suggest-item:hover, .suggest-item.active { background: var(--selected); }
+.suggest-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.suggest-item.rich { height: 52px; gap: 10px; padding: 0 6px; }
+.suggest-item .s-art { width: 40px; height: 40px; flex: none; border-radius: 4px; overflow: hidden; background: var(--bg-elev-2, rgba(127,127,127,.15)); }
+.suggest-item .s-art.round { border-radius: 50%; }
+.suggest-item .s-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.suggest-item .s-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.suggest-item .s-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.suggest-item .s-play { color: var(--text); opacity: 0; display: grid; place-items: center; }
+.suggest-item .s-play svg.i { width: 16px; height: 16px; }
+.suggest-item.rich:hover .s-play, .suggest-item.rich.active .s-play { opacity: 1; }
 
 /* ---- Charts / releases ---- */
 .chart-artists { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 16px; }
@@ -1558,6 +1568,16 @@ body.dragging-tracks .track:hover { background: transparent; }
 .avatar.lg { width: 96px; height: 96px; font-size: 34px; }
 .manage-followers { margin-top: 18px; max-width: 520px; }
 .manage-followers summary { cursor: pointer; color: var(--text-dim); font-size: 13px; margin-bottom: 8px; }
+/* Edit profile: banner + picture preview (click either to change). */
+.pe-head { display: flex; flex-direction: column; }
+.pe-banner { height: 120px; border-radius: 10px; background: var(--bg-elev-2) center / cover no-repeat; cursor: pointer; }
+.pe-banner.no-image { background-image: radial-gradient(120% 140% at 15% 0%, color-mix(in srgb, var(--accent-c, var(--accent)) 90%, #fff) 0%, var(--accent-c, var(--accent)) 35%, color-mix(in srgb, var(--accent-c, var(--accent)) 30%, #000) 100%); }
+.pe-row { display: flex; align-items: flex-start; gap: 12px; padding: 0 14px; margin-top: -40px; }
+.pe-avatar { width: 88px; height: 88px; flex: none; border-radius: 50%; overflow: hidden; display: grid; place-items: center; font-size: 34px; font-weight: 700; color: #fff; background: var(--accent-c, var(--accent)); border: 4px solid var(--panel-solid); cursor: pointer; }
+.pe-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.pe-banner:hover, .pe-avatar:hover { filter: brightness(.85); }
+.pe-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 48px; }
+.pe-group { display: flex; gap: 6px; }
 @media (max-width: 900px) { .profile-avatar { width: 112px; height: 112px; font-size: 44px; } .profile-id { margin-top: -56px; padding: 0 20px; } }
 
 /* Header colors fade to the cover's color instead of jumping from grey. */
@@ -1686,3 +1706,25 @@ body.dragging-tracks .track:hover { background: transparent; }
 .friend > .friend-main, .friend > .friend-name, .friend > .grow { flex: 1; min-width: 0; }
 .friend > .btn, .friend > .friend-tools, .friend > .friend-when { flex: none; }
 .friend .av-wrap .avatar, .friend .presence .avatar { width: 36px; height: 36px; }
+
+/* Why sign in: a few auto-advancing slides (story-style bars), then Discord. */
+.signin-modal { width: min(440px, 100%); }
+.signin-intro { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+.si-bars { display: flex; gap: 4px; }
+.si-bars span { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text) 14%, transparent); overflow: hidden; }
+.si-bars i { display: block; height: 100%; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+.si-bars .done i { transform: none; }
+.si-bars .on i { animation: si-fill 3.8s linear forwards; }
+.signin-intro:hover .si-bars .on i, .signin-intro:focus-within .si-bars .on i { animation-play-state: paused; }
+@keyframes si-fill { to { transform: none; } }
+.si-stage { display: grid; outline: none; min-height: 210px; }
+.si-slide { grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; opacity: 0; transform: translateX(14px); visibility: hidden; transition: opacity .22s ease, transform .3s var(--ease-out), visibility 0s .3s; }
+.si-slide.on { opacity: 1; transform: none; visibility: visible; transition: opacity .22s ease, transform .3s var(--ease-out); }
+.si-slide h3 { margin: 4px 0 0; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+.si-slide p { margin: 0; color: var(--text-dim); font-size: 13.5px; line-height: 1.5; max-width: 340px; }
+.si-ico { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 4px; }
+.si-ico svg.i, .si-ico .plogo { width: 28px; height: 28px; }
+.si-ico.discord { background: #5865f2; color: #fff; }
+.btn.si-discord { height: 38px; padding: 0 18px; margin-top: 8px; border-radius: 19px; background: #5865f2; border-color: #5865f2; color: #fff; }
+.btn.si-discord .plogo, .btn.si-discord svg.i { width: 18px; height: 18px; }
+.signin-modal footer { align-items: center; }

@@ -51,12 +51,7 @@ pub struct ExportResult {
 #[tauri::command]
 pub fn export_theme(app: AppHandle, st: State<'_, AppState>, id: String) -> AppResult<ExportResult> {
     let json = st.themes.export_json(&id)?;
-    let path = app
-        .path()
-        .download_dir()
-        .ok()
-        .map(|d| d.join(format!("{}.tunewire-theme.json", themes::slug(&id))))
-        .and_then(|p| std::fs::write(&p, &json).ok().map(|_| p.display().to_string()));
+    let path = app.path().download_dir().ok().map(|d| d.join(format!("{}.tunewire-theme.json", themes::slug(&id)))).and_then(|p| std::fs::write(&p, &json).ok().map(|_| p.display().to_string()));
     Ok(ExportResult { json, path })
 }
 

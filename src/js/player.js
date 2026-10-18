@@ -141,8 +141,16 @@ function runSmoothProgress() {
   smooth.raf = requestAnimationFrame(step);
 }
 
+// Width of the bar (kept up to date without reading layout every frame).
+const bar = { width: 0, frac: -1 };
+new ResizeObserver(([e]) => { bar.width = e.contentRect.width; bar.frac = -1; }).observe(progressEl);
+
 function setProgress(frac) {
   frac = Math.max(0, Math.min(1, frac || 0));
+  // Under half a pixel of movement nothing visible changes: no style write
+  // (a 4-minute song moves the bar that far only every few frames).
+  if (bar.width && Math.abs(frac - bar.frac) * bar.width < 0.5) return;
+  bar.frac = frac;
   // Transforms only: moving the bar never triggers layout, so the per-frame
   // animation doesn't compete with scrolling.
   playedEl.style.transform = `scaleX(${frac})`;
